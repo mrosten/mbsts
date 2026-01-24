@@ -1,0 +1,10 @@
+db:
+    driver: {{ db_driver | default('sqlite') }}
+    host: {{ db_host | default('localhost') }}
+    port: {{ db_port | default(5432) }}
+    user: {{ db_user | default('user') }}
+    password: {{ db_password | default('password') }}
+    database: {{ db_name | default('sprout_db') }}
+
+logging:
+    level: {{ log_level | default('INFO') }}
