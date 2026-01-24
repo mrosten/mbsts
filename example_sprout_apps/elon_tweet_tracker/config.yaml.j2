@@ -1,0 +1,13 @@
+
+db:
+    driver: sqlite
+    sqlite:
+        storage_file: example_sprout_apps/elon_tweet_tracker/tweets.db
+        updates_file: example_sprout_apps/elon_tweet_tracker/data/updates.yaml
+
+cron:
+    schedule: "*/30 * * * * *" # Run every 30 seconds for testing
+
+apify:
+    token: {{ ENV['APIFY_TOKEN'] }}
+
