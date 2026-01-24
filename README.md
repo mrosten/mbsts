@@ -14,7 +14,8 @@ Included in this project are a few examples of what this engine can build:
 2.  **Bitcoin Tracker ("Financial")**: Monitors Bitcoin prices in real-time and saves them to a database.
 3.  **Elon Tweet Tracker**: Tracks tweets from Elon Musk and saves them to a database.
 4.  **Gmail Inbox Tracker**: Monitors your Gmail inbox statistics, unread count, and top senders.
-5.  **Hello World**: A simple "test drive" application that demonstrates the engine is running correctly by recording basic information.
+5.  **Polytrading (Polymarket Tracker)**: Tracks prediction market prices (specifically BTC Up/Down) from Polymarket every 20 seconds.
+6.  **Hello World**: A simple "test drive" application that demonstrates the engine is running correctly by recording basic information.
 
 ## For Developers (Technical Details)
 The section below contains the technical specifications for programmers who want to work on or extend the project.
@@ -28,6 +29,7 @@ Sprout is an **asynchronous Python framework** built on `asyncio`. It is designe
   - **financial/**: Bitcoin price tracker.
   - **elon_tweet_tracker/**: Elon Musk tweet tracker.
   - **gmail_tracker/**: Gmail inbox statistics tracker.
+  - **polytrading/**: Prediction market price tracker (Polymarket).
   - **mailsync/**: Email sync tool.
   - **hello_world/**: Basic demo.
 
@@ -49,7 +51,8 @@ Your login session will be saved and the tracker will use it automatically!
 ### How to Run It
 Run the example applications using the provided scripts:
 - `run_hello_world.bat` - Simple test app
-- `run_financial.bat` - Tracks BTC price every 20 seconds
+- `run_financial.bat` - Tracks BTC price every 20 seconds (Coinbase)
+- `run_polytrading.bat` - Tracks BTC Up/Down prediction prices every 20 seconds (Polymarket)
 - `run_elon_tracker.bat` - Checks for new tweets every 30 seconds
 - `run_gmail_tracker.bat` - Tracks Gmail inbox stats every 5 minutes (**Requires OAuth setup - see GMAIL_SETUP.md**)
 
@@ -60,6 +63,7 @@ Since the apps run in the background, check their output in log files:
 - **`view_logs.bat`** - Interactive menu to view all logs
 - Or check the `logs/` folder directly:
   - `logs/financial.log` - Bitcoin tracker output
+  - `logs/polytrading.log` - Polymarket tracker output
   - `logs/elon_tracker.log` - Tweet tracker output
   - `logs/gmail_tracker.log` - Gmail tracker output
 
@@ -76,6 +80,7 @@ To manually examine the database (e.g., to see saved prices or tweets), use the 
 - `inspect_tweets.bat` - View latest tweets
 - `inspect_gmail.bat` - View Gmail inbox statistics (CLI)
 - `inspect_gmail_gui.bat` - View Gmail statistics **(GUI Window)**
+- `inspect_polytrading_gui.bat` - View Polymarket price history **(GUI Window)**
 
 Or run SQLite commands directly:
 ```bash
