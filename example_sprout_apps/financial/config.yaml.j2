@@ -1,0 +1,8 @@
+db:
+    driver: sqlite
+    sqlite:
+        storage_file: example_sprout_apps/financial/financial.db
+        updates_file: example_sprout_apps/financial/data/updates.yaml
+
+cron:
+    schedule: "*/20 * * * * *" # Run every 20 seconds
