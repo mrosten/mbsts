@@ -32,7 +32,7 @@ chrome_profile/
 *.db-journal
 *.mail
 emails/
-input_output/
+*.pickle
 data/__pycache__/
 credentials.json
 *.json
