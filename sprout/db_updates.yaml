@@ -1,0 +1,17 @@
+2:
+  - alter table TestResults ADD newproperty text;
+---
+3:
+  - alter table TestResults2 ADD newproperty text;
+4:
+  - create table TestDatabaseDefClass2_dg_tmp(id STRING, argszzz TEXT, body TEXT, remote TEXT, time INTEGER);
+  - insert into TestDatabaseDefClass2_dg_tmp(id, argszzz, body, remote, time) select id, args, body, remote, time from TestDatabaseDefClass2;
+  - drop table TestDatabaseDefClass2;
+  - alter table TestDatabaseDefClass2_dg_tmp rename to TestDatabaseDefClass2;
+5:
+  -
+
+
+
+
+

@@ -1,0 +1,2 @@
+class SPECIAL_TYPES:
+    NOT_SET = "NOT_SET"

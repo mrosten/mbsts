@@ -1,0 +1,16 @@
+
+# Data accessors template
+import jinja2
+
+TEMPLATE_CONTENT = """
+{% for clazz, props in class_prop_map.items() %}
+class {{ clazz }}Accessors:
+    def __init__(self):
+        pass
+        
+    {% for prop in props %}
+    def get_{{ prop }}(self):
+        pass
+    {% endfor %}
+{% endfor %}
+"""
