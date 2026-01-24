@@ -1,0 +1,25 @@
+
+
+app:
+  archive_path: /core/datasets/mail_archive/iotin
+
+io:
+  imap:
+    server: mail.drastical.net
+    port: 993
+    tls: true
+    user: moshe@iowntheinter.net
+    password: {{ ENV['MAIL_PASSWORD'] }}
+
+db:
+  driver: sqlite
+  sqlite:
+    storage_file: ./smssync.db
+    updates_file: data/updates.yaml
+
+cron:
+  schedule:
+    sync_sms: "* * * * *"
+  config:
+    sync_sms:
+      queue: False

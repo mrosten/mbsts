@@ -1,0 +1,25 @@
+
+
+app:
+  archive_path: ./emails
+
+io:
+  imap:
+    server: mail.drastical.net
+    port: 993
+    tls: true
+    user: moshe@iowntheinter.net
+    password: {{ ENV['MAIL_PASSWORD'] }}
+
+db:
+  driver: sqlite
+  sqlite:
+    storage_file: ./mailsync.db
+    updates_file: data/updates.yaml
+
+cron:
+  schedule:
+    sync_mail: "* * * * *"
+  config:
+    sync_mail:
+      queue: False

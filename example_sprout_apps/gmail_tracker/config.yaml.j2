@@ -1,0 +1,13 @@
+runtime:
+  name: gmail_tracker
+
+db:
+  driver: sqlite
+  sqlite:
+    storage_file: gmail.db
+
+jobs:
+  - name: track_inbox
+    cron: "*/5 * * * *"  # Every 5 minutes
+    module: jobs.track_inbox
+    function: track_inbox_stats
