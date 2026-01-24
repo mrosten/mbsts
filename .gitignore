@@ -1,0 +1,39 @@
+# IDEs and Editors
+.idea/
+.vscode/
+*.iml
+*.code-workspace
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Configuration and Secrets
+.env
+id_ed25519*
+secrets.yaml
+
+# Logs and large data
+logs/
+*.log
+chrome_profile/
+*.html
+*.txt
+*.db
+*.db-journal
+*.mail
+emails/
+input_output/
+data/__pycache__/
+credentials.json
+*.json
+client_secret*.json
