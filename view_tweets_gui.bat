@@ -1,0 +1,3 @@
+@echo off
+echo Opening Tweet Database Viewer...
+python view_db_gui.py
