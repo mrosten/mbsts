@@ -12,6 +12,7 @@ class SimBroker:
         self.balance = balance
         self.shares = {"UP": 0.0, "DOWN": 0.0}
         self.invested_this_window = 0.0
+        self.revenue_this_window = 0.0
         self.log_file = log_file
         self.init_log()
 
@@ -80,6 +81,7 @@ class SimBroker:
         if shares <= 0: return False, "No shares"
         revenue = shares * price
         self.balance += revenue
+        self.revenue_this_window += revenue
         self.shares[side] = 0.0
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})"
@@ -87,11 +89,13 @@ class SimBroker:
     def settle_window(self, winning_side):
         winning_shares = self.shares[winning_side]
         payout = winning_shares * 1.00
-        net_pnl = payout - self.invested_this_window
+        total_revenue = payout + self.revenue_this_window
+        net_pnl = total_revenue - self.invested_this_window
         self.balance += payout
         self.log_trade("SETTLE", winning_side, payout, 1.00, winning_shares, note=f"Win: {winning_side} | PnL: {net_pnl:.2f}")
         self.shares = {"UP": 0.0, "DOWN": 0.0}
         self.invested_this_window = 0.0
+        self.revenue_this_window = 0.0
         return payout, net_pnl
 
 class LiveBroker:

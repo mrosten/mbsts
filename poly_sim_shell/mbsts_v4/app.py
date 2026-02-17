@@ -252,10 +252,10 @@ class SniperApp(App):
             classes="algo_row"
         )
         yield Horizontal(
-            Checkbox("TP/SL", value=True, id="cb_tp_active"),
+            Checkbox("TP/SL", value=False, id="cb_tp_active"),
             Checkbox("Strong Only", value=False, id="cb_strong"),
             Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
-            Checkbox("Whale Protect", value=True, id="cb_whale"),
+            Checkbox("Whale Protect", value=False, id="cb_whale"),
             id="settings_row",
             classes="live_row"
         )
@@ -373,7 +373,6 @@ class SniperApp(App):
                 self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
                 self._add_risk_revenue(payout)
 
-                    self._add_risk_revenue(0) # Logic for refill if lost
 
                 self.risk_manager.reset_window(); self.last_second_exit_triggered = False
                 self.update_balance_ui(); self.window_bets.clear()
@@ -580,6 +579,10 @@ class SniperApp(App):
             await self.trigger_sell_all("UP" if "_up" in bid else "DOWN")
 
     async def trigger_buy(self, side):
+        if hasattr(self, "_last_manual_buy") and time.time() - self._last_manual_buy < 2.0:
+            return self.log_msg("[yellow]Manual Buy Debounce Active...[/]")
+        self._last_manual_buy = time.time()
+        
         try: val = float(self.query_one("#inp_amount").value)
         except: return self.log_msg("[red]Invalid Amount[/]")
         if self.risk_initialized and val > self.risk_manager.risk_bankroll + 0.01: return self.log_msg("[red]Insuff Risk Cap[/]")

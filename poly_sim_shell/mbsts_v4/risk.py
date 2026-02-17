@@ -31,8 +31,8 @@ class RiskManager:
         if any(p in strategy_type for p in strong_patterns):
             budget_pct = TradingConfig.STRONG_RISK_PCT
             
-        # Use Initial Window Bankroll (before current window's bets) as the base
-        base = self.risk_bankroll + self.allocated_this_window
+        # Use Current Risk Bankroll (what is actually left) as the base
+        base = self.risk_bankroll
         if base <= 0: return 0.0
         
         cost = base * budget_pct
