@@ -38,6 +38,9 @@ class RiskManager:
         cost = base * budget_pct
         
         # 2. Adjustments
+        if "FAKEOUT" in strategy_type.upper():
+             cost *= 0.5
+        
         trend_4h = trend_context.get('trend_4h', 'NEUTRAL')
         direction = trend_context.get('direction', 'UP')
         if trend_4h != 'NEUTRAL' and trend_4h != direction:
