@@ -135,7 +135,6 @@ class MarketDataManager:
         up_ask, down_ask = 0.51, 0.51
         try:
             url = f"https://gamma-api.polymarket.com/markets/slug/{slug}"
-            self.log(f"Fetching Poly: {url}") 
             m = requests.get(url, timeout=2).json()
             # print(m) # Debug full response if needed
             ids = json.loads(m["clobTokenIds"]); outs = json.loads(m["outcomes"])
