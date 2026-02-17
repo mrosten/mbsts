@@ -179,8 +179,20 @@ def get_trading_recommendation(price_diff, trend, vol_status, time_left):
     # 2. If Volatility is High (Expansion), risk of reversal is high -> Inadvisable or Caution
     # 3. If Trend aligns with Winning Side -> Good
     
-    if time_left < 180 and abs(price_diff) < 20:
-        return "⚠️ TRADING INADVISABLE (Time low, spread tight)"
+    # Reasoning list
+    reasoning = []
+    advice = "N/A"
+    
+    # Time Check - CONVERGENCE LOGIC
+    is_clutch_time = False
+    if time_left < 30:
+        reasoning.append(f"⏱️ **Time Critical:** < 30s remaining. Execution risk too high. AVOID.")
+        return "⛔ TOO LATE (Exec Risk)", " ".join(reasoning)
+    elif time_left < 300: # Last 5 minutes
+        reasoning.append(f"⏱️ **Convergence Zone:** < 5 mins left. Prices will diverge rapidly to $1.00 or $0.00.")
+        is_clutch_time = True
+    else:
+        reasoning.append(f"⏱️ **Time:** Sufficient time ({int(time_left/60)}m) for trend to play out.")
         
     # Winning Side
     winning_side = "UP" if price_diff > 0 else "DOWN"
@@ -192,14 +204,38 @@ def get_trading_recommendation(price_diff, trend, vol_status, time_left):
     
     # Volatility Check
     high_vol = "High" in vol_status
+    if high_vol:
+        reasoning.append(f"💥 **Volatility:** Market is expanding/volatile. Reversals possible.")
+    else:
+        reasoning.append(f"💤 **Volatility:** Market is stable/squeezing.")
+
+    if not trend_aligned:
+         reasoning.append(f"⚠️ **Trend Divergence:** Price is winning {winning_side} but Trend is {trend}.")
+
+    # RSI Check (Optional integration if passed, but for now just general)
+    # We don't have RSI passed here, implying simple logic.
     
-    if trend_aligned and not high_vol:
-        return f"✅ BETTING {winning_side} ODDS LOOK GOOD"
-    
-    if trend_aligned and high_vol:
-        return f"⚠️ BETTING {winning_side} POSSIBLE (Caution: High Vol)"
+    # Final Decision
+    if is_clutch_time:
+         # In Convergence Zone, being on the winning side is huge
+         if abs(price_diff) > 10:
+             advice = f"🚀 SNIPE {winning_side} (Convergence Play)"
+             reasoning.append(f"**Conclusion:** 🟢 TIME DECAY PLAY. Market is winning {winning_side} near expiry. Probability of reaching $1.00 is high.")
+         else:
+             advice = "⚠️ CHOPPY / RISKY (Too Close)"
+             reasoning.append(f"**Conclusion:** Price is too close to strike for the final minutes. Coin flip.")
+             
+    elif trend_aligned and not high_vol:
+        advice = f"✅ BETTING {winning_side} ODDS LOOK GOOD"
+        reasoning.append(f"**Conclusion:** Strong setup. Trend and price agree with stable volatility.")
+    elif trend_aligned and high_vol:
+        advice = f"⚠️ BETTING {winning_side} POSSIBLE (Caution: High Vol)"
+        reasoning.append(f"**Conclusion:** Setup aligns but high volatility increases risk.")
+    else:
+        advice = "⛔ TRADING INADVISABLE (Trend/Price Divergence)"
+        reasoning.append(f"**Conclusion:** Conflicting signals. Best to wait for clarity.")
         
-    return "⛔ TRADING INADVISABLE (Trend/Price Divergence)"
+    return advice, " ".join(reasoning)
 
 def analyze_market_data(url):
     # Returns a dictionary of analysis results
@@ -287,7 +323,7 @@ def analyze_market_data(url):
         
         # Recommendation
         if 'diff' in result:
-             result['recommendation'] = get_trading_recommendation(
+             result['recommendation'], result['reasoning'] = get_trading_recommendation(
                 result['diff'], result['trend'], result.get('vol_status', 'Normal'), result['time_left_s']
              )
         else:

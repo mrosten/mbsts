@@ -33,9 +33,22 @@ class SimBroker:
         with open(self.log_file, 'a') as f:
             f.write(text + "\n")
 
-    def log_trade(self, type_, side, amount, price, shares, note=""):
+    def log_trade(self, type_, side, amount, price, shares, context=None, note=""):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.write_to_log(f"TRADE_EVENT,{ts},{type_},{side}, Amt:{amount:.2f}, Price:{price:.3f}, Shares:{shares:.2f}, Note:{note}")
+        
+        # Context extraction
+        ctx = context or {}
+        sig_price = ctx.get('signal_price', price)
+        slippage = price - sig_price
+        rsi = ctx.get('rsi', 0)
+        trend = ctx.get('trend', 'N/A')
+        risk_bal = ctx.get('risk_bal', 0)
+        main_bal = self.balance # Sim Main Balance
+        
+        # CSV: Event,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note
+        line = (f"TRADE_EVENT,{ts},{type_},{side},{amount:.2f},{price:.5f},{sig_price:.5f},"
+                f"{slippage:.5f},{shares:.2f},{rsi:.2f},{trend},{risk_bal:.2f},{main_bal:.2f},{note}")
+        self.write_to_log(line)
 
     def log_snapshot(self, md, time_rem_str, is_live_active, live_bal, risk_bankroll):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -53,13 +66,13 @@ class SimBroker:
         )
         self.write_to_log(line)
 
-    def buy(self, side, usd_amount, price, reason="Manual"):
+    def buy(self, side, usd_amount, price, context=None, reason="Manual"):
         if usd_amount > self.balance: return False, "Insufficient Funds"
         shares = usd_amount / price
         self.balance -= usd_amount
         self.invested_this_window += usd_amount
         self.shares[side] += shares
-        self.log_trade("BUY", side, usd_amount, price, shares, note=reason)
+        self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
         return True, f"Bought {shares:.2f} {side} @ {price*100:.1f}¢ | Cost: ${usd_amount:.2f} ({reason})"
 
     def sell(self, side, price, reason="Manual"):
@@ -76,7 +89,7 @@ class SimBroker:
         payout = winning_shares * 1.00
         net_pnl = payout - self.invested_this_window
         self.balance += payout
-        self.log_trade("SETTLE", winning_side, payout, 1.00, winning_shares, f"Win: {winning_side} | PnL: {net_pnl:.2f}")
+        self.log_trade("SETTLE", winning_side, payout, 1.00, winning_shares, note=f"Win: {winning_side} | PnL: {net_pnl:.2f}")
         self.shares = {"UP": 0.0, "DOWN": 0.0}
         self.invested_this_window = 0.0
         return payout, net_pnl
@@ -106,7 +119,7 @@ class LiveBroker:
             return bal
         except: return 0.0
 
-    def buy(self, side, usd_amount, price, token_id, reason="Manual"):
+    def buy(self, side, usd_amount, price, token_id, context=None, reason="Manual"):
         if not self.client or not token_id: return False, "Client/Token Error"
         try:
             size = round(usd_amount / price, 2)
@@ -114,8 +127,16 @@ class LiveBroker:
             o_args = OrderArgs(price=limit_price, size=size, side="BUY", token_id=token_id)
             r = self.client.post_order(self.client.create_order(o_args))
             if r.get("success") or r.get("orderID"):
-                self.sim_broker.write_to_log(f"TRADE_EVENT,{datetime.now()},LIVE_BUY,{side},Cost:{usd_amount},Price:{price},Size:{size},{reason}")
-                self.update_balance()
+                # Enhanced CSV logging for Live Trads
+                main_bal = self.update_balance()
+                
+                ctx = context or {}
+                # Update context with live main balance
+                ctx['main_bal'] = main_bal 
+                
+                # We use sim_broker to write to the single log file
+                self.sim_broker.log_trade("LIVE_BUY", side, usd_amount, price, size, context=ctx, note=reason)
+                
                 return True, f"✅ LIVE BUY {side} | {price*100:.1f}¢ | Cost: ${usd_amount:.2f} | Pot. Win: ${size:.2f}"
             else:
                 return False, f"Live Fail: {r.get('errorMsg')}"
@@ -160,14 +181,14 @@ class TradeExecutor:
         self.live = live_broker
         self.risk = risk_manager
         
-    def execute_buy(self, is_live, side, amount, price, token_id=None, reason=""):
+    def execute_buy(self, is_live, side, amount, price, token_id=None, context=None, reason=""):
         if amount <= 0: return False, "Zero amount"
         if is_live:
             if not token_id: return False, "No Token ID"
-            success, msg = self.live.buy(side, amount, price, token_id, reason=reason)
+            success, msg = self.live.buy(side, amount, price, token_id, context=context, reason=reason)
             return success, msg
         else:
-            success, msg = self.sim.buy(side, amount, price, reason=reason)
+            success, msg = self.sim.buy(side, amount, price, context=context, reason=reason)
             return success, msg
 
     def execute_sell(self, is_live, side, token_id, limit_price, best_bid, reason=""):

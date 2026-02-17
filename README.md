@@ -1,88 +1,105 @@
-# Turbindo (Sprout Framework)
+# 🚀 Polymarket Turbo Trader v2 (NiceGUI Edition)
 
-## What is this?
-**Turbindo** is the home of **Sprout**, a software engine designed to act as a personal digital assistant or automation robot.
+## Overview
+**Polymarket Turbo Trader v2** is a professional-grade, low-latency trading terminal designed for high-frequency trading and algorithmic position management on Polymarket (Polygon Network).
 
-Imagine you have a team of helpers who can do different tasks for you at the same time—like checking your email, organizing your files, and listening for messages—without getting tired or waiting for one task to finish before starting another. That is what Sprout does for computer programs.
+Unlike standard web interfaces, this tool connects directly to the **CLOB (Central Limit Order Book)** API for millisecond-latency execution and real-time pricing, bypassing standard caching layers. It is built with **NiceGUI** (Vue.js + FastAPI) for a reactive, modern, and dark-themed user interface.
 
-It is a "framework," which means it provides the building blocks for developers to create these kinds of smart, multi-tasking applications easily.
+---
 
-## What can it do?
-Included in this project are a few examples of what this engine can build:
+## 🌟 Key Features
 
-1.  **Email Synchronizer ("Mailsync")**: A tool designed to automatically connect to your email accounts and keep them updated or organized in the background.
-2.  **Bitcoin Tracker ("Financial")**: Monitors Bitcoin prices in real-time and saves them to a database.
-3.  **Elon Tweet Tracker**: Tracks tweets from Elon Musk and saves them to a database.
-4.  **Gmail Inbox Tracker**: Monitors your Gmail inbox statistics, unread count, and top senders.
-5.  **Polytrading (Polymarket Tracker)**: Tracks prediction market prices (specifically BTC Up/Down) from Polymarket every 20 seconds.
-6.  **Hello World**: A simple "test drive" application that demonstrates the engine is running correctly by recording basic information.
+### 0. 💸 NEW: Real Money Live Trading Shell
+**Located in `/poly_sim_shell`** - A dedicated suite of terminal bots for T+9 Drift Strategies.
+*   **Standard Bot**: Configurable, safer trading.
+*   **Dynamic Bot**: Sizing scales with momentum.
+*   **GUI Bot**: Beautiful terminal monitoring.
+*   **Linux Runner**: Auto-installing start script.
+*   See `poly_sim_shell/README.md` for full instructions.
 
-## For Developers (Technical Details)
-The section below contains the technical specifications for programmers who want to work on or extend the project.
+### 1. ⚡ Zero-Latency Trading Engine
+*   **Direct CLOB Access:** Bypasses Gamma API cache; fetches bids/asks directly from the matching engine.
+*   **Rapid Execution:** Single-click "EXECUTE TRADE" buttons fire Limit Orders (IOC) instantly.
+*   **Background Heartbeat:** A robust `asyncio` loop fetches data in the background (every ~1s), ensuring the UI never freezes.
+*   **Echo Badge:** The UI dynamically confirms which side (UP/DOWN) you are targeting.
 
-### Technical Overview
-Sprout is an **asynchronous Python framework** built on `asyncio`. It is designed for I/O-bound applications that need to handle high concurrency (doing many things at once).
+### 2. 🛡️ Advanced Stop Loss Manager
+Located immediately below the Quick Trade panel, this specific module protects your active positions:
+*   **Echo Protection:** Automatically tracks your selected trading side (UP/DOWN).
+*   **Auto-Update Trigger:** Trigger price automatically follows the market (`Current - Dist`) when inactive, so it's always ready to set.
+*   **Trailing Stop:** Toggle "Auto-Trail" to have your trigger price move UP with the market to lock in profits.
+*   **Precision Control:** Use the **Spin Box** to set trailing distance in 1-cent increments (e.g., $0.05).
+*   **Safety Lock:** "Set Manual SL" is disabled if no valid trade or price is detected.
 
-### Project Structure
-- **sprout/**: The core framework code (the "engine").
-- **example_sprout_apps/**: Demo applications.
-  - **financial/**: Bitcoin price tracker.
-  - **elon_tweet_tracker/**: Elon Musk tweet tracker.
-  - **gmail_tracker/**: Gmail inbox statistics tracker.
-  - **polytrading/**: Prediction market price tracker (Polymarket).
-  - **mailsync/**: Email sync tool.
-  - **hello_world/**: Basic demo.
+### 3. 🤖 Auto-Strategies (Algorithmic Trading)
+Expand the **"Auto-Strategies"** panel to enable bot logic:
+*   **Reversion Master 📉:** Buys dips (RSI < 30) and sells rips (RSI > 70) in range-bound markets.
+*   **Trend Surfer 🏄:** Enters positions when SuperTrend momentum flips direction.
+*   **Bracket Bot 🛡️:** Automatically posts Take Profit and Stop Loss orders immediately upon trade entry.
+*   **T-4 Sniper:** (Experimental) Special logic to trade the final 4-minute volatility window.
 
-### Restoration Notes
-This project was recently restored from a damaged state. Several missing parts of the engine (like the database connector and logging system) were reconstructed.
+### 4. 🧠 Real-Time Market Analysis
+*   **Live Metrics:** Updates Price, Strike Price, Time Remaining, RSI, and Volatility every second.
+*   **Divergence:** Shows the spread between the implied probability and the logic-derived value.
+*   **Convergence Zone:** Visual warnings when the market is entering the final minutes involving high Time Decay (Theta).
 
-### Setup for Elon Tweet Tracker
+---
 
-**One-time setup required**: The tweet tracker needs you to login to Twitter once:
+## 🛠️ Installation & Setup
 
-1. Run **`login_twitter_manual.bat`**
-2. A Chrome window will open
-3. Login to Twitter with your credentials
-4. Navigate to @elonmusk to verify you see tweets
-5. Close the terminal when done
+### Prerequisites
+*   Python 3.10+
+*   A Polymarket Account (Polygon Wallet) with USDC bridged.
 
-Your login session will be saved and the tracker will use it automatically!
-
-### How to Run It
-Run the example applications using the provided scripts:
-- `run_hello_world.bat` - Simple test app
-- `run_financial.bat` - Tracks BTC price every 20 seconds (Coinbase)
-- `run_polytrading.bat` - Tracks BTC Up/Down prediction prices every 20 seconds (Polymarket)
-- `run_elon_tracker.bat` - Checks for new tweets every 30 seconds
-- `run_gmail_tracker.bat` - Tracks Gmail inbox stats every 5 minutes (**Requires OAuth setup - see GMAIL_SETUP.md**)
-
-**The apps run in minimized windows** - they won't block your terminal! You'll see a minimized window in your taskbar, and all output goes to log files.
-
-### Viewing Logs
-Since the apps run in the background, check their output in log files:
-- **`view_logs.bat`** - Interactive menu to view all logs
-- Or check the `logs/` folder directly:
-  - `logs/financial.log` - Bitcoin tracker output
-  - `logs/polytrading.log` - Polymarket tracker output
-  - `logs/elon_tracker.log` - Tweet tracker output
-  - `logs/gmail_tracker.log` - Gmail tracker output
-
-### Stopping Applications
-To stop running trackers:
-- `stop_financial.bat` - Stop the Bitcoin tracker
-- `stop_elon_tracker.bat` - Stop the Elon tweet tracker  
-- `stop_gmail_tracker.bat` - Stop the Gmail tracker
-- `stop_all.bat` - Stop all running trackers
-
-### Managing Data
-To manually examine the database (e.g., to see saved prices or tweets), use the helper scripts:
-- `inspect_financial_db.bat` - View latest BTC prices with readable timestamps
-- `inspect_tweets.bat` - View latest tweets
-- `inspect_gmail.bat` - View Gmail inbox statistics (CLI)
-- `inspect_gmail_gui.bat` - View Gmail statistics **(GUI Window)**
-- `inspect_polytrading_gui.bat` - View Polymarket price history **(GUI Window)**
-
-Or run SQLite commands directly:
+### 1. Clone & Install
 ```bash
-sqlite3 example_sprout_apps/financial/financial.db "SELECT * FROM StockTicker;"
+git clone https://github.com/your-repo/turbindo.git
+cd turbindo
+pip install -r requirements.txt
+# Ensure nicegui is installed
+pip install nicegui
 ```
+
+### 2. Configuration (.env)
+Create a `.env` file in the root directory (critical for trading):
+```env
+PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
+PROXY_ADDRESS=0xYOUR_PROXY_ADDRESS  # Optional: Standard for Polymarket Proxy Wallets
+```
+
+### 3. Run the App
+Launch the NiceGUI interface:
+```bash
+# Windows
+run.bat
+
+# Manual
+python main.py
+```
+*App will open at `http://localhost:8085`*
+
+---
+
+## 🖥️ User Guide
+
+### The Dashboard Layout
+1.  **Market Analysis:** Top card showing the event URL and calculated signals.
+2.  **Quick Trade Panel:**
+    *   **Lever:** Toggle **UP** (Green) or **DOWN** (Red).
+    *   **Control:** Set Share Size (e.g., 5 shares) and Refresh Rate.
+    *   **Execute:** Fires the trade immediately.
+3.  **Stop Loss Manager:**
+    *   Set a "Trigger Price" manually or use the "Trailing" switch.
+    *   Click "Set Manual SL" to arm the protection.
+4.  **Auto-Strategies:** Toggle automated bots on/off.
+
+### Troubleshooting
+*   **Trade Fails / Silent Failure:**
+    *   **Check Minimum Order Value:** Polymarket (CLOB) often rejects orders with a total value < $1.00 USD. Increase your Share Size (e.g., minimum 5-10 shares).
+    *   **Check Logs:** Look at the terminal output for `DEBUG` messages regarding `OrderArgs`.
+*   **Proxy Error:** Ensure your `PROXY_ADDRESS` in `.env` matches your Polymarket Proxy Wallet, not your EOA (Metamask) address.
+
+---
+
+## ⚠️ Disclaimer
+This software is provided for **educational and research purposes only**. Cryptocurrency trading, especially on prediction markets, involves **substantial risk of loss**. The authors are not responsible for any financial losses incurred while using this software. Use at your own risk.

@@ -80,6 +80,9 @@ class MarketDataManager:
             try:
                 price = self.chainlink_contract.functions.latestAnswer().call()
                 return float(price) / 10**8 # BTC/USD on Chainlink has 8 decimals
+            except: pass
+
+        # 3. Fallback to Binance (Real-time Exchange Price)
         try:
             r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
             return float(r['price'])

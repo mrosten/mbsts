@@ -23,7 +23,7 @@ def index_page():
                 label='Polymarket Event URL', 
                 placeholder='https://polymarket.com/event/...',
                 on_change=lambda e: state.set_url(e.value)
-            ).props('dark outlined w-full').classes('w-full')
+            ).props('dark outlined w-full stack-label').classes('w-full')
             
             # Sync initial URL if exists in state
             if state.url:
@@ -34,8 +34,8 @@ def index_page():
         # Indicators & Trading
         ui_components.analysis_card()
         ui_components.trading_controls()
-        ui_components.strategy_controls()
         ui_components.stop_loss_manager()
+        ui_components.strategy_controls()
 
 # Run
 if __name__ in {"__main__", "__mp_main__"}:

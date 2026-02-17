@@ -177,35 +177,139 @@ def calc_supertrend(df, period=10, multiplier=3):
     else:
         return "🌑 WEAK BEAR"
 
-def get_trading_recommendation(price_diff, trend, vol_status, time_left):
+def get_trading_recommendation(price_diff, trend, vol_status, time_left, rsi_status, sma_status):
     # Logic:
     # 1. If Time is very short (< 3 mins), mostly random/gambling unless huge diff -> Inadvisable
     # 2. If Volatility is High (Expansion), risk of reversal is high -> Inadvisable or Caution
     # 3. If Trend aligns with Winning Side -> Good
     
-    if time_left < 180 and abs(price_diff) < 20:
-        return "⚠️ TRADING INADVISABLE (Time low, spread tight)"
-        
+    reasoning = []
+    advice = "N/A"
+    
+    # Time Check
+    # Time Check - CONVERGENCE LOGIC
+    is_clutch_time = False
+    if time_left < 30:
+        reasoning.append(f"⏱️ **Time Critical:** < 30s remaining. Execution risk too high. AVOID.")
+        return "⛔ TOO LATE (Exec Risk)", " ".join(reasoning)
+    elif time_left < 300: # Last 5 minutes
+        reasoning.append(f"⏱️ **Convergence Zone:** < 5 mins left. Prices will diverge rapidly to $1.00 or $0.00.")
+        is_clutch_time = True
+    else:
+        reasoning.append(f"⏱️ **Time:** Sufficient time ({int(time_left/60)}m) for trend to play out.")
+
     # Winning Side
     winning_side = "UP" if price_diff > 0 else "DOWN"
+    reasoning.append(f"🎯 **Price Action:** Market is currently winning **{winning_side}** by ${abs(price_diff):.2f}.")
     
-    # Check Trend Alignment
+    # Trend Alignment
     trend_aligned = False
     if winning_side == "UP" and ("BULL" in trend): trend_aligned = True
     if winning_side == "DOWN" and ("BEAR" in trend): trend_aligned = True
     
+    if trend_aligned:
+        reasoning.append(f"✅ **Trend:** The SuperTrend ({trend}) aligns with the current winning side.")
+    else:
+        reasoning.append(f"⚠️ **Trend Divergence:** The SuperTrend is {trend}, which opposes the current price direction.")
+        
     # Volatility Check
     high_vol = "High" in vol_status
-    
-    if trend_aligned and not high_vol:
-        return f"✅ BETTING {winning_side} ODDS LOOK GOOD"
-    
-    if trend_aligned and high_vol:
-        return f"⚠️ BETTING {winning_side} POSSIBLE (Caution: High Vol)"
+    if high_vol:
+        reasoning.append(f"💥 **Volatility:** Market is in expansion ({vol_status}). High risk of sharp reversals.")
+    elif "Squeeze" in vol_status:
+        reasoning.append(f"💤 **Volatility:** Market is in a squeeze. Expect a breakout soon.")
+    else:
+        reasoning.append(f"🌊 **Volatility:** Normal volatility levels.")
         
-    return "⛔ TRADING INADVISABLE (Trend/Price Divergence)"
+    # RSI Check
+    if "Overbought" in rsi_status and winning_side == "UP":
+        reasoning.append(f"⚠️ **RSI:** Warning! Price is winning UP but RSI is Overbought. Pullback likely.")
+    elif "Oversold" in rsi_status and winning_side == "DOWN":
+        reasoning.append(f"⚠️ **RSI:** Warning! Price is winning DOWN but RSI is Oversold. Bounce likely.")
+        
+    # Final Decision
+    # Final Decision
+    if is_clutch_time:
+         # In Convergence Zone, being on the winning side is huge
+         if abs(price_diff) > 10:
+             advice = f"🚀 SNIPE {winning_side} (Convergence Play)"
+             reasoning.append(f"**Conclusion:** 🟢 TIME DECAY PLAY. Market is winning {winning_side} near expiry. Probability of reaching $1.00 is high.")
+         else:
+             advice = "⚠️ CHOPPY / RISKY (Too Close)"
+             reasoning.append(f"**Conclusion:** Price is too close to strike for the final minutes. Coin flip.")
+             
+    elif trend_aligned and not high_vol:
+        advice = f"✅ BETTING {winning_side} ODDS LOOK GOOD"
+        reasoning.append(f"**Conclusion:** Strong setup. Trend and price agree with stable volatility.")
+    elif trend_aligned and high_vol:
+        advice = f"⚠️ BETTING {winning_side} POSSIBLE (Caution: High Vol)"
+        reasoning.append(f"**Conclusion:** Setup aligns but high volatility increases risk.")
+    else:
+        advice = "⛔ TRADING INADVISABLE (Trend/Price Divergence)"
+        reasoning.append(f"**Conclusion:** Conflicting signals. Best to wait for clarity.")
+        
+    return advice, "\n\n".join(reasoning)
 
-def analyze_market_data(url):
+def find_next_btc_market(current_url=None):
+    """
+    Scrapes https://polymarket.com/crypto/15M to find the next active BTC 15m market.
+    """
+    try:
+        url = "https://polymarket.com/crypto/15M"
+        # Mimic browser header to avoid blocking
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=5)
+        text = resp.text
+        
+        # Regex to find all BTC 15m slugs
+        # Pattern: event/btc-updown-15m-{TIMESTAMP}
+        import re
+        matches = re.findall(r'event/btc-updown-15m-(\d+)', text)
+        
+        if not matches:
+             print("DEBUG: Scraper found no BTC matches.")
+             return None
+             
+        # Extract and Sort Timestamps
+        timestamps = sorted([int(ts) for ts in matches])
+        
+        now = time.time()
+        next_ts = None
+        
+        # If we have a current URL, we want strictly greater than that?
+        # Or just the smallest TS that is in the future?
+        # Usually we want the one that starts soon or is currently running.
+        # "Next" implies the one AFTER the current one closes.
+        
+        # Logic: Find smallest TS > (now + buffer)
+        # 15m markets overlap? No, consecutive.
+        
+        # Filter for market ending in future (> now)
+        future_markets = [ts for ts in timestamps if (ts + 900) > now]
+        
+        if not future_markets:
+            print("DEBUG: No future markets found on page.")
+            return None
+            
+        # Get the soonest one
+        target_ts = future_markets[0]
+        
+        # Construct URL
+        # "https://polymarket.com/event/btc-updown-15m-{TS}"
+        # Wait, the link in the page has a slug like "btc-updown-15m-1769...", usually the canonical URL.
+        # The stored URL in app includes domain.
+        
+        next_url = f"https://polymarket.com/event/btc-updown-15m-{target_ts}"
+        print(f"DEBUG: Next Market Found: {next_url}")
+        return next_url
+        
+    except Exception as e:
+        print(f"DEBUG: Scraper Error: {e}")
+        return None
+
+def analyze_market_data(url, offset=0.0):
     # Returns a dictionary of analysis results
     result = {}
     
@@ -238,6 +342,12 @@ def analyze_market_data(url):
         strike_price, strike_src = future_hist.result()
         df = future_candles.result()
     
+    # User requested offset (Applied here)
+    if strike_price:
+        strike_price += offset
+    if curr_price:
+        curr_price += offset
+        
     result['current_price'] = curr_price
     result['current_source'] = curr_src
     result['strike_price'] = strike_price
@@ -299,10 +409,14 @@ def analyze_market_data(url):
         
         # Recommendation
         if 'diff' in result:
-             result['recommendation'] = get_trading_recommendation(
-                result['diff'], result['trend'], result.get('vol_status', 'Normal'), result['time_left_s']
+             advice, reasoning = get_trading_recommendation(
+                result['diff'], result['trend'], result.get('vol_status', 'Normal'), 
+                result['time_left_s'], result.get('rsi_status', 'Neutral'), result.get('sma_status', 'Neutral')
              )
+             result['recommendation'] = advice
+             result['reasoning'] = reasoning
         else:
              result['recommendation'] = "N/A (Missing Price Data)"
+             result['reasoning'] = "No data available to generate reasoning."
         
     return result

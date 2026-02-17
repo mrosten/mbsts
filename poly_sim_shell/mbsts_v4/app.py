@@ -66,8 +66,19 @@ class SniperApp(App):
     .algo_item Label { width: auto; margin: 0 0 0 1; color: #666666; }
     .algo_item Label:hover { color: cyan; text-style: underline; }
     
-    .live_row { align: center middle; height: 1; background: #220000; padding: 0 1; border-top: solid #440000; }
-    .live_row Checkbox { width: auto; margin: 0 1; background: #220000; color: #aaaaaa; border: none; }
+    .live_row { align: center middle; height: 3; background: #220000; padding: 0 1; border-top: solid #440000; }
+    .live_row Checkbox { height: 1; min-height: 1; width: auto; margin: 0 1; background: #220000; color: #aaaaaa; border: none; }
+    
+    /* Checkbox Styling: Hide X when unchecked, Show when checked */
+    Checkbox > .toggle--button { color: $surface; background: #333333; } /* Matches bg color to hide check */
+    Checkbox.-on > .toggle--button { color: #000000; background: #00ff00; } /* Black check on Green BG */
+    
+    /* Live Mode Checkbox Special */
+    #cb_live > .toggle--button { color: $surface; background: #550000; }
+    #cb_live.-on > .toggle--button { color: #ffffff; background: #ff0000; }
+    
+    /* Deprecated styling */
+    .deprecated_lbl { color: #555555; }
     
     #cb_live { color: #ff0000; text-style: bold; }
     RichLog { height: 1fr; min-height: 5; background: #111111; color: #eeeeee; }
@@ -211,31 +222,31 @@ class SniperApp(App):
         yield Horizontal(
             Horizontal(Checkbox(value=True, id="cb_cob"), Label("COB", id="lbl_cob"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_fak"), Label("FAK", id="lbl_fak"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_gri"), Label("GRI", id="lbl_gri"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_gri"), Label("GRI ~", id="lbl_gri", classes="deprecated_lbl"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_lat"), Label("LAT", id="lbl_lat"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_liq"), Label("LIQ", id="lbl_liq"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_mea"), Label("MEA", id="lbl_mea"), classes="algo_item"),
             classes="algo_row"
         )
         yield Horizontal(
+            Horizontal(Checkbox(value=True, id="cb_mea"), Label("MEA", id="lbl_mea"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_mes"), Label("MES", id="lbl_mes"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_mid"), Label("MID", id="lbl_mid"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_min"), Label("MIN", id="lbl_min"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_mid"), Label("MID ~", id="lbl_mid", classes="deprecated_lbl"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_min"), Label("MIN ~", id="lbl_min", classes="deprecated_lbl"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_mos"), Label("MOS", id="lbl_mos"), classes="algo_item"),
+            classes="algo_row"
+        )
+        yield Horizontal(
             Horizontal(Checkbox(value=True, id="cb_npa"), Label("NPA", id="lbl_npa"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_pos"), Label("POS", id="lbl_pos"), classes="algo_item"),
-            classes="algo_row"
-        )
-        yield Horizontal(
             Horizontal(Checkbox(value=True, id="cb_rsi"), Label("RSI", id="lbl_rsi"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_sli"), Label("SLI", id="lbl_sli"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_sta"), Label("STA", id="lbl_sta"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_ste"), Label("STE", id="lbl_ste"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_tai"), Label("TAI", id="lbl_tai"), classes="algo_item"),
-            Horizontal(Checkbox(value=True, id="cb_tra"), Label("TRA", id="lbl_tra"), classes="algo_item"),
             classes="algo_row"
         )
         yield Horizontal(
+            Horizontal(Checkbox(value=True, id="cb_ste"), Label("STE", id="lbl_ste"), classes="algo_item"),
+            Horizontal(Checkbox(value=True, id="cb_tai"), Label("TAI", id="lbl_tai"), classes="algo_item"),
+            Horizontal(Checkbox(value=True, id="cb_tra"), Label("TRA", id="lbl_tra"), classes="algo_item"),
             Horizontal(Checkbox(value=True, id="cb_vol"), Label("VOL", id="lbl_vol"), classes="algo_item"),
             Horizontal(Checkbox(value=False, id="cb_zsc"), Label("ZSC", id="lbl_zsc"), classes="algo_item"),
             classes="algo_row"
@@ -280,7 +291,7 @@ class SniperApp(App):
             all_cbs = ["#cb_cob", "#cb_fak", "#cb_gri", "#cb_lat", "#cb_liq", "#cb_mea", "#cb_mes", "#cb_mid", "#cb_min", "#cb_mos", "#cb_npa", "#cb_pos", "#cb_rsi", "#cb_sli", "#cb_sta", "#cb_ste", "#cb_tai", "#cb_tra", "#cb_vol", "#cb_zsc"]
             for cid in all_cbs: self.query_one(cid).value = False
             lb = self.live_broker.balance
-            if lb > 0:
+            if lb >= 0:
                 self.query_one("#inp_risk_alloc").value = f"{lb/TradingConfig.LIVE_RISK_DIVISOR:.2f}"
                 self.risk_manager.set_bankroll(lb, is_live=True)
                 self.risk_initialized = True
@@ -352,7 +363,12 @@ class SniperApp(App):
                 for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
                 
                 # Calculate what we would have won from open bets
-                total_payout = sum((info["cost"]/info["entry"] if info["side"]==winner else 0) for info in self.window_bets.values() if not info.get("closed"))
+                # Calculate what we would have won from open bets
+                total_payout = 0.0
+                for k, info in self.window_bets.items():
+                    if isinstance(info, dict) and not info.get("closed"):
+                         if info.get("side") == winner:
+                             total_payout += info.get("cost", 0) / info.get("entry", 1)
                 if total_payout > 0:
                     self.log_msg(f"[cyan]💰 Settlement Revenue: +${total_payout:.2f}[/]")
                     self._add_risk_revenue(total_payout)
@@ -388,6 +404,7 @@ class SniperApp(App):
             })
             
             rsi = calculate_rsi(d["c60"])
+            self.market_data['rsi'] = rsi # Store for manual access
             _, _, lbb = calculate_bb(d["c60"])
             ph = self.market_data_manager.price_history
             fbb = calculate_bb([p['price'] for p in ph[-20:]]) if len(ph) >= 20 else (0,0,0)
@@ -426,7 +443,16 @@ class SniperApp(App):
                         pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                         if pr and 0.01 < pr < 0.99:
                             is_l = self.query_one("#cb_live").value
-                            ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], reason=res)
+                            
+                            # Build Context for Validated Logging
+                            ctx = {
+                                'signal_price': d["cur"],
+                                'rsi':rsi,
+                                'trend': self.market_data_manager.trend_4h,
+                                'risk_bal': self.risk_manager.risk_bankroll
+                            }
+                            
+                            ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=res)
                             if ok:
                                 self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
                                 self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
@@ -449,6 +475,7 @@ class SniperApp(App):
         try: tp = float(self.query_one("#inp_tp").value)/100; sl = float(self.query_one("#inp_sl").value)/100
         except: tp=1.0; sl=1.0
         for bid, info in list(self.window_bets.items()):
+            if not isinstance(info, dict): continue
             if info.get("closed"): continue
             side = info["side"]; ent = info["entry"]; cur = self.market_data["up_price"] if side=="UP" else self.market_data["down_price"]
             roi = (cur-ent)/ent; reason = None
@@ -547,7 +574,16 @@ class SniperApp(App):
         pr = self.market_data["up_ask" if side=="UP" else "down_ask"]
         if is_l and pr >= 0.98: return self.log_msg("[red]Price too high[/]")
         tid = self.market_data["up_id" if side=="UP" else "down_id"]
-        ok, msg = self.trade_executor.execute_buy(is_l, side, val, pr or 0.5, tid, reason="Manual")
+        
+        # Manual Context
+        ctx = {
+            'signal_price': self.market_data.get('btc_price', 0),
+            'rsi': self.market_data.get('rsi', 0),
+            'trend': self.market_data_manager.trend_4h,
+            'risk_bal': self.risk_manager.risk_bankroll
+        }
+        
+        ok, msg = self.trade_executor.execute_buy(is_l, side, val, pr or 0.5, tid, context=ctx, reason="Manual")
         if ok:
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
             if self.risk_initialized: self.risk_manager.register_bet(val)

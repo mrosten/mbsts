@@ -57,6 +57,7 @@ def print_analysis(url):
         
     if "recommendation" in results:
         print(f"\n📢 RECOMMENDATION: {results['recommendation']}")
+        print(f"📝 REASONING:      {results.get('reasoning', '')}")
     
     # TA Section
     if 'rsi' in results:

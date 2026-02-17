@@ -11,6 +11,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs
 from datetime import datetime
 import time
+import numpy as np
 
 load_dotenv()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
@@ -27,8 +28,10 @@ class Store:
         self.is_analyzing = False
         self.btc_offset = -86.0 
         self.btc_offset = -86.0 
+        self.btc_offset = -86.0 
         self.refresh_rate = 2.0 
         self.trading_side = "UP" # UI State for Lever/SL Sync
+        self.price_history = [] # List of (timestamp, price) for 1s candles/volatility
         
         # Stop Loss State
         self.sl_active = False
@@ -40,8 +43,10 @@ class Store:
         self.sl_trigger_price = 0.0
         self.sl_size = 0.0
         self.sl_side = "up" # For UI display
-        self.sl_trailing = False
-        self.sl_trail_dist = 0.05
+        self.sl_trailing = True
+        self.sl_trail_dist = 0.10
+        self.sl_auto_arm = False
+        self.orders = [] # Track Order IDs
         
         # Strategy State
         self.strategy_reversion_active = False
@@ -57,6 +62,12 @@ class Store:
         
         # Start Background Loop manually in main.py
         self.loop_running = False
+        self.wake_event = asyncio.Event()
+
+    def set_refresh_rate(self, rate):
+        self.refresh_rate = float(rate)
+        # Wake up the loop immediately if it's sleeping
+        self.wake_event.set()
         
     async def background_loop(self):
         if self.loop_running: return
@@ -91,7 +102,25 @@ class Store:
                             mins, secs = divmod(int(seconds), 60)
                             time_str = f"T-{mins}:{secs:02}"
                         
-                        print(f"CSV: {time_str}, UP={up:.3f}, DOWN={down:.3f}, BTC={btc:.2f}, STRIKE={strike:.2f}, DIV={div:.2f}")
+                        # Volatility Calculation
+                        vol_val = 0.0
+                        if len(self.price_history) > 1:
+                             # Extract prices only
+                             prices = [p[1] for p in self.price_history]
+                             price_changes = np.diff(prices)
+                             vol_val = np.std(price_changes)
+                        
+                        # Signal Calculation (Strategy V2)
+                        # Rule: Good if Abs(Div) >= Vol * 5.0 AND Vol <= 10.0
+                        strategic_mult = 5.0
+                        max_vol = 10.0
+                        
+                        dynamic_thresh = vol_val * strategic_mult
+                        is_good = abs(div) >= dynamic_thresh and vol_val <= max_vol and vol_val > 0
+                        
+                        sig = 'g' if is_good else 'b'
+                        
+                        print(f"CSV: {time_str}, UP={up:.3f}, DOWN={down:.3f}, BTC={btc:.2f}, STRIKE={strike:.2f}, DIV={div:.2f}, VOL={vol_val:.4f}, SIG={sig}")
 
                         # Auto-Switch Market Check
                         # If time_left is defined and < -10 (10s buffer after close)
@@ -123,7 +152,15 @@ class Store:
                         # print(traceback.format_exc())
                         pass
                 
-                await asyncio.sleep(self.refresh_rate)
+                # Smart Sleep: Wait for timeout OR wake event
+                try:
+                    await asyncio.wait_for(self.wake_event.wait(), timeout=self.refresh_rate)
+                    # If we woke up early due to event:
+                    self.wake_event.clear()
+                    print(f"DEBUG: Loop Woken Up Early! New Rate: {self.refresh_rate}")
+                except asyncio.TimeoutError:
+                    # Normal timeout, just continue
+                    pass
         except asyncio.CancelledError:
             print("DEBUG: Background Loop Cancelled")
         finally:
@@ -266,7 +303,17 @@ class Store:
             
             data = await run.io_bound(_get)
             if data and "price" in data:
-                self.market_data["btc_price"] = float(data["price"])
+                price = float(data["price"])
+                self.market_data["btc_price"] = price
+                
+                # Update Price History (Rolling 180s window)
+                now = time.time()
+                self.price_history.append((now, price))
+                
+                # Filter out old data (> 180s)
+                cutoff = now - 180
+                self.price_history = [x for x in self.price_history if x[0] > cutoff]
+                
         except Exception as e:
             print(f"DEBUG: Spot Fetch Error: {e}")
 
@@ -306,11 +353,21 @@ class Store:
             self.sl_active = False
             self.safe_notify("🛡️ Stop Loss Executed & Disabled", "warning")
 
+    def set_stop_loss(self, trigger_price):
+        self.sl_trigger_price = float(trigger_price)
+        self.sl_active = True
+        self.safe_notify(f"🛡️ Stop Loss Set @ ${self.sl_trigger_price}", "positive")
+
+    def cancel_stop_loss(self):
+        self.sl_active = False
+        self.safe_notify("🛑 Stop Loss Cancelled", "warning")
+
     async def evaluate_strategies(self):
         # Lazy Init check
         if not hasattr(self, 'last_auto_trade_ts'): self.last_auto_trade_ts = 0
         
         # Prevent rapid firing (1 trade per minute per strategy?)
+        # print(f"DEBUG: Eval invoked. Cool: {time.time() - self.last_auto_trade_ts:.1f}s")
         if time.time() - self.last_auto_trade_ts < 60: return
         
         signal_side = None
@@ -331,6 +388,52 @@ class Store:
                 signal_side = sig
                 strategy_name = "Trend Surfer"
                 
+        # 3. T-4 Volatility Sniper (Refined)
+        # Check Time: Between 3:00 (180s) and 4:30 (270s)
+        # Fix: Calculate dynamic time_left (analysis_results has stale time_left_s)
+        end_ts = self.analysis_results.get('end_ts')
+        if not end_ts: return
+        time_left = end_ts - datetime.now().timestamp()
+        
+        if 180 <= time_left <= 270:
+             # Calculate Signal
+            vol_val = 0.0
+            if len(self.price_history) > 1:
+                    prices = [p[1] for p in self.price_history]
+                    vol_val = np.std(np.diff(prices))
+            
+            btc = self.market_data.get("btc_price", 0)
+            if btc > 0: btc += self.btc_offset
+            strike = self.analysis_results.get("strike_price", 0)
+            div = btc - strike if (btc > 0 and strike > 0) else 0
+            
+            strategic_mult = 5.0
+            max_vol = 10.0
+            dynamic_thresh = vol_val * strategic_mult
+            
+            is_good = abs(div) >= dynamic_thresh and vol_val <= max_vol and vol_val > 0
+            
+            # DEBUG LOGGING for T-4
+            # print(f"DEBUG: T-4 Check: Time={time_left:.1f}, Vol={vol_val:.4f}, Div={div:.2f}, Thresh={dynamic_thresh:.2f}, Good={is_good}")
+            
+            if is_good:
+                # Direction? Follow the divergence
+                # If div > 0 (BTC > Strike) -> UP
+                # If div < 0 (BTC < Strike) -> DOWN
+                side_str = "UP" if div > 0 else "DOWN"
+                
+                # Check Price Threshold (>= $0.80)
+                curr_price_for_side = self.market_data.get("up_price", 0) if side_str == "UP" else self.market_data.get("down_price", 0)
+                
+                if curr_price_for_side >= 0.80:
+                    print(f"DEBUG: T-4 Signal Found! Div={div:.2f}, Vol={vol_val:.3f}, Price={curr_price_for_side} -> Buying {side_str}")
+                    signal_side = side_str
+                    strategy_name = "T-4 Sniper"
+                    # Override size to 6 shares as requested
+                    self.sl_size = 6.0 
+                else:
+                     print(f"DEBUG: T-4 Signal Good but Price too low: {curr_price_for_side} < 0.80")
+
         if signal_side:
             print(f"DEBUG: Strategy Signal: {strategy_name} -> {signal_side}")
             # Execute Trade (Small size for safety initially?)
@@ -367,76 +470,88 @@ class Store:
             
     async def place_trade(self, side, size):
         if not self.client:
-            ui.notify("Error: CLOB Client not initialized (Check .env)", color="negative")
+            ui.notify("Error: CLOB Client not initialized", color="negative")
+            print("DEBUG: Client not initialized!")
             return
             
         token_id = self.market_data.get(f"{side}_id")
         if not token_id:
-            ui.notify("Error: Token ID not found. Wait for prices to load.", color="negative")
+            ui.notify("Error: Token ID not found.", color="negative")
+            print(f"DEBUG: Token ID not found for {side}!")
             return
             
+        print(f"DEBUG: place_trade INVOKED. Side={side}, Size={size}, Token={token_id}")
         ui.notify(f"Buying {size} shares of {side.upper()}...", color="info")
         
         try:
-            # Run in thread
+            # Run in thread to avoid blocking loop
             def _trade():
-                buy_args = OrderArgs(price=0.99, size=size, token_id=token_id, side="BUY")
-                resp = self.client.create_order(buy_args)
-                return self.client.post_order(resp)
+                try:
+                    print("DEBUG: _trade thread started.")
+                    # Ensure size is float
+                    f_size = float(size)
+                    
+                    # 1. Create Args (Market Buy = Limit 0.99)
+                    buy_args = OrderArgs(price=0.99, size=f_size, token_id=token_id, side="BUY")
+                    print(f"DEBUG: OrderArgs: {buy_args}")
+                    
+                    # 2. Sign Order
+                    print("DEBUG: Calling client.create_order...")
+                    signed_order = self.client.create_order(buy_args)
+                    print(f"DEBUG: Signed Order: {signed_order}")
+                    
+                    # 3. Post Order
+                    print("DEBUG: Calling client.post_order...")
+                    resp = self.client.post_order(signed_order)
+                    print(f"DEBUG: Raw Post Response: {resp}")
+                    return resp
+                    
+                except Exception as inner_e:
+                    print(f"CRITICAL: INNER TRADE EXCEPTION: {inner_e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    return {"success": False, "errorMsg": str(inner_e)}
             
+            # Execute
             res = await run.io_bound(_trade)
             
-            if res.get("success"):
-                ui.notify(f"✅ Executed! ID: {res.get('orderID')}", color="positive")
+            print(f"DEBUG: Trade Result: {res}")
+            
+            # Polymarket CLOB often returns orderID on success
+            if res and (res.get("success") or res.get("orderID")):
+                oid = res.get("orderID") or "UNKNOWN"
+                ui.notify(f"✅ Executed! ID: {oid}", color="positive")
                 
-                # Auto-Activate Stop Loss
-                self.sl_side = side
-                self.sl_token_id = token_id
-                self.sl_size = float(size)
-                # Estimate entry price (optimistic 0.99 fill or use market data)
-                # Better: use current LIVE price from market_data - 0.05 safety
-                curr = self.market_data.get(f"{side}_price", 0.0)
-                if curr > 0:
-                     self.sl_trigger_price = max(0.01, round(curr - 0.05, 2))
-                else:
-                     self.sl_trigger_price = 0.02 # Fallback
-                     
-                self.sl_active = True
-                self.sl_trailing = True # Auto-enable trailing
-                self.sl_trail_dist = 0.05
-                ui.notify(f"🛡️ Auto-SL Active @ ${self.sl_trigger_price} (Trailing)", color="warning")
+                # Register for SL
+                self.orders.append(oid)
+                self.last_trade = res
                 
-                # BRACKET BOT LOGIC
-                if self.strategy_bracket_active:
-                     # Calculate SL/TP
-                     # Note: Auto-SL above sets SL. Bracket Bot overrides it with configurable %
-                     # Entry Price Estimate
-                     entry = self.market_data.get(f"{side}_price", 0.0)
-                     if entry > 0:
-                         tp, sl = strategies.calculate_bracket_orders(entry, side, self.bracket_tp_pct, self.bracket_sl_pct)
-                         
-                         # Update SL State
-                         self.sl_trigger_price = sl
-                         self.sl_active = True # Ensure active
-                         self.safe_notify(f"🤖 Bracket Bot: TP ${tp} | SL ${sl}", "info")
-                         
-                         # Place Limit Sell for TP?
-                         # For now, just notifying TP. Implementing Auto-Limit Sell requires Order ID tracking or open order check.
-                         # Let's just create a 'Pending TP' state or just place the limit order immediately?
-                         # Placing limit order immediately might lock funds/shares.
-                         # Let's place it!
-                         # await self.place_limit_sell(token_id, size, tp) # TODO: Implement place_limit_sell
-                         
-                         ui.notify(f"🎯 Bracket Targets Set: TP ${tp} / SL ${sl}", color="positive")
-                         
-                     else:
-                         ui.notify("⚠️ Bracket Bot: Could not determine entry price.", color="warning")
+                # Auto-Arm Logic
+                if self.sl_auto_arm:
+                    # Determine trigger
+                    # Use current market price from memory
+                    curr_price = self.market_data.get(f"{side}_price", 0.50) 
+                    trigger = max(0.01, curr_price - self.sl_trail_dist)
+                    
+                    self.set_stop_loss(trigger)
+                    ui.notify(f"🛡️ Auto-Armed SL @ ${trigger:.2f}", color="positive")
+                
+                # Update SL Check Loop
+                if not self.sl_active and not self.sl_auto_arm:
+                    print("DEBUG: Auto-Strategies logic might want to set SL here?")
+                    # NOTE: Bracket Bot logic is handled in evaluate_strategies usually, 
+                    # but if this was manual, we might want to auto-set SL if Bracket is active.
                 
             else:
-                ui.notify(f"❌ Failed: {res.get('errorMsg')}", color="negative")
+                msg = res.get("errorMsg") if res else "Unknown Error"
+                ui.notify(f"❌ Failed: {msg}", color="negative")
+                print(f"DEBUG: Trade Failed Msg: {msg}")
                 
         except Exception as e:
             self.safe_notify(f"❌ Trade Exception: {str(e)}", "negative")
+            print(f"DEBUG: Trade Exception Trace: {e}")
+            import traceback
+            print(traceback.format_exc())
         
     def get_price_labels(self):
         # Fallback

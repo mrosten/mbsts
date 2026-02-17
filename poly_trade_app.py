@@ -213,6 +213,10 @@ if url:
                     c4.metric("Bollinger Status", results.get("bb_status", "N/A"))
                     c5.metric("SMA 50 Status", results.get("sma_status", "N/A"))
                     c6.metric("Volatility", results.get("vol_status", "N/A"))
+                
+                    st.info(f"**Recommendation:** {results.get('recommendation', 'N/A')}")
+                    if 'reasoning' in results:
+                        st.caption(f"**Analysis:** {results['reasoning']}")
                     
                     # Detailed Text
                     if "bb_lower" in results:
