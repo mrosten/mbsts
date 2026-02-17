@@ -18,8 +18,17 @@ from textual import work
 load_dotenv()
 
 # --- CONFIG ---
-POLYGON_RPC = os.getenv("POLYGON_RPC", "https://polygon-rpc.com") 
-CHAINLINK_BTC_FEED = "0xc907E116054710363050Cce340695D7946aaBf47"
+POLYGON_RPC_LIST = [
+    os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com"),
+    os.getenv("POLYGON_RPC", "https://polygon-rpc.com"),
+    "https://rpc-mainnet.maticvigil.com",
+    "https://rpc.ankr.com/polygon",
+    "https://1rpc.io/matic"
+]
+# Remove duplicates while preserving order
+POLYGON_RPC_LIST = list(dict.fromkeys(filter(None, POLYGON_RPC_LIST)))
+
+CHAINLINK_BTC_FEED = "0xc907E116054Ad103354f2D350FD2514433D57F6f"
 CHAINLINK_ABI = '[{"inputs":[],"name":"latestAnswer","outputs":[{"internalType":"int256","name":"","type":"int256"}],"stateMutability":"view","type":"function"}]'
 
 # --- BETTING CONFIG ---
@@ -194,12 +203,25 @@ class PolySimApp(App):
     .timer_text { text-style: bold; color: $warning; }
     
     /* MAIN DATA ROW */
-    .row_main { height: 7; margin: 0; padding: 0; }
-    .price_card { height: 100%; border: ascii $secondary; margin: 0; padding: 0; }
+    .row_main { height: 8; margin: 0; padding: 0; }
+    .price_card { height: 100%; border: ascii $secondary; margin: 0; padding: 0; background: $surface; }
     
     /* 3-Column BTC Data */
-    #card_btc { width: 4fr; border: ascii #f7931a; layout: horizontal; }
-    .col_btc_data { width: 1fr; height: 100%; align: center middle; padding: 0 1; }
+    #card_btc { 
+        width: 4fr; 
+        border: ascii #f7931a; 
+        layout: grid; 
+        grid-size: 3; 
+        grid-columns: 1fr 1fr 1fr; 
+        grid-rows: 1fr 1fr 1fr 1fr;
+    }
+    
+    #card_btc > Label {
+        width: 100%;
+        height: 100%;
+        content-align: center middle;
+        padding: 0;
+    }
     
     /* UP/DOWN Sidebars */
     .right_col { width: 1fr; height: 100%; }
@@ -208,22 +230,23 @@ class PolySimApp(App):
     #card_down { border: ascii #ff0000; }
 
     /* TEXT STYLES */
-    .price_val { text-style: bold; }
-    .price_sub { text-style: dim; color: $text-muted; }
+    .price_val { text-style: bold; color: #ffffff; }
+    /* FIX: Use explicit color instead of $text-muted/dim to prevent invisibility in PuTTY */
+    .price_sub { color: #aaaaaa; } 
     
     /* STATUS COLORS */
     .diff_green { color: #00ff00; }
     .diff_red { color: #ff0000; }
     .sig_up { color: #00ff00; text-style: bold; }
     .sig_down { color: #ff0000; text-style: bold; }
-    .sig_wait { color: #555555; }
+    .sig_wait { color: #666666; }
     .master_up { color: #00ff00; text-style: bold; background: #003300; width: 100%; text-align: center; }
     .master_down { color: #ff0000; text-style: bold; background: #330000; width: 100%; text-align: center; }
-    .master_neu { color: #888888; width: 100%; text-align: center; }
+    .master_neu { color: #cccccc; width: 100%; text-align: center; }
     
     /* COMPACT INPUT ROW */
     #input_area { height: 3; border-top: solid $primary; align: center middle; layout: horizontal; padding: 0; }
-    #inp_amount { width: 14; height: 1; margin: 0 1; background: $surface; border: none; }
+    #inp_amount { width: 14; height: 1; margin: 0 1; background: $surface; border: none; color: #ffffff; }
     Button { height: 1; min-width: 10; margin: 0 1; border: none; }
     
     .btn_buy_up { background: #006600; color: #ffffff; }
@@ -232,7 +255,7 @@ class PolySimApp(App):
     .btn_sell_down { background: #b34b00; color: #ffffff; }
     
     /* LOG */
-    RichLog { height: 1fr; min-height: 5; border-top: double $primary; background: $surface; }
+    RichLog { height: 1fr; min-height: 5; border-top: double $primary; background: #111111; color: #eeeeee; }
     """
 
     def __init__(self, broker):
@@ -264,39 +287,34 @@ class PolySimApp(App):
 
         # 2. MAIN DATA DASHBOARD (Compact)
         yield Horizontal(
-            # Left: BTC Logic (3 Columns)
-            Vertical(
-                Horizontal(
-                    # Col 1: Price Stats
-                    Vertical(
-                        Label("$0.00", id="p_btc", classes="price_val"),
-                        Label("Op: $0", id="p_btc_open", classes="price_sub"),
-                        Label("Diff: $0", id="p_btc_diff", classes="price_sub"),
-                        Label("Rng: $0", id="p_btc_rng", classes="price_sub"),
-                        classes="col_btc_data"
-                    ),
-                    # Col 2: Signals
-                    Vertical(
-                        Label("Sling: WAIT", id="p_sling", classes="price_sub"),
-                        Label("Poly: WAIT", id="p_poly", classes="price_sub"),
-                        Label("Cobra: WAIT", id="p_cobra", classes="price_sub"),
-                        Label("Flag: WAIT", id="p_flag", classes="price_sub"),
-                        classes="col_btc_data"
-                    ),
-                    # Col 3: Master & Trend
-                    Vertical(
-                        Label("NEUTRAL", id="p_master", classes="master_neu"),
-                        Label("Odds: -/5", id="p_btc_odds", classes="price_sub"),
-                        Label("Trend: -", id="p_btc_trend", classes="price_sub"),
-                        classes="col_btc_data"
-                    )
-                ),
+            # Left: BTC Logic (Grid of 4 Rows x 3 Cols)
+            Container(
+                # ROW 1
+                Label("$0.00", id="p_btc", classes="price_val"),
+                Label("Sling: WAIT", id="p_sling", classes="price_sub"),
+                Label("NEUTRAL", id="p_master", classes="master_neu"),
+                
+                # ROW 2
+                Label("Op: $0", id="p_btc_open", classes="price_sub"),
+                Label("Poly: WAIT", id="p_poly", classes="price_sub"),
+                Label("Odds: -/5", id="p_btc_odds", classes="price_sub"),
+                
+                # ROW 3
+                Label("Diff: $0", id="p_btc_diff", classes="price_sub"),
+                Label("Cobra: WAIT", id="p_cobra", classes="price_sub"),
+                Label("Trend: -", id="p_btc_trend", classes="price_sub"),
+                
+                # ROW 4
+                Label("Rng: $0", id="p_btc_rng", classes="price_sub"),
+                Label("Flag: WAIT", id="p_flag", classes="price_sub"),
+                Label("", classes="price_sub"), # Empty spacer for 4th row, 3rd col
+                
                 id="card_btc", classes="price_card"
             ),
-            # Right: UP/DOWN Cards
+            # Right: UP/DOWN Stack
             Vertical(
-                Horizontal(Label("UP ", classes="price_sub", id="lbl_up_static"), Label("0.0¢", id="p_up", classes="price_val"), id="card_up", classes="mini_card"),
-                Horizontal(Label("DOWN ", classes="price_sub", id="lbl_down_static"), Label("0.0¢", id="p_down", classes="price_val"), id="card_down", classes="mini_card"),
+                Vertical(Label("UP", classes="price_sub", id="lbl_up_static"), Label("0.0¢", id="p_up", classes="price_val"), id="card_up", classes="mini_card"),
+                Vertical(Label("DN", classes="price_sub", id="lbl_down_static"), Label("0.0¢", id="p_down", classes="price_val"), id="card_down", classes="mini_card"),
                 classes="right_col"
             ),
             classes="row_main"
@@ -330,10 +348,27 @@ class PolySimApp(App):
     def init_web3(self):
         try:
             from web3 import Web3
-            self.w3_provider = Web3(Web3.HTTPProvider(POLYGON_RPC))
-            self.chainlink_contract = self.w3_provider.eth.contract(address=Web3.to_checksum_address(CHAINLINK_BTC_FEED), abi=CHAINLINK_ABI)
-            self.call_from_thread(self.log_msg, "[green]Web3 Linked (Read-Only)[/]")
-        except: self.call_from_thread(self.log_msg, "[yellow]Web3 Failed. Using Binance backup.[/]")
+            # Use the global config list
+            for rpc in POLYGON_RPC_LIST:
+                try:
+                    self.w3_provider = Web3(Web3.HTTPProvider(rpc))
+                    if not self.w3_provider.is_connected(): continue
+                    
+                    self.chainlink_contract = self.w3_provider.eth.contract(address=Web3.to_checksum_address(CHAINLINK_BTC_FEED), abi=CHAINLINK_ABI)
+                    # Test call to ensure it works
+                    self.chainlink_contract.functions.latestAnswer().call()
+                    
+                    self.call_from_thread(self.log_msg, f"[green]Web3 Connected via {rpc}[/]")
+                    return
+                except Exception as e:
+                    self.call_from_thread(self.log_msg, f"[yellow]RPC {rpc} failed: {e}[/]")
+            
+            self.call_from_thread(self.log_msg, "[red]All Web3 RPCs Failed. Using Binance backup.[/]")
+        except ImportError as e:
+            self.call_from_thread(self.log_msg, f"[red]Web3 Import Failed: {e}. Ensure 'web3' and dependencies are installed.[/]")
+        except Exception as e:
+            import traceback
+            self.call_from_thread(self.log_msg, f"[red]Web3 Init Error: {e}\n{traceback.format_exc()}[/]")
 
     def update_balance_ui(self):
         self.query_one("#header_stats").update(f"SIM | Bal: ${self.broker.balance:.2f}")
@@ -557,7 +592,9 @@ class PolySimApp(App):
         else: self.log_msg(f"[red]{msg}[/]")
 
 if __name__ == "__main__":
+    import sys
     print("\n=== POLYMARKET SIMULATOR SETUP ===")
+    print(f"Running with Python: {sys.executable}")
     try: start_bal = float(input("Enter Initial Balance ($): ").strip() or "100.00")
     except: start_bal = 100.00
     default_log = f"sim_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
