@@ -1,7 +1,11 @@
-from mbsts_v4.config import TradingConfig
-from mbsts_v4.main import main
+from mbsts_15m_v4.main import main
 
 if __name__ == "__main__":
-    # Override for 15M mode
-    TradingConfig.WINDOW_SECONDS = 900
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        with open("launcher_crash.txt", "w") as f:
+            f.write(traceback.format_exc())
+        print("CRASHED! See launcher_crash.txt")
+        input("Press Enter to continue...")

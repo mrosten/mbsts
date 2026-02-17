@@ -505,7 +505,6 @@ class SniperApp(App):
                     except: pass
 
     async def _run_last_second_exit(self, is_live):
-        if not is_live: return # SIM: Let it expire and settle at $1.00
         sides = set()
         if is_live: sides.update(info["side"] for info in self.window_bets.values() if not info.get("closed"))
         else:

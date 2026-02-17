@@ -351,7 +351,7 @@ class SniperApp(App):
 
     async def fetch_market_loop(self):
         try:
-            now = datetime.now(timezone.utc); floor = (now.minute // 5) * 5
+            now = datetime.now(timezone.utc); floor = (now.minute // 15) * 15
             ts_start = int(now.replace(minute=floor, second=0, microsecond=0).timestamp())
             if not self.risk_initialized:
                 try:
@@ -387,7 +387,7 @@ class SniperApp(App):
 
             self.market_data["start_ts"] = ts_start
             elapsed = int(now.timestamp()) - ts_start
-            slug = f"btc-updown-5m-{ts_start}"
+            slug = f"btc-updown-15m-{ts_start}"
             
             # Direct sync fetcher for background data gathering
             def sync_fetch():
@@ -505,7 +505,6 @@ class SniperApp(App):
                     except: pass
 
     async def _run_last_second_exit(self, is_live):
-        if not is_live: return # SIM: Let it expire and settle at $1.00
         sides = set()
         if is_live: sides.update(info["side"] for info in self.window_bets.values() if not info.get("closed"))
         else:
