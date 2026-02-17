@@ -252,10 +252,10 @@ class SniperApp(App):
             classes="algo_row"
         )
         yield Horizontal(
-            Checkbox("TP/SL", value=True, id="cb_tp_active"),
+            Checkbox("TP/SL", value=False, id="cb_tp_active"),
             Checkbox("Strong Only", value=False, id="cb_strong"),
             Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
-            Checkbox("Whale Protect", value=True, id="cb_whale"),
+            Checkbox("Whale Protect", value=False, id="cb_whale"),
             id="settings_row",
             classes="live_row"
         )
@@ -365,20 +365,13 @@ class SniperApp(App):
                 winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
                 self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
                 
-                self.sim_broker.settle_window(winner)
+                payout, net_pnl = self.sim_broker.settle_window(winner)
+                
                 for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
                 
-                # Calculate what we would have won from open bets
-                total_payout = 0.0
-                for k, info in self.window_bets.items():
-                    if isinstance(info, dict) and not info.get("closed"):
-                         if info.get("side") == winner:
-                             total_payout += info.get("cost", 0) / info.get("entry", 1)
-                if total_payout > 0:
-                    self.log_msg(f"[cyan]💰 Settlement Revenue: +${total_payout:.2f}[/]")
-                    self._add_risk_revenue(total_payout)
-                else:
-                    self._add_risk_revenue(0) # Logic for refill if lost
+                color = "green" if net_pnl >= 0 else "red"
+                self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
+                self._add_risk_revenue(payout)
 
                 self.risk_manager.reset_window(); self.last_second_exit_triggered = False
                 self.update_balance_ui(); self.window_bets.clear()
@@ -505,18 +498,28 @@ class SniperApp(App):
                     except: pass
 
     async def _run_last_second_exit(self, is_live):
+        # if not is_live: return # REMOVED: We want Sim Logic for Hypothetical Logging
         sides = set()
         if is_live: sides.update(info["side"] for info in self.window_bets.values() if not info.get("closed"))
         else:
             if self.sim_broker.shares["UP"] > 0: sides.add("UP")
             if self.sim_broker.shares["DOWN"] > 0: sides.add("DOWN")
+        
         for side in sides:
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
             cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
-            # For SIM: Sell at Bid (Realism). For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
-            lp = cbid if not is_live else max(0.01, cbid - 0.05)
-            # If Sim and Bid is 0, we can't sell (or sell for 0)
-            if not is_live and lp <= 0.001: lp = 0.0
+            
+            if not is_live:
+                # SIM HYPOTHETICAL LOGGING
+                shares = self.sim_broker.shares.get(side, 0)
+                if shares > 0:
+                    revenue = shares * cbid
+                    # "If we were live we would sell X shares of winning side at 99c right now..."
+                    self.call_from_thread(self.log_msg, f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
+                continue # Skip actual execution for Sim, let it expire/settle at $1.00
+                
+            # For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
+            lp = max(0.01, cbid - 0.05)
             
             ok, msg = self.trade_executor.execute_sell(is_live, side, tid, lp, cbid, reason="Last Second Exit")
             if ok:
@@ -575,6 +578,10 @@ class SniperApp(App):
             await self.trigger_sell_all("UP" if "_up" in bid else "DOWN")
 
     async def trigger_buy(self, side):
+        if hasattr(self, "_last_manual_buy") and time.time() - self._last_manual_buy < 2.0:
+            return self.log_msg("[yellow]Manual Buy Debounce Active...[/]")
+        self._last_manual_buy = time.time()
+        
         try: val = float(self.query_one("#inp_amount").value)
         except: return self.log_msg("[red]Invalid Amount[/]")
         if self.risk_initialized and val > self.risk_manager.risk_bankroll + 0.01: return self.log_msg("[red]Insuff Risk Cap[/]")

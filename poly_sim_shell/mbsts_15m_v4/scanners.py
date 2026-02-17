@@ -59,7 +59,7 @@ class FakeoutScanner(BaseScanner):
         spike_high = max(early_prices)
         current_price = history_objs[-1]['price']
         if (spike_high > open_price) and (current_price < open_price):
-            if prev_window_color == "RED": self.triggered_signal = f"BET_DOWN_AGGRESSIVE|Rejected Rescue & Trend Align"
+            if prev_window_color == "RED": self.triggered_signal = f"BET_DOWN_FAKEOUT|Rejected Rescue & Trend Align"
             elif prev_window_color == "GREEN": self.triggered_signal = f"WAIT_FOR_CONFIRMATION|Rejected Rescue vs Trend"
             return self.triggered_signal
         return "NO_SIGNAL"
