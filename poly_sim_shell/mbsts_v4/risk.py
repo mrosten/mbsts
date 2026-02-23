@@ -27,7 +27,7 @@ class RiskManager:
         """
         # 1. Base Sizing
         budget_pct = TradingConfig.DEFAULT_RISK_PCT
-        strong_patterns = ["UPTREND", "STRONG_TREND", "COBRA", "LIQ_SWEEP", "LATE_REVERSAL"]
+        strong_patterns = ["UPTREND", "STRONG_TREND", "LIQ_SWEEP", "LATE_REVERSAL"]
         if any(p in strategy_type for p in strong_patterns):
             budget_pct = TradingConfig.STRONG_RISK_PCT
             
@@ -81,7 +81,7 @@ class AlgorithmPortfolio:
     def calculate_bet_size(self, context, strategy_type):
         if not self.is_active: return 0
         budget_pct = TradingConfig.DEFAULT_RISK_PCT
-        strong_patterns = ["UPTREND", "STRONG_TREND", "COBRA", "LIQ_SWEEP", "LATE_REVERSAL"]
+        strong_patterns = ["UPTREND", "STRONG_TREND", "LIQ_SWEEP", "LATE_REVERSAL"]
         if any(p in strategy_type for p in strong_patterns):
             budget_pct = TradingConfig.STRONG_RISK_PCT
             

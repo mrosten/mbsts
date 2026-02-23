@@ -99,6 +99,24 @@ class SniperApp(App):
                     lbl.styles.text_style = "none"
             except: pass
 
+    @on(Input.Changed, "#inp_risk_alloc")
+    def on_risk_alloc_changed(self, event: Input.Changed):
+        try:
+            val = float(event.value)
+            is_live = self.query_one("#cb_live").value
+            if is_live:
+                # User is inputting the RISK AMOUNT (already divided).
+                # set_bankroll expects the TOTAL WALLET balance and divides it by 8.
+                # So we multiply by 8 to reverse it, ensuring the final risk amount matches input.
+                total_implied_wallet = val * TradingConfig.LIVE_RISK_DIVISOR
+                self.risk_manager.set_bankroll(total_implied_wallet, is_live=True)
+            else:
+                self.risk_manager.set_bankroll(val, is_live=False)
+            
+            # Immediately update the UI to reflect the new "B.R."
+            self.update_balance_ui()
+        except: pass
+
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
         lbl_id = event.control.id
@@ -163,7 +181,7 @@ class SniperApp(App):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
@@ -365,13 +383,50 @@ class SniperApp(App):
                 winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
                 self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
                 
-                payout, net_pnl = self.sim_broker.settle_window(winner)
-                
-                for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
-                
-                color = "green" if net_pnl >= 0 else "red"
-                self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
-                self._add_risk_revenue(payout)
+                if self.query_one("#cb_live").value:
+                    # LIVE PNL CALCULATION
+                    total_payout = 0
+                    total_invested = 0
+                    for bet_id, info in self.window_bets.items():
+                        if not info.get("closed"): # Open bets that expired
+                             if info["side"] == winner:
+                                 # We assume 100% payout for winners held to expiry (simplified)
+                                 # In reality, needs redemption, but for PnL tracking we count it.
+                                 payout = info["cost"] / info["entry"] # shares * $1.00
+                                 total_payout += payout
+                             total_invested += info["cost"]
+                        else:
+                             # Closed bets handled by _check_tpsl or last_second_exit logic already added revenue
+                             # But for Net PnL display we need to track them.
+                             # This is complex because revenue was already added. 
+                             # Simpler: Just track what happens at settlement for *remaining* positions?
+                             # Actually, easiest is to trust the SimBroker log for Live Trades if we are logging them there?
+                             # No, SimBroker.settle_window clears shares. LiveBroker doesn't track shares the same way.
+                             pass
+                    
+                    # Better approach: We need to know the *actual* realized PnL from the window.
+                    # Since we add revenue dynamically on Sells, we only need to handle Expiry Payouts here.
+                    expiry_payout = 0
+                    for bet_id, info in list(self.window_bets.items()):
+                        if not info.get("closed") and info["side"] == winner:
+                             # Assume we redeem at $1.00
+                             shares = info["cost"] / info["entry"]
+                             expiry_payout += shares
+                             self.log_msg(f"[bold green]WINNER REDEEM: {shares:.2f} Shares @ $1.00[/]")
+                    
+                    self._add_risk_revenue(expiry_payout)
+                    self.log_msg(f"[bold yellow]💰 Window Revenue: ${expiry_payout:.2f} (Expiry)[/]")
+                    
+                    # Force Balance Refresh on Window Close
+                    try: self.live_broker.update_balance()
+                    except: pass
+
+                else:
+                    # SIMULATION
+                    payout, net_pnl = self.sim_broker.settle_window(winner)
+                    color = "green" if net_pnl >= 0 else "red"
+                    self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
+                    self._add_risk_revenue(payout)
 
 
                 self.risk_manager.reset_window(); self.last_second_exit_triggered = False
@@ -397,6 +452,10 @@ class SniperApp(App):
             if is_new_window:
                 self.log_msg(f"[bold magenta]🔔 NEW WINDOW STARTED[/] | Open: [bold white]${d['opn']:,.2f}[/]")
             
+            # Periodic Live Balance Refresh (every 10s)
+            if self.query_one("#cb_live").value and elapsed % 10 == 0:
+                self.run_worker(self._refresh_live_balance(), thread=True)
+
             self.market_data.update({
                 "btc_price": d["cur"], "btc_open": d["opn"],
                 "up_price": d["poly"]["up_price"], "down_price": d["poly"]["down_price"],
@@ -472,6 +531,12 @@ class SniperApp(App):
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
 
+    async def _refresh_live_balance(self):
+        try:
+            self.live_broker.update_balance()
+            self.call_from_thread(self.update_balance_ui)
+        except: pass
+
     def _check_tpsl(self):
         if not self.query_one("#cb_tp_active").value: return
         try: tp = float(self.query_one("#inp_tp").value)/100; sl = float(self.query_one("#inp_sl").value)/100
@@ -508,7 +573,7 @@ class SniperApp(App):
         
         for side in sides:
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
-            cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
+            cbid = self.market_data["up_bid" if side=="UP" else "down_bid"]
             
             if not is_live:
                 # SIM HYPOTHETICAL LOGGING
@@ -519,8 +584,17 @@ class SniperApp(App):
                     self.call_from_thread(self.log_msg, f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
                 
-            # For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
-            lp = max(0.01, cbid - 0.05) if is_live else 0.0
+            # For LIVE: Determine Limit Price based on winning status
+            # User Request: WINNER -> Strictly 0.99 (Safe, don't dump). LOSER -> 0.02 (Dump).
+            cur_winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
+            
+            if is_live:
+                if side == cur_winner:
+                    lp = 0.99 
+                else:
+                    lp = 0.02
+            else:
+                lp = 0.0
             
             ok, msg = self.trade_executor.execute_sell(is_live, side, tid, lp, cbid, reason="Last Second Exit")
             if ok:
@@ -531,6 +605,8 @@ class SniperApp(App):
                     revenue = float(msg.split("$")[1].split(" ")[0])
                     self._add_risk_revenue(revenue)
                 except: pass
+            else:
+                 self.call_from_thread(self.log_msg, f"[bold red]❌ FINAL EXIT FAIL {side}: {msg}[/]")
 
     def update_timer(self):
         if not self.market_data["start_ts"]: return
@@ -565,9 +641,19 @@ class SniperApp(App):
                  # If wallet is lower than target, bankroll IS the wallet
                  self.risk_manager.risk_bankroll = main_bal
         
-        # 4. Final safety clamp: Never exceed Session Target
+        # 4. STRICT Clamping: Skim EVERYTHING above the target.
         if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
-            self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
+             self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
+        
+        # 4. Final safety clamp: Never exceed Session Target
+        # 4. Final safety clamp: STRICT Clamping to Target
+        # Per user request: Skim EVERYTHING above the target.
+        if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
+             skim_amt = self.risk_manager.risk_bankroll - self.risk_manager.target_bankroll
+             self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
+             # Optional: log skim? self.log_msg(f"Skimmed ${skim_amt:.2f}")
+             
+        # Also ensure we don't drop below target if wallet allows (Refill logic above handles this)
             
         self.update_balance_ui()
 
@@ -613,6 +699,12 @@ class SniperApp(App):
         ok, msg = self.trade_executor.execute_sell(is_l, side, tid, max(0.02, cbid-0.05), cbid, reason="Manual")
         if ok:
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
+            
+            # Mark all bets of this side as CLOSED so they aren't double-counted at window expiry
+            for bet_id, info in self.window_bets.items():
+                if info["side"] == side:
+                    info["closed"] = True
+            
             try: 
                 revenue = float(msg.split("$")[1].split(" ")[0])
                 self._add_risk_revenue(revenue)

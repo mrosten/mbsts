@@ -99,6 +99,20 @@ class SniperApp(App):
                     lbl.styles.text_style = "none"
             except: pass
 
+    @on(Input.Changed, "#inp_risk_alloc")
+    def on_risk_alloc_changed(self, event: Input.Changed):
+        try:
+            val = float(event.value)
+            is_live = self.query_one("#cb_live").value
+            if is_live:
+                total_implied_wallet = val * TradingConfig.LIVE_RISK_DIVISOR
+                self.risk_manager.set_bankroll(total_implied_wallet, is_live=True)
+            else:
+                self.risk_manager.set_bankroll(val, is_live=False)
+            
+            self.update_balance_ui()
+        except: pass
+
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
         lbl_id = event.control.id
@@ -163,7 +177,7 @@ class SniperApp(App):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"15-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
@@ -365,13 +379,31 @@ class SniperApp(App):
                 winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
                 self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
                 
-                payout, net_pnl = self.sim_broker.settle_window(winner)
-                
+                if self.query_one("#cb_live").value:
+                    # LIVE PNL CALCULATION
+                    # Calculate payout from winning bets that were NOT closed early (expired ITM)
+                    expiry_payout = 0
+                    for bet_id, info in self.window_bets.items():
+                        if not info.get("closed") and info["side"] == winner:
+                             # Assume we redeem at $1.00
+                             shares = info["cost"] / info["entry"]
+                             expiry_payout += shares
+                             self.log_msg(f"[bold green]WINNER REDEEM: {shares:.2f} Shares @ $1.00[/]")
+                    
+                    self._add_risk_revenue(expiry_payout)
+                    self.log_msg(f"[bold yellow]💰 Window Revenue: ${expiry_payout:.2f} (Expiry)[/]")
+                    
+                    # Force Balance Refresh on Window Close
+                    try: self.live_broker.update_balance()
+                    except: pass
+                else:
+                    # SIM PNL CALCULATION
+                    payout, net_pnl = self.sim_broker.settle_window(winner)
+                    self.log_msg(f"[bold {'green' if net_pnl >= 0 else 'red'}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
+                    # For Sim, we add revenue if > 0 (though sim broker handles balance internally too, this feeds risk view)
+                    if payout > 0: self._add_risk_revenue(payout)
+                    
                 for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
-                
-                color = "green" if net_pnl >= 0 else "red"
-                self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
-                self._add_risk_revenue(payout)
 
                 self.risk_manager.reset_window(); self.last_second_exit_triggered = False
                 self.update_balance_ui(); self.window_bets.clear()
@@ -469,7 +501,17 @@ class SniperApp(App):
             self.query_one("#p_btc_diff").update(f"Diff: {'+' if df>=0 else '-'}${abs(df):.2f}")
             self.query_one("#p_trend").update(f"Trend 4H: {self.market_data_manager.trend_4h}")
 
+            # Periodic Live Balance Refresh (every 10s)
+            if self.query_one("#cb_live").value and elapsed % 10 == 0:
+                self.run_worker(self._refresh_live_balance(), thread=True)
+
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
+
+    async def _refresh_live_balance(self):
+        try:
+            self.live_broker.update_balance()
+            self.call_from_thread(self.update_balance_ui)
+        except: pass
 
     def _check_tpsl(self):
         if not self.query_one("#cb_tp_active").value: return
@@ -518,8 +560,17 @@ class SniperApp(App):
                     self.call_from_thread(self.log_msg, f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
                 
-            # For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
-            lp = max(0.01, cbid - 0.05)
+            # For LIVE: Determine Limit Price based on winning status
+            # User Request: WINNER -> Strictly 0.99 (Safe, don't dump). LOSER -> 0.02 (Dump).
+            cur_winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
+            
+            if is_live:
+                if side == cur_winner:
+                    lp = 0.99 
+                else:
+                    lp = 0.02
+            else:
+                lp = 0.0
             
             ok, msg = self.trade_executor.execute_sell(is_live, side, tid, lp, cbid, reason="Last Second Exit")
             if ok:
@@ -564,9 +615,10 @@ class SniperApp(App):
                  # If wallet is lower than target, bankroll IS the wallet
                  self.risk_manager.risk_bankroll = main_bal
         
-        # 4. Final safety clamp: Never exceed Session Target
+        # 4. STRICT Clamping: Skim EVERYTHING above the target.
         if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
-            self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
+             skim_amt = self.risk_manager.risk_bankroll - self.risk_manager.target_bankroll
+             self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
             
         self.update_balance_ui()
 
@@ -612,6 +664,12 @@ class SniperApp(App):
         ok, msg = self.trade_executor.execute_sell(is_l, side, tid, max(0.02, cbid-0.05), cbid, reason="Manual")
         if ok:
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
+            
+            # Mark all bets of this side as CLOSED so they aren't double-counted at window expiry
+            for bet_id, info in self.window_bets.items():
+                if info["side"] == side:
+                    info["closed"] = True
+
             try: 
                 revenue = float(msg.split("$")[1].split(" ")[0])
                 self._add_risk_revenue(revenue)

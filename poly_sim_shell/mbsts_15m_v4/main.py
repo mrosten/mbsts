@@ -6,7 +6,7 @@ from .broker import SimBroker, LiveBroker
 from .app import SniperApp
 
 def main():
-    print("\n=== POLYMARKET SNIPER V4 REFACTORED ===")
+    print("\n=== POLYMARKET SNIPER V4 REFACTORED [15 MINUTE VERSION] ===")
     print(f"Running with Python: {sys.executable}")
     
     start_mode = input("Select Mode: (1) Sim Mode [Default], (2) Live Mode: ").strip()
@@ -23,7 +23,11 @@ def main():
     if not os.path.exists("logs"): 
         os.makedirs("logs")
         
-    default_log = f"logs/sim_log_5M_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    # Timeframe is 15M for this version
+    timeframe = "15"
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
+    default_log = f"logs/sim_log_{timeframe}M_{timestamp}.csv"
     log_file = input(f"Enter Log Filename (default: {default_log}): ").strip()
     if not log_file: 
         log_file = default_log

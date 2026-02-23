@@ -305,23 +305,18 @@ class MosheSpecializedScanner(BaseScanner):
     def reset(self): super().reset(); self.checkpoints = {}
     def analyze(self, elapsed, price, open_price, trend_4h, up_p, down_p):
         if self.triggered_signal: return self.triggered_signal
-        leader_p = up_p if price > open_price else down_p
-        drift = abs(price - open_price) / open_price if open_price > 0 else 0
-        if 100 <= elapsed <= 260 and elapsed not in self.checkpoints: self.checkpoints[elapsed] = leader_p
-        if 100 <= elapsed <= 180:
-            times = sorted(self.checkpoints.keys()); recent = [self.checkpoints[t] for t in times if elapsed - t <= 30]
-            if len(recent) >= 3:
-                consec = 0; max_consec = 0
-                for i in range(1, len(recent)):
-                    if recent[i] > recent[i-1]: consec += 1
-                    else: consec = 0
-                    max_consec = max(max_consec, consec)
-                if max_consec >= 3 and (recent[-1] - recent[0]) >= 0.25 and drift > 0.0004 and 0.10 < leader_p < 0.85:
-                    self.triggered_signal = f"MOSHE_STRONG_TREND_{'UP' if price > open_price else 'DOWN'}|Surge Detected"; return self.triggered_signal
-        elif 220 <= elapsed <= 260:
-            if 0.80 <= leader_p <= 0.92 and drift > 0.003:
-                if (price > open_price and trend_4h == "UP") or (price < open_price and trend_4h == "DOWN"):
-                    self.triggered_signal = f"MOSHE_SNIPER_{'UP' if price > open_price else 'DOWN'}|Trend Match"; return self.triggered_signal
+        
+        # User Request: Buy whenever a side reaches 90 cents (0.90)
+        # Risk Manager allocates 12% by default as Moshe is not in "Strong Patterns"
+        
+        if up_p >= 0.90:
+            self.triggered_signal = f"MOSHE_90_UP|High Probability Win > 90c"
+            return self.triggered_signal
+            
+        if down_p >= 0.90:
+            self.triggered_signal = f"MOSHE_90_DOWN|High Probability Win > 90c"
+            return self.triggered_signal
+
         return "WAIT"
 
 class ZScoreBreakoutScanner(BaseScanner):
