@@ -22,6 +22,8 @@ class SniperApp(App):
     CSS = """
     Screen { align: center top; layers: base; }
     #top_bar { dock: top; height: 1; background: $panel; color: $text; content-align: center middle; }
+    #btn_settings { dock: right; border: none; background: transparent; color: #aaaaaa; min-width: 14; height: 1; padding: 0 1; }
+    #btn_settings:hover { color: #ffffff; text-style: bold; }
     #header_stats { width: auto; margin-right: 2; }
     .timer_text { text-style: bold; color: $warning; }
     .run_time { color: #00ffff; margin-left: 2; }
@@ -162,15 +164,23 @@ class SniperApp(App):
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0) for name in self.scanners}
         self.window_bets = {} 
         self.last_second_exit_triggered = False 
+        self.window_settled = False
+        self.mid_window_lockout = False
+        self.saved_sim_bankroll = None
         self.app_start_time = time.time()
         self.time_rem_str = "00:00"
+        
+        # Adjustable global settings
+        self.csv_log_freq = 15
+        self.last_log_dump = 0
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
+            Button("⚙ Settings", id="btn_settings"),
             id="top_bar"
         )
         yield Horizontal(
@@ -331,13 +341,14 @@ class SniperApp(App):
         self.init_web3()
         self.set_interval(1, self.fetch_market_loop)
         self.set_interval(1, self.update_timer)
-        self.set_interval(15, self.dump_state_log)
+        self.set_interval(1, self.check_dump_log)
         if self.start_live_mode:
             self.query_one("#cb_live").value = True 
 
     @on(Checkbox.Changed, "#cb_live")
     def on_live_toggle(self, event: Checkbox.Changed):
         if event.value: 
+            self.saved_sim_bankroll = self.risk_manager.risk_bankroll
             self.log_msg("[bold red]LIVE MODE ENABLED! All Algos deselected for safety.[/]")
             all_cbs = ["#cb_cob", "#cb_fak", "#cb_gri", "#cb_lat", "#cb_liq", "#cb_mea", "#cb_mes", "#cb_mid", "#cb_min", "#cb_mos", "#cb_npa", "#cb_pos", "#cb_rsi", "#cb_sli", "#cb_sta", "#cb_ste", "#cb_tai", "#cb_tra", "#cb_vol", "#cb_zsc"]
             for cid in all_cbs: self.query_one(cid).value = False
@@ -347,9 +358,14 @@ class SniperApp(App):
                 self.risk_manager.set_bankroll(lb, is_live=True)
                 self.risk_initialized = True
         else:
-            sb = self.sim_broker.balance
-            self.query_one("#inp_risk_alloc").value = f"{sb:.2f}"
-            self.risk_manager.set_bankroll(sb, is_live=False)
+            if self.saved_sim_bankroll is not None:
+                self.query_one("#inp_risk_alloc").value = f"{self.saved_sim_bankroll:.2f}"
+                self.risk_manager.risk_bankroll = self.saved_sim_bankroll
+                self.risk_manager.target_bankroll = self.saved_sim_bankroll
+            else:
+                sb = self.sim_broker.balance
+                self.query_one("#inp_risk_alloc").value = f"{sb:.2f}"
+                self.risk_manager.set_bankroll(sb, is_live=False)
             self.risk_initialized = True
 
     def log_msg(self, msg):
@@ -368,6 +384,12 @@ class SniperApp(App):
     def dump_state_log(self):
         is_live = self.query_one("#cb_live").value
         self.sim_broker.log_snapshot(self.market_data, self.time_rem_str, is_live, self.live_broker.balance, self.risk_manager.risk_bankroll)
+
+    def check_dump_log(self):
+        now = time.time()
+        if now - self.last_log_dump >= self.csv_log_freq:
+            self.last_log_dump = now
+            self.dump_state_log()
 
     @work(exclusive=True, thread=True)
     def init_web3(self):
@@ -417,27 +439,22 @@ class SniperApp(App):
                     self.risk_initialized = True
                 except: pass
             is_new_window = False
-            if self.market_data["start_ts"] != 0 and ts_start != self.market_data["start_ts"]:
+            is_first_tick = (self.market_data["start_ts"] == 0)
+            
+            if not is_first_tick and ts_start != self.market_data["start_ts"]:
                 is_new_window = True
-                winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
-                self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
-                
-                payout, net_pnl = self.sim_broker.settle_window(winner)
-                
-                for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
-                
-                color = "green" if net_pnl >= 0 else "red"
-                self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
-                self._add_risk_revenue(payout)
-
-
-                self.risk_manager.reset_window(); self.last_second_exit_triggered = False
-                self.update_balance_ui(); self.window_bets.clear()
-                for s in self.scanners.values(): s.reset()
-                self.market_data_manager.reset_history()
+                self.window_settled = False # reset latch for new window
+                if self.mid_window_lockout:
+                    self.mid_window_lockout = False
+                    self.log_msg("[bold green]Lockout Lifted. Clean Window Started. Trading Enabled.[/]")
 
             self.market_data["start_ts"] = ts_start
             elapsed = int(now.timestamp()) - ts_start
+            
+            # Mid-Window Safety Lockout Activation
+            if is_first_tick and elapsed > 10:
+                self.mid_window_lockout = True
+                self.log_msg(f"[bold yellow]Booted Mid-Round ({elapsed}s elapsed). Waiting for next clean window to start trading...[/]")
             slug = f"btc-updown-5m-{ts_start}"
             
             # Direct sync fetcher for background data gathering
@@ -470,68 +487,69 @@ class SniperApp(App):
 
             scanner_map = {"NPattern":"#cb_npa","Fakeout":"#cb_fak","TailWag":"#cb_tai","RSI":"#cb_rsi","TrapCandle":"#cb_tra","MidGame":"#cb_mid","LateReversal":"#cb_lat","BullFlag":"#cb_sta","PostPump":"#cb_pos","StepClimber":"#cb_ste","Slingshot":"#cb_sli","MinOne":"#cb_min","Liquidity":"#cb_liq","Cobra":"#cb_cob","Mesa":"#cb_mes","MeanReversion":"#cb_mea","GrindSnap":"#cb_gri","VolCheck":"#cb_vol","Moshe":"#cb_mos","ZScore":"#cb_zsc"}
             
-            for name, sc in self.scanners.items():
-                if not self.query_one(scanner_map[name]).value: continue
-                res = "WAIT"
-                if name == "NPattern": res = sc.analyze(ph, d["opn"])
-                elif name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
-                elif name == "TailWag": res = sc.analyze(300-elapsed, 0, 1000, "UP" if d["poly"]["up_bid"]>d["poly"]["down_bid"] else "DOWN", d["cur"], ph)
-                elif name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
-                elif name == "TrapCandle": res = sc.analyze(ph, d["opn"])
-                elif name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
-                elif name == "LateReversal": res = sc.analyze(ph, d["opn"], elapsed)
-                elif name == "BullFlag": res = sc.analyze(d["c60"])
-                elif name == "PostPump": res = sc.analyze(d["cur"], d["opn"], {})
-                elif name == "StepClimber": res = sc.analyze(d["c60"])
-                elif name == "Slingshot": res = sc.analyze(d["c60"])
-                elif name == "MinOne": res = sc.analyze(ph, elapsed)
-                elif name == "Liquidity": res = sc.analyze(d["cur"], min(d["l60"]) if d["l60"] else 0, d["opn"])
-                elif name == "Cobra": res = sc.analyze(d["c60"], d["cur"], elapsed)
-                elif name == "Mesa": res = sc.analyze(ph, d["opn"], elapsed)
-                elif name == "MeanReversion": res = sc.analyze(ph, fbb, self.market_data_manager.trend_4h)
-                elif name == "GrindSnap": res = sc.analyze(ph, elapsed)
-                elif name == "VolCheck": res = sc.analyze(d["c60"], d["cur"], d["opn"], elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                elif name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                elif name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
+            if not self.mid_window_lockout:
+                for name, sc in self.scanners.items():
+                    if not self.query_one(scanner_map[name]).value: continue
+                    res = "WAIT"
+                    if name == "NPattern": res = sc.analyze(ph, d["opn"])
+                    elif name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
+                    elif name == "TailWag": res = sc.analyze(300-elapsed, 0, 1000, "UP" if d["poly"]["up_bid"]>d["poly"]["down_bid"] else "DOWN", d["cur"], ph)
+                    elif name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
+                    elif name == "TrapCandle": res = sc.analyze(ph, d["opn"])
+                    elif name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
+                    elif name == "LateReversal": res = sc.analyze(ph, d["opn"], elapsed)
+                    elif name == "BullFlag": res = sc.analyze(d["c60"])
+                    elif name == "PostPump": res = sc.analyze(d["cur"], d["opn"], {})
+                    elif name == "StepClimber": res = sc.analyze(d["c60"])
+                    elif name == "Slingshot": res = sc.analyze(d["c60"])
+                    elif name == "MinOne": res = sc.analyze(ph, elapsed)
+                    elif name == "Liquidity": res = sc.analyze(d["cur"], min(d["l60"]) if d["l60"] else 0, d["opn"])
+                    elif name == "Cobra": res = sc.analyze(d["c60"], d["cur"], elapsed)
+                    elif name == "Mesa": res = sc.analyze(ph, d["opn"], elapsed)
+                    elif name == "MeanReversion": res = sc.analyze(ph, fbb, self.market_data_manager.trend_4h)
+                    elif name == "GrindSnap": res = sc.analyze(ph, elapsed)
+                    elif name == "VolCheck": res = sc.analyze(d["c60"], d["cur"], d["opn"], elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
 
-                if res and "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
-                    if self.query_one("#cb_one_trade").value and self.window_bets: continue
-                    
-                    # Apply Min Diff filter
-                    try: min_diff = float(self.query_one("#inp_min_diff").value)
-                    except: min_diff = 0.0
-                    if min_diff > 0:
-                        diff = abs(d["cur"] - d["opn"])
-                        if diff < min_diff:
-                            self.log_msg(f"[dim]SKIP {name} | Diff ${diff:.2f} < Min ${min_diff:.0f}[/]")
-                            continue
-                            
-                    bs = self.risk_manager.calculate_bet_size(str(res), self.portfolios[name].balance, self.portfolios[name].consecutive_losses, {'trend_4h':self.market_data_manager.trend_4h, 'direction':"UP" if "UP" in str(res) else "DOWN"})
-                    if bs > 0:
-                        sd = "UP" if "UP" in str(res) else "DOWN"
-                        pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                    if res and "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
+                        if self.query_one("#cb_one_trade").value and self.window_bets: continue
                         
-                        # Override execution price for Moshe Limit Buys
-                        if "MOSHE_90" in str(res):
-                            pr = 0.90
-                            self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Executing Limit Buy at $0.90")
+                        # Apply Min Diff filter
+                        try: min_diff = float(self.query_one("#inp_min_diff").value)
+                        except: min_diff = 0.0
+                        if min_diff > 0:
+                            diff = abs(d["cur"] - d["opn"])
+                            if diff < min_diff:
+                                self.log_msg(f"[dim]SKIP {name} | Diff ${diff:.2f} < Min ${min_diff:.0f}[/]")
+                                continue
+                                
+                        bs = self.risk_manager.calculate_bet_size(str(res), self.portfolios[name].balance, self.portfolios[name].consecutive_losses, {'trend_4h':self.market_data_manager.trend_4h, 'direction':"UP" if "UP" in str(res) else "DOWN"})
+                        if bs > 0:
+                            sd = "UP" if "UP" in str(res) else "DOWN"
+                            pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                             
-                        if pr and 0.01 < pr < 0.99:
-                            is_l = self.query_one("#cb_live").value
-                            
-                            # Build Context for Validated Logging
-                            ctx = {
-                                'signal_price': d["cur"],
-                                'rsi':rsi,
-                                'trend': self.market_data_manager.trend_4h,
-                                'risk_bal': self.risk_manager.risk_bankroll
-                            }
-                            
-                            ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=res)
-                            if ok:
-                                self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
-                                self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
-                                self.log_msg(f"[bold green]EXECUTED {name}[/]: {msg}")
+                            # Override execution price for Moshe Limit Buys
+                            if "MOSHE_90" in str(res):
+                                pr = 0.90
+                                self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Executing Limit Buy at $0.90")
+                                
+                            if pr and 0.01 < pr < 0.99:
+                                is_l = self.query_one("#cb_live").value
+                                
+                                # Build Context for Validated Logging
+                                ctx = {
+                                    'signal_price': d["cur"],
+                                    'rsi':rsi,
+                                    'trend': self.market_data_manager.trend_4h,
+                                    'risk_bal': self.risk_manager.risk_bankroll
+                                }
+                                
+                                ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=res)
+                                if ok:
+                                    self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
+                                    self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
+                                    self.log_msg(f"[bold green]EXECUTED {name}[/]: {msg}")
 
             self._check_tpsl()
             self.update_balance_ui(); self.update_sell_buttons()
@@ -613,8 +631,31 @@ class SniperApp(App):
         if rem <= 8 and not self.last_second_exit_triggered:
             self.last_second_exit_triggered = True
             self.run_worker(self._run_last_second_exit(self.query_one("#cb_live").value), thread=True)
+            
+        # Trigger Settlement precisely on the exact dot of the 59th second
+        if rem <= 1 and not self.window_settled:
+            self.window_settled = True
+            self.trigger_settlement()
+            
         run = int(time.time() - self.app_start_time)
         self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d}")
+
+    def trigger_settlement(self):
+        if self.market_data["start_ts"] == 0: return
+        winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
+        self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
+        
+        payout, net_pnl = self.sim_broker.settle_window(winner)
+        for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
+        
+        color = "green" if net_pnl >= 0 else "red"
+        self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
+        self._add_risk_revenue(payout)
+
+        self.risk_manager.reset_window(); self.last_second_exit_triggered = False
+        self.update_balance_ui(); self.window_bets.clear()
+        for s in self.scanners.values(): s.reset()
+        self.market_data_manager.reset_history()
 
     def _add_risk_revenue(self, amount):
         """Adds revenue back to the usable bankroll with strict wallet and target clamping."""
@@ -646,7 +687,9 @@ class SniperApp(App):
 
     async def on_button_pressed(self, event: Button.Pressed):
         bid = event.button.id
-        if "btn_buy_" in bid: 
+        if bid == "btn_settings":
+            self.push_screen(GlobalSettingsModal(self))
+        elif "btn_buy_" in bid: 
             await self.trigger_buy("UP" if "_up" in bid else "DOWN")
         elif "btn_sell_" in bid:
             await self.trigger_sell_all("UP" if "_up" in bid else "DOWN")
@@ -694,6 +737,65 @@ class SniperApp(App):
 
 from textual.screen import ModalScreen
 from .scanners import ALGO_INFO
+
+from textual.widgets import Static
+
+class GlobalSettingsModal(ModalScreen):
+    """A modal that shows global settings like CSV log frequency."""
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #00ffff]Global Settings[/]", id="modal_title")
+            with Horizontal(id="modal_csv_freq"):
+                yield Label("CSV Log Freq (s):", id="lbl_csv_freq")
+                yield Input(placeholder="15", id="inp_csv_freq")
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        
+        container = self.query_one("#modal_container")
+        container.styles.background = "#222222"
+        container.styles.border = ("thick", "#00ffff")
+        container.styles.padding = (1, 2)
+        container.styles.width = 40
+        container.styles.height = "auto"
+        container.styles.align = ("center", "middle")
+        
+        self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.width = "100%"
+        
+        row = self.query_one("#modal_csv_freq")
+        row.styles.height = 3
+        row.styles.align = ("center", "middle")
+        row.styles.margin = (0, 0, 2, 0)
+        
+        self.query_one("#inp_csv_freq").styles.width = 10
+        self.query_one("#lbl_csv_freq").styles.margin = (1, 1, 0, 0)
+        
+        if self.main_app and hasattr(self.main_app, "csv_log_freq"):
+            self.query_one("#inp_csv_freq").value = str(self.main_app.csv_log_freq)
+
+        footer = self.query_one("#modal_footer")
+        footer.styles.height = "auto"
+        footer.styles.align = ("center", "middle")
+        footer.styles.width = "100%"
+
+    @on(Button.Pressed, "#btn_modal_close")
+    def close_modal(self):
+        if self.main_app:
+            try:
+                freq = int(self.query_one("#inp_csv_freq").value)
+                if freq > 0:
+                    self.main_app.csv_log_freq = freq
+            except Exception:
+                pass
+        self.dismiss()
 
 from textual.widgets import Static
 
