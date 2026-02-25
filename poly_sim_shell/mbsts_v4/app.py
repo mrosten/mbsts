@@ -132,6 +132,10 @@ class SniperApp(App):
         self.market_data = self.market_data_manager.market_data 
         self.risk_initialized = False 
         
+        self.console_log_file = self.sim_broker.log_file.replace(".csv", "_console.txt")
+        with open(self.console_log_file, "w", encoding="utf-8") as f:
+            f.write("=== POLYMARKET SNIPER V4 CONSOLE LOG ===\n")
+        
         self.scanners = {
             "NPattern": NPatternScanner(),
             "Fakeout": FakeoutScanner(),
@@ -266,6 +270,49 @@ class SniperApp(App):
         )
         yield RichLog(id="log_window", highlight=True, markup=True)
 
+    @on(Input.Submitted)
+    def on_input_submitted(self, event: Input.Submitted):
+        # Ignore changes from the Sim Bal display field
+        if event.input.id == "inp_sim_bal": return
+        
+        # Determine human-readable names for the logs
+        labels = {
+            "inp_amount": "Bet Size",
+            "inp_risk_alloc": "Risk Bankroll",
+            "inp_tp": "Take Profit %",
+            "inp_sl": "Stop Loss %",
+            "inp_min_diff": "Min BTC Diff",
+            "inp_min_price": "Min Option Price",
+            "inp_max_price": "Max Option Price"
+        }
+        
+        name = labels.get(event.input.id, event.input.id)
+        val = event.input.value
+        
+        # Only log if there's actually a value typed
+        if val:
+            # If the user changed the Bankroll input box, explicitly set the trading core to use this value
+            if event.input.id == "inp_risk_alloc":
+                try:
+                    new_br = float(val)
+                    is_live = self.query_one("#cb_live").value
+                    max_allowed = self.live_broker.balance if is_live else self.sim_broker.balance
+                    
+                    if new_br > max_allowed:
+                        self.log_msg(f"[bold red]Admin Error:[/] Cannot set Bankroll to ${new_br:.2f} (Max balance is ${max_allowed:.2f})")
+                        # Visually revert the input field to the max allowed so they know what happened
+                        event.input.value = f"{max_allowed:.2f}"
+                        self.risk_manager.risk_bankroll = max_allowed
+                        self.risk_manager.target_bankroll = max_allowed
+                    else:
+                        self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]${new_br:.2f}[/]")
+                        self.risk_manager.risk_bankroll = new_br
+                        self.risk_manager.target_bankroll = new_br
+                except ValueError:
+                    pass
+            else:
+                self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}[/]")
+
     async def on_mount(self):
         self.log_msg(f"Simulation Started. Bal: ${self.sim_broker.balance}")
         def_risk = self.sim_broker.balance
@@ -306,7 +353,17 @@ class SniperApp(App):
             self.risk_initialized = True
 
     def log_msg(self, msg):
-        self.query_one(RichLog).write(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        self.query_one(RichLog).write(f"[{timestamp}] {msg}")
+        
+        # Strip simple rich tags like [bold red] or [/]
+        import re
+        clean_msg = re.sub(r'\[.*?\]', '', msg)
+        
+        try:
+            with open(self.console_log_file, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {clean_msg}\n")
+        except: pass
 
     def dump_state_log(self):
         is_live = self.query_one("#cb_live").value
@@ -656,17 +713,18 @@ class AlgoInfoModal(ModalScreen):
             
             # Additional settings for specific algorithms
             if self.algo_id == "MOS":
-                with Horizontal(id="modal_settings_row"):
-                    yield Label("Active Window (t-x to t-y):", id="lbl_mos_window")
-                    yield Input(placeholder="Start", id="inp_mos_start")
-                    yield Label("to", id="lbl_mos_to")
-                    yield Input(placeholder="End", id="inp_mos_end")
-                with Horizontal(id="modal_diff_row"):
-                    yield Label("Min Diff Curve ($):", id="lbl_mos_diff")
-                    yield Input(placeholder="Start Diff", id="inp_mos_diff_start")
-                    yield Label("to", id="lbl_mos_diff_to")
-                    yield Input(placeholder="End Diff", id="inp_mos_diff_end")
-                    
+                with Horizontal(id="modal_mos_pt1"):
+                    yield Label("Pt1 (T / D$):", id="lbl_mos_pt1")
+                    yield Input(placeholder="Time 1", id="inp_mos_t1")
+                    yield Input(placeholder="Diff 1", id="inp_mos_d1")
+                with Horizontal(id="modal_mos_pt2"):
+                    yield Label("Pt2 (T / D$):", id="lbl_mos_pt2")
+                    yield Input(placeholder="Time 2", id="inp_mos_t2")
+                    yield Input(placeholder="Diff 2", id="inp_mos_d2")
+                with Horizontal(id="modal_mos_pt3"):
+                    yield Label("Pt3 (T / D$):", id="lbl_mos_pt3")
+                    yield Input(placeholder="Time 3", id="inp_mos_t3")
+                    yield Input(placeholder="Diff 3", id="inp_mos_d3")
             with Horizontal(id="modal_footer"):
                 yield Button("CLOSE/SAVE", id="close_btn", variant="primary")
 
@@ -691,34 +749,24 @@ class AlgoInfoModal(ModalScreen):
         self.query_one("#modal_body").styles.width = "100%"
 
         if self.algo_id == "MOS":
-            mr = self.query_one("#modal_settings_row")
-            mr.styles.height = 3
-            mr.styles.align = ("center", "middle")
-            mr.styles.margin = (0, 0, 1, 0)
-            mr.styles.border = ("ascii", "#333333")
+            for row_id in ["#modal_mos_pt1", "#modal_mos_pt2", "#modal_mos_pt3"]:
+                row = self.query_one(row_id)
+                row.styles.height = 3
+                row.styles.align = ("center", "middle")
+                row.styles.margin = (0, 0, 1, 0)
+                row.styles.border = ("ascii", "#333333")
             
-            i_start = self.query_one("#inp_mos_start")
-            i_end = self.query_one("#inp_mos_end")
-            i_start.styles.width = 10
-            i_end.styles.width = 10
-            
-            dr = self.query_one("#modal_diff_row")
-            dr.styles.height = 3
-            dr.styles.align = ("center", "middle")
-            dr.styles.margin = (0, 0, 1, 0)
-            dr.styles.border = ("ascii", "#333333")
-            
-            d_start = self.query_one("#inp_mos_diff_start")
-            d_end = self.query_one("#inp_mos_diff_end")
-            d_start.styles.width = 10
-            d_end.styles.width = 10
+            for inp_id in ["#inp_mos_t1", "#inp_mos_d1", "#inp_mos_t2", "#inp_mos_d2", "#inp_mos_t3", "#inp_mos_d3"]:
+                self.query_one(inp_id).styles.width = 10
             
             if self.main_app and "Moshe" in self.main_app.scanners:
                 moshe = self.main_app.scanners["Moshe"]
-                if hasattr(moshe, "time_rem_start"): i_start.value = str(moshe.time_rem_start)
-                if hasattr(moshe, "time_rem_end"): i_end.value = str(moshe.time_rem_end)
-                if hasattr(moshe, "diff_start"): d_start.value = str(moshe.diff_start)
-                if hasattr(moshe, "diff_end"): d_end.value = str(moshe.diff_end)
+                if hasattr(moshe, "t1"): self.query_one("#inp_mos_t1").value = str(moshe.t1)
+                if hasattr(moshe, "d1"): self.query_one("#inp_mos_d1").value = str(moshe.d1)
+                if hasattr(moshe, "t2"): self.query_one("#inp_mos_t2").value = str(moshe.t2)
+                if hasattr(moshe, "d2"): self.query_one("#inp_mos_d2").value = str(moshe.d2)
+                if hasattr(moshe, "t3"): self.query_one("#inp_mos_t3").value = str(moshe.t3)
+                if hasattr(moshe, "d3"): self.query_one("#inp_mos_d3").value = str(moshe.d3)
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -729,13 +777,20 @@ class AlgoInfoModal(ModalScreen):
     def close_modal(self):
         if self.algo_id == "MOS" and self.main_app and "Moshe" in self.main_app.scanners:
             moshe = self.main_app.scanners["Moshe"]
-            try: moshe.time_rem_start = int(self.query_one("#inp_mos_start").value)
-            except: getattr(moshe, "time_rem_start", None)
-            try: moshe.time_rem_end = int(self.query_one("#inp_mos_end").value)
-            except: getattr(moshe, "time_rem_end", None)
-            try: moshe.diff_start = float(self.query_one("#inp_mos_diff_start").value)
-            except: getattr(moshe, "diff_start", None)
-            try: moshe.diff_end = float(self.query_one("#inp_mos_diff_end").value)
-            except: getattr(moshe, "diff_end", None)
+            
+            try: moshe.t1 = int(self.query_one("#inp_mos_t1").value)
+            except: getattr(moshe, "t1", None)
+            try: moshe.d1 = float(self.query_one("#inp_mos_d1").value)
+            except: getattr(moshe, "d1", None)
+            
+            try: moshe.t2 = int(self.query_one("#inp_mos_t2").value)
+            except: getattr(moshe, "t2", None)
+            try: moshe.d2 = float(self.query_one("#inp_mos_d2").value)
+            except: getattr(moshe, "d2", None)
+            
+            try: moshe.t3 = int(self.query_one("#inp_mos_t3").value)
+            except: getattr(moshe, "t3", None)
+            try: moshe.d3 = float(self.query_one("#inp_mos_d3").value)
+            except: getattr(moshe, "d3", None)
             
         self.dismiss()

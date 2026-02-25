@@ -302,41 +302,56 @@ class MosheSpecializedScanner(BaseScanner):
     def __init__(self):
         super().__init__()
         self.checkpoints = {}
-        self.time_rem_start = 300 # User inputs e.g. 90
-        self.time_rem_end = 0     # User inputs e.g. 20
-        self.diff_start = 0.0     # Min Diff at start of window
-        self.diff_end = 0.0       # Min Diff at end of window
+        # 3-Point Time Remaining and Min Diff Curve
+        self.t1 = 290; self.d1 = 200.0
+        self.t2 = 120; self.d2 = 60.0
+        self.t3 = 20;  self.d3 = 15.0
         
     def reset(self): super().reset(); self.checkpoints = {}
     
     def analyze(self, elapsed, price, open_price, trend_4h, up_p, down_p):
         if self.triggered_signal: return self.triggered_signal
         
-        # UI Setting Filter: Block if outside the user-defined time window
         time_rem = 300 - elapsed
-        if time_rem > self.time_rem_start or time_rem < self.time_rem_end:
-            return "WAIT"
+        
+        # Check if we have a valid 3-point sequence defined
+        has_curve = (self.t1 > 0 or self.t2 > 0 or self.t3 > 0)
+        
+        if has_curve:
+            # Block if time remaining is outside the outer boundaries (t1 to t3)
+            # Assuming standard input where t1 is highest, t3 is lowest remaining time
+            if time_rem > max(self.t1, self.t2, self.t3) or time_rem < min(self.t1, self.t2, self.t3):
+                return "WAIT"
+                
+            required_diff = 0.0
             
-        # Min Diff Curve Filter
-        if self.diff_start > 0 or self.diff_end > 0:
-            window_duration = max(1, self.time_rem_start - self.time_rem_end)
-            progress = (self.time_rem_start - time_rem) / window_duration
-            progress = max(0.0, min(1.0, progress)) # Clamp between 0 and 1
-            
-            # Linear interpolation: required_diff = start + (end - start) * progress
-            required_diff = self.diff_start + ((self.diff_end - self.diff_start) * progress)
+            # Phase 1: Between T1 and T2
+            if time_rem <= self.t1 and time_rem >= self.t2 and self.t1 > self.t2:
+                window_duration = self.t1 - self.t2
+                progress = (self.t1 - time_rem) / window_duration
+                required_diff = self.d1 + ((self.d2 - self.d1) * progress)
+                
+            # Phase 2: Between T2 and T3
+            elif time_rem <= self.t2 and time_rem >= self.t3 and self.t2 > self.t3:
+                window_duration = self.t2 - self.t3
+                progress = (self.t2 - time_rem) / window_duration
+                required_diff = self.d2 + ((self.d3 - self.d2) * progress)
+                
+            # Ensure price difference meets the interpolated curve calculation
             actual_diff = abs(price - open_price)
             if actual_diff < required_diff:
                 return "WAIT"
+        # Ensure actual_diff is calculated for logging
+        actual_diff = abs(price - open_price)
         
-        # User Request: Buy 12% whenever a side reaches 90 to 93 cents
-        # Note: Risk manager defaults Moshe to 12% already
-        if 0.90 <= up_p <= 0.93:
-            self.triggered_signal = f"BET_UP_MOSHE_90|High Probability Win 90c-93c"
+        # User Request: Buy 12% whenever a side reaches >= 90 cents
+        # Removed the 0.93 artificial ceiling to prevent missing massive spikes
+        if 0.90 <= up_p < 1.0:
+            self.triggered_signal = f"BET_UP_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
             
-        if 0.90 <= down_p <= 0.93:
-            self.triggered_signal = f"BET_DOWN_MOSHE_90|High Probability Win 90c-93c"
+        if 0.90 <= down_p < 1.0:
+            self.triggered_signal = f"BET_DOWN_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
 
         return "WAIT"
