@@ -280,7 +280,7 @@ class GrindSnapScanner(BaseScanner):
         if grind_move > 0 and any(p > p_snap_start for p in recent_30s): return "WAIT_FAILED_HOLD"
         elif grind_move < 0 and any(p < p_snap_start for p in recent_30s): return "WAIT_FAILED_HOLD"
         if abs(snap_move / grind_move) > 0.60:
-            self.triggered_signal = f"BET_{'DOWN' if grind_move > 0 else 'UP'}_SNAP|Grind Snapped"; return self.triggered_signal
+             self.triggered_signal = f"BET_{'DOWN' if grind_move > 0 else 'UP'}_SNAP|Grind Snapped"; return self.triggered_signal
         return "WAIT"
 
 class VolCheckScanner(BaseScanner):
@@ -302,19 +302,41 @@ class MosheSpecializedScanner(BaseScanner):
     def __init__(self):
         super().__init__()
         self.checkpoints = {}
+        self.time_rem_start = 300 # User inputs e.g. 90
+        self.time_rem_end = 0     # User inputs e.g. 20
+        self.diff_start = 0.0     # Min Diff at start of window
+        self.diff_end = 0.0       # Min Diff at end of window
+        
     def reset(self): super().reset(); self.checkpoints = {}
+    
     def analyze(self, elapsed, price, open_price, trend_4h, up_p, down_p):
         if self.triggered_signal: return self.triggered_signal
         
-        # User Request: Buy whenever a side reaches 90 cents (0.90)
-        # Risk Manager allocates 12% by default as Moshe is not in "Strong Patterns"
+        # UI Setting Filter: Block if outside the user-defined time window
+        time_rem = 300 - elapsed
+        if time_rem > self.time_rem_start or time_rem < self.time_rem_end:
+            return "WAIT"
+            
+        # Min Diff Curve Filter
+        if self.diff_start > 0 or self.diff_end > 0:
+            window_duration = max(1, self.time_rem_start - self.time_rem_end)
+            progress = (self.time_rem_start - time_rem) / window_duration
+            progress = max(0.0, min(1.0, progress)) # Clamp between 0 and 1
+            
+            # Linear interpolation: required_diff = start + (end - start) * progress
+            required_diff = self.diff_start + ((self.diff_end - self.diff_start) * progress)
+            actual_diff = abs(price - open_price)
+            if actual_diff < required_diff:
+                return "WAIT"
         
-        if up_p >= 0.90:
-            self.triggered_signal = f"MOSHE_90_UP|High Probability Win > 90c"
+        # User Request: Buy 12% whenever a side reaches 90 to 93 cents
+        # Note: Risk manager defaults Moshe to 12% already
+        if 0.90 <= up_p <= 0.93:
+            self.triggered_signal = f"BET_UP_MOSHE_90|High Probability Win 90c-93c"
             return self.triggered_signal
             
-        if down_p >= 0.90:
-            self.triggered_signal = f"MOSHE_90_DOWN|High Probability Win > 90c"
+        if 0.90 <= down_p <= 0.93:
+            self.triggered_signal = f"BET_DOWN_MOSHE_90|High Probability Win 90c-93c"
             return self.triggered_signal
 
         return "WAIT"

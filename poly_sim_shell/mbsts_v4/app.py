@@ -99,24 +99,6 @@ class SniperApp(App):
                     lbl.styles.text_style = "none"
             except: pass
 
-    @on(Input.Changed, "#inp_risk_alloc")
-    def on_risk_alloc_changed(self, event: Input.Changed):
-        try:
-            val = float(event.value)
-            is_live = self.query_one("#cb_live").value
-            if is_live:
-                # User is inputting the RISK AMOUNT (already divided).
-                # set_bankroll expects the TOTAL WALLET balance and divides it by 8.
-                # So we multiply by 8 to reverse it, ensuring the final risk amount matches input.
-                total_implied_wallet = val * TradingConfig.LIVE_RISK_DIVISOR
-                self.risk_manager.set_bankroll(total_implied_wallet, is_live=True)
-            else:
-                self.risk_manager.set_bankroll(val, is_live=False)
-            
-            # Immediately update the UI to reflect the new "B.R."
-            self.update_balance_ui()
-        except: pass
-
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
         lbl_id = event.control.id
@@ -124,7 +106,7 @@ class SniperApp(App):
             code = lbl_id[4:].upper()
             info = ALGO_INFO.get(code)
             if info:
-                self.push_screen(AlgoInfoModal(code, info['name'], info['desc']))
+                self.push_screen(AlgoInfoModal(code, info['name'], info['desc'], main_app=self))
                 event.stop()
 
     @on(Button.Pressed, "#btn_algo_all")
@@ -181,7 +163,7 @@ class SniperApp(App):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
@@ -383,50 +365,13 @@ class SniperApp(App):
                 winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
                 self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
                 
-                if self.query_one("#cb_live").value:
-                    # LIVE PNL CALCULATION
-                    total_payout = 0
-                    total_invested = 0
-                    for bet_id, info in self.window_bets.items():
-                        if not info.get("closed"): # Open bets that expired
-                             if info["side"] == winner:
-                                 # We assume 100% payout for winners held to expiry (simplified)
-                                 # In reality, needs redemption, but for PnL tracking we count it.
-                                 payout = info["cost"] / info["entry"] # shares * $1.00
-                                 total_payout += payout
-                             total_invested += info["cost"]
-                        else:
-                             # Closed bets handled by _check_tpsl or last_second_exit logic already added revenue
-                             # But for Net PnL display we need to track them.
-                             # This is complex because revenue was already added. 
-                             # Simpler: Just track what happens at settlement for *remaining* positions?
-                             # Actually, easiest is to trust the SimBroker log for Live Trades if we are logging them there?
-                             # No, SimBroker.settle_window clears shares. LiveBroker doesn't track shares the same way.
-                             pass
-                    
-                    # Better approach: We need to know the *actual* realized PnL from the window.
-                    # Since we add revenue dynamically on Sells, we only need to handle Expiry Payouts here.
-                    expiry_payout = 0
-                    for bet_id, info in list(self.window_bets.items()):
-                        if not info.get("closed") and info["side"] == winner:
-                             # Assume we redeem at $1.00
-                             shares = info["cost"] / info["entry"]
-                             expiry_payout += shares
-                             self.log_msg(f"[bold green]WINNER REDEEM: {shares:.2f} Shares @ $1.00[/]")
-                    
-                    self._add_risk_revenue(expiry_payout)
-                    self.log_msg(f"[bold yellow]💰 Window Revenue: ${expiry_payout:.2f} (Expiry)[/]")
-                    
-                    # Force Balance Refresh on Window Close
-                    try: self.live_broker.update_balance()
-                    except: pass
-
-                else:
-                    # SIMULATION
-                    payout, net_pnl = self.sim_broker.settle_window(winner)
-                    color = "green" if net_pnl >= 0 else "red"
-                    self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
-                    self._add_risk_revenue(payout)
+                payout, net_pnl = self.sim_broker.settle_window(winner)
+                
+                for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
+                
+                color = "green" if net_pnl >= 0 else "red"
+                self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
+                self._add_risk_revenue(payout)
 
 
                 self.risk_manager.reset_window(); self.last_second_exit_triggered = False
@@ -452,10 +397,6 @@ class SniperApp(App):
             if is_new_window:
                 self.log_msg(f"[bold magenta]🔔 NEW WINDOW STARTED[/] | Open: [bold white]${d['opn']:,.2f}[/]")
             
-            # Periodic Live Balance Refresh (every 10s)
-            if self.query_one("#cb_live").value and elapsed % 10 == 0:
-                self.run_worker(self._refresh_live_balance(), thread=True)
-
             self.market_data.update({
                 "btc_price": d["cur"], "btc_open": d["opn"],
                 "up_price": d["poly"]["up_price"], "down_price": d["poly"]["down_price"],
@@ -498,10 +439,26 @@ class SniperApp(App):
 
                 if res and "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
                     if self.query_one("#cb_one_trade").value and self.window_bets: continue
+                    
+                    # Apply Min Diff filter
+                    try: min_diff = float(self.query_one("#inp_min_diff").value)
+                    except: min_diff = 0.0
+                    if min_diff > 0:
+                        diff = abs(d["cur"] - d["opn"])
+                        if diff < min_diff:
+                            self.log_msg(f"[dim]SKIP {name} | Diff ${diff:.2f} < Min ${min_diff:.0f}[/]")
+                            continue
+                            
                     bs = self.risk_manager.calculate_bet_size(str(res), self.portfolios[name].balance, self.portfolios[name].consecutive_losses, {'trend_4h':self.market_data_manager.trend_4h, 'direction':"UP" if "UP" in str(res) else "DOWN"})
                     if bs > 0:
                         sd = "UP" if "UP" in str(res) else "DOWN"
                         pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                        
+                        # Override execution price for Moshe Limit Buys
+                        if "MOSHE_90" in str(res):
+                            pr = 0.90
+                            self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Executing Limit Buy at $0.90")
+                            
                         if pr and 0.01 < pr < 0.99:
                             is_l = self.query_one("#cb_live").value
                             
@@ -530,12 +487,6 @@ class SniperApp(App):
             self.query_one("#p_trend").update(f"Trend 4H: {self.market_data_manager.trend_4h}")
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
-
-    async def _refresh_live_balance(self):
-        try:
-            self.live_broker.update_balance()
-            self.call_from_thread(self.update_balance_ui)
-        except: pass
 
     def _check_tpsl(self):
         if not self.query_one("#cb_tp_active").value: return
@@ -573,7 +524,7 @@ class SniperApp(App):
         
         for side in sides:
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
-            cbid = self.market_data["up_bid" if side=="UP" else "down_bid"]
+            cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
             
             if not is_live:
                 # SIM HYPOTHETICAL LOGGING
@@ -584,17 +535,8 @@ class SniperApp(App):
                     self.call_from_thread(self.log_msg, f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
                 
-            # For LIVE: Determine Limit Price based on winning status
-            # User Request: WINNER -> Strictly 0.99 (Safe, don't dump). LOSER -> 0.02 (Dump).
-            cur_winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
-            
-            if is_live:
-                if side == cur_winner:
-                    lp = 0.99 
-                else:
-                    lp = 0.02
-            else:
-                lp = 0.0
+            # For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
+            lp = max(0.01, cbid - 0.05) if is_live else 0.0
             
             ok, msg = self.trade_executor.execute_sell(is_live, side, tid, lp, cbid, reason="Last Second Exit")
             if ok:
@@ -605,8 +547,6 @@ class SniperApp(App):
                     revenue = float(msg.split("$")[1].split(" ")[0])
                     self._add_risk_revenue(revenue)
                 except: pass
-            else:
-                 self.call_from_thread(self.log_msg, f"[bold red]❌ FINAL EXIT FAIL {side}: {msg}[/]")
 
     def update_timer(self):
         if not self.market_data["start_ts"]: return
@@ -641,19 +581,9 @@ class SniperApp(App):
                  # If wallet is lower than target, bankroll IS the wallet
                  self.risk_manager.risk_bankroll = main_bal
         
-        # 4. STRICT Clamping: Skim EVERYTHING above the target.
-        if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
-             self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
-        
         # 4. Final safety clamp: Never exceed Session Target
-        # 4. Final safety clamp: STRICT Clamping to Target
-        # Per user request: Skim EVERYTHING above the target.
         if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
-             skim_amt = self.risk_manager.risk_bankroll - self.risk_manager.target_bankroll
-             self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
-             # Optional: log skim? self.log_msg(f"Skimmed ${skim_amt:.2f}")
-             
-        # Also ensure we don't drop below target if wallet allows (Refill logic above handles this)
+            self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
             
         self.update_balance_ui()
 
@@ -699,12 +629,6 @@ class SniperApp(App):
         ok, msg = self.trade_executor.execute_sell(is_l, side, tid, max(0.02, cbid-0.05), cbid, reason="Manual")
         if ok:
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
-            
-            # Mark all bets of this side as CLOSED so they aren't double-counted at window expiry
-            for bet_id, info in self.window_bets.items():
-                if info["side"] == side:
-                    info["closed"] = True
-            
             try: 
                 revenue = float(msg.split("$")[1].split(" ")[0])
                 self._add_risk_revenue(revenue)
@@ -718,18 +642,33 @@ from textual.widgets import Static
 
 class AlgoInfoModal(ModalScreen):
     """A modal that shows algo details."""
-    def __init__(self, name, full_name, description):
+    def __init__(self, name, full_name, description, main_app=None):
         super().__init__()
         self.algo_id = name
         self.full_name = full_name
         self.description = description
+        self.main_app = main_app
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
             yield Static(f"[bold cyan]{self.algo_id}[/] - {self.full_name}", id="modal_title")
             yield Static(self.description, id="modal_body")
+            
+            # Additional settings for specific algorithms
+            if self.algo_id == "MOS":
+                with Horizontal(id="modal_settings_row"):
+                    yield Label("Active Window (t-x to t-y):", id="lbl_mos_window")
+                    yield Input(placeholder="Start", id="inp_mos_start")
+                    yield Label("to", id="lbl_mos_to")
+                    yield Input(placeholder="End", id="inp_mos_end")
+                with Horizontal(id="modal_diff_row"):
+                    yield Label("Min Diff Curve ($):", id="lbl_mos_diff")
+                    yield Input(placeholder="Start Diff", id="inp_mos_diff_start")
+                    yield Label("to", id="lbl_mos_diff_to")
+                    yield Input(placeholder="End Diff", id="inp_mos_diff_end")
+                    
             with Horizontal(id="modal_footer"):
-                yield Button("CLOSE", id="close_btn", variant="primary")
+                yield Button("CLOSE/SAVE", id="close_btn", variant="primary")
 
     def on_mount(self):
         # Center the modal on screen
@@ -751,6 +690,36 @@ class AlgoInfoModal(ModalScreen):
         self.query_one("#modal_body").styles.text_align = "center"
         self.query_one("#modal_body").styles.width = "100%"
 
+        if self.algo_id == "MOS":
+            mr = self.query_one("#modal_settings_row")
+            mr.styles.height = 3
+            mr.styles.align = ("center", "middle")
+            mr.styles.margin = (0, 0, 1, 0)
+            mr.styles.border = ("ascii", "#333333")
+            
+            i_start = self.query_one("#inp_mos_start")
+            i_end = self.query_one("#inp_mos_end")
+            i_start.styles.width = 10
+            i_end.styles.width = 10
+            
+            dr = self.query_one("#modal_diff_row")
+            dr.styles.height = 3
+            dr.styles.align = ("center", "middle")
+            dr.styles.margin = (0, 0, 1, 0)
+            dr.styles.border = ("ascii", "#333333")
+            
+            d_start = self.query_one("#inp_mos_diff_start")
+            d_end = self.query_one("#inp_mos_diff_end")
+            d_start.styles.width = 10
+            d_end.styles.width = 10
+            
+            if self.main_app and "Moshe" in self.main_app.scanners:
+                moshe = self.main_app.scanners["Moshe"]
+                if hasattr(moshe, "time_rem_start"): i_start.value = str(moshe.time_rem_start)
+                if hasattr(moshe, "time_rem_end"): i_end.value = str(moshe.time_rem_end)
+                if hasattr(moshe, "diff_start"): d_start.value = str(moshe.diff_start)
+                if hasattr(moshe, "diff_end"): d_end.value = str(moshe.diff_end)
+
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
         footer.styles.align = ("center", "middle")
@@ -758,4 +727,15 @@ class AlgoInfoModal(ModalScreen):
 
     @on(Button.Pressed, "#close_btn")
     def close_modal(self):
+        if self.algo_id == "MOS" and self.main_app and "Moshe" in self.main_app.scanners:
+            moshe = self.main_app.scanners["Moshe"]
+            try: moshe.time_rem_start = int(self.query_one("#inp_mos_start").value)
+            except: getattr(moshe, "time_rem_start", None)
+            try: moshe.time_rem_end = int(self.query_one("#inp_mos_end").value)
+            except: getattr(moshe, "time_rem_end", None)
+            try: moshe.diff_start = float(self.query_one("#inp_mos_diff_start").value)
+            except: getattr(moshe, "diff_start", None)
+            try: moshe.diff_end = float(self.query_one("#inp_mos_diff_end").value)
+            except: getattr(moshe, "diff_end", None)
+            
         self.dismiss()

@@ -1,6 +1,9 @@
 import time
 import requests
 import json
+import asyncio
+import threading
+import websockets
 from .config import TradingConfig
 
 def calculate_rsi(prices, period=14):
@@ -39,8 +42,53 @@ class MarketDataManager:
         self.last_4h_update = 0
         self.first_update = True
         
+        # Live WebSocket Price variables
+        self.live_price = 0.0
+        self.last_ws_update = 0
+        self.ws_thread = threading.Thread(target=self._start_ws_thread, daemon=True)
+        self.ws_thread.start()
+        
+    def _start_ws_thread(self):
+        """Initializes a new event loop for the background WebSocket connection."""
+        time.sleep(1) # Allow Textual UI time to mount before processing
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._kraken_ws_loop())
+
+    async def _kraken_ws_loop(self):
+        """Maintains a continuous WebSocket connection to Kraken for real-time BTC/USD pricing."""
+        uri = "wss://ws.kraken.com/"
+        while True:
+            try:
+                self.log("[cyan]Connecting to Kraken WebSocket...[/]")
+                async with websockets.connect(uri) as ws:
+                    self.log("[green]Kraken WebSocket Connected.[/]")
+                    subscribe_message = {
+                        "event": "subscribe",
+                        "pair": ["XBT/USD"],
+                        "subscription": {"name": "ticker"}
+                    }
+                    await ws.send(json.dumps(subscribe_message))
+
+                    while True:
+                        response = await ws.recv()
+                        data = json.loads(response)
+                        
+                        if isinstance(data, list) and len(data) > 1 and 'ticker' in data:
+                            ticker_payload = data[1]
+                            if 'c' in ticker_payload:
+                                self.live_price = float(ticker_payload['c'][0])
+                                self.last_ws_update = time.time()
+            except Exception as e:
+                self.log(f"[yellow]Kraken WS Disconnected: {e}. Reconnecting in 3s...[/]")
+                await asyncio.sleep(3)
+
     def log(self, msg):
-        self.logger(msg)
+        try:
+            if self.logger:
+                self.logger(msg)
+        except Exception:
+            pass # Failsafe if the UI thread is not ready to receive logs
 
     def update_4h_trend(self):
         if (time.time() - self.last_4h_update) < 900: return
@@ -62,35 +110,31 @@ class MarketDataManager:
             r = requests.get("https://api.binance.com/api/v3/klines", params={"symbol":"BTCUSDT","interval":"1m","limit":200}, timeout=3)
             r.raise_for_status()
             data = r.json()
-            # Returns: Close prices, Low prices, High prices, and the full OHLC for index matching
             return [float(x[4]) for x in data], [float(x[3]) for x in data], [float(x[2]) for x in data], data
         except Exception as e:
             self.log(f"[yellow]Warn: candles Fetch Failed: {e}[/]")
             return [], [], [], []
 
     def fetch_current_price(self):
-        # 1. Try Kraken (Closest to Polymarket Match)
-        try:
-            r = requests.get("https://api.kraken.com/0/public/Ticker?pair=XBTUSD", timeout=1).json()
-            return float(r['result']['XXBTZUSD']['c'][0])
-        except: pass
+        # 1. Primary: Live Kraken WebSocket Price (Must be fresh < 5 seconds)
+        if self.live_price > 0 and (time.time() - self.last_ws_update) < 5:
+            return self.live_price
 
-        # 2. Try Chainlink (Oracle Price)
+        # 2. Secondary: Chainlink Oracle Backup
         if self.chainlink_contract:
             try:
                 price = self.chainlink_contract.functions.latestAnswer().call()
-                return float(price) / 10**8 # BTC/USD on Chainlink has 8 decimals
+                return float(price) / 10**8 
             except: pass
 
-        # 3. Fallback to Binance (Real-time Exchange Price)
+        # 3. Tertiary: Binance REST Fallback
         try:
             r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
             return float(r['price'])
         except Exception: 
-            return self.market_data["btc_price"] 
+            return self.market_data.get("btc_price", 0)
 
     def fetch_oracle_price(self):
-        """Specifically fetches the Chainlink Oracle price for drift check."""
         if self.chainlink_contract:
             try:
                 price = self.chainlink_contract.functions.latestAnswer().call()
@@ -102,24 +146,19 @@ class MarketDataManager:
         self.price_history = []
 
     def update_history(self, curr_price, start_ts, elapsed):
-        # If we just started mid-window and have no history, try to find the actual open price
         if self.first_update and not self.price_history and elapsed > 5:
             self.first_update = False
             try:
-                # Fetch Kraken OHLC (1-min intervals) to find the open
-                # Kraken returns [time, open, high, low, close, vwap, vol, count]
-                # We need "since" parameter roughly around start_ts
                 r = requests.get("https://api.kraken.com/0/public/OHLC", 
                                  params={"pair":"XBTUSD", "interval":1, "since":start_ts-60}, 
                                  timeout=2).json()
                 
-                # Find the candle that matches our start_ts exactly
                 if 'result' in r and 'XXBTZUSD' in r['result']:
                     candles = r['result']['XXBTZUSD']
                     target_candle = next((c for c in candles if int(c[0]) == start_ts), None)
                     
                     if target_candle:
-                        open_p = float(target_candle[1]) # Index 1 is Open
+                        open_p = float(target_candle[1]) 
                         self.price_history.append({'timestamp': start_ts, 'elapsed': 0, 'price': open_p})
                         self.log(f"[cyan]Fixed Mid-Window Start: Found Kraken Open @ ${open_p:,.2f}[/]")
             except:

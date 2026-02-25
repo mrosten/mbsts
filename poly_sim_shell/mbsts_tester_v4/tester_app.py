@@ -503,9 +503,14 @@ class TesterApp(App):
         poly_price = tick.get('UP_Bid' if direction == "UP" else 'DN_Bid', 0.5)
         if poly_price <= 0: poly_price = 0.5 
         
-        # Risk Mitigation: Don't buy if odds are too poor (e.g. > $0.85)
-        # High poly_price = low payout. Buying at 0.85 requires 85%+ win rate to break even.
-        MAX_POLY_PRICE = 0.85
+        # Override execution price to exactly 0.90 if it's the Moshe algorithm
+        if algo_name == "Moshe":
+            poly_price = 0.90
+            self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Executing at limit price: $0.90 (Tick was ${tick.get('UP_Bid' if direction == 'UP' else 'DN_Bid', 0):.2f})")
+        
+        # Risk Mitigation: Don't buy if odds are too poor (e.g. > $0.95)
+        # High poly_price = low payout. Buying at 0.95 requires 95%+ win rate to break even.
+        MAX_POLY_PRICE = 0.95
         if poly_price > MAX_POLY_PRICE:
             self.log_msg(f"[dim]SKIPPED {algo_name}[/] | Price too high: ${poly_price:.2f}")
             return
