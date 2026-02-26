@@ -105,6 +105,7 @@ class TrapCandleScanner(BaseScanner):
 class MidGameScanner(BaseScanner):
     def analyze(self, price_history, open_price, elapsed, trend_4h):
         if self.triggered_signal: return self.triggered_signal
+        if not price_history: return "WAIT"
         if trend_4h == "UP": return "WAIT_TREND_MISMATCH"
         if elapsed < 100: return "WAIT_TIME"
         crossed_up = any(x['price'] > open_price for x in price_history if 100 <= x['elapsed'] <= 200)
@@ -117,6 +118,7 @@ class MidGameScanner(BaseScanner):
 class LateReversalScanner(BaseScanner):
     def analyze(self, price_history, open_price, elapsed):
         if self.triggered_signal: return self.triggered_signal
+        if not price_history: return "WAIT"
         if elapsed < 220: return "WAIT_TIME"
         early_low = min([x['price'] for x in price_history if x['elapsed'] < 140], default=open_price)
         if early_low >= open_price * 0.999: return "WAIT_NO_DROP"
@@ -230,6 +232,7 @@ class MesaCollapseScanner(BaseScanner):
     def reset(self): super().reset(); self.state = "SEARCHING"; self.mesa_floor = None; self.pump_start_time = None
     def analyze(self, price_history, open_price, elapsed):
         if self.triggered_signal: return self.triggered_signal
+        if not price_history: return "WAIT"
         if elapsed < 60: return "WAIT_TIME"
         current_price = price_history[-1]['price']
         if self.state == "SEARCHING":
@@ -267,6 +270,7 @@ class MeanReversionScanner(BaseScanner):
 class GrindSnapScanner(BaseScanner):
     def analyze(self, price_history, elapsed):
         if self.triggered_signal: return self.triggered_signal
+        if not price_history: return "WAIT"
         if elapsed < 130: return "WAIT_TIME"
         p_now = price_history[-1]['price']
         p_snap_end = next((x['price'] for x in reversed(price_history) if x['elapsed'] <= (elapsed - 10)), None)
@@ -303,9 +307,10 @@ class MosheSpecializedScanner(BaseScanner):
         super().__init__()
         self.checkpoints = {}
         # 3-Point Time Remaining and Min Diff Curve
-        self.t1 = 290; self.d1 = 200.0
-        self.t2 = 120; self.d2 = 60.0
-        self.t3 = 20;  self.d3 = 15.0
+        self.bet_size = 2.0
+        self.t1 = 290; self.d1 = 2000.0
+        self.t2 = 80; self.d2 = 80.0
+        self.t3 = 15;  self.d3 = 25.0
         
     def reset(self): super().reset(); self.checkpoints = {}
     
@@ -344,13 +349,13 @@ class MosheSpecializedScanner(BaseScanner):
         # Ensure actual_diff is calculated for logging
         actual_diff = abs(price - open_price)
         
-        # User Request: Buy 12% whenever a side reaches >= 90 cents
-        # Removed the 0.93 artificial ceiling to prevent missing massive spikes
-        if 0.90 <= up_p < 1.0:
+        # User Request: Buy when a side reaches >= 86 cents (Target Lim $0.90)
+        # Removed the artificial ceiling to prevent missing massive spikes
+        if 0.86 <= up_p < 1.0:
             self.triggered_signal = f"BET_UP_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
             
-        if 0.90 <= down_p < 1.0:
+        if 0.86 <= down_p < 1.0:
             self.triggered_signal = f"BET_DOWN_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
 
@@ -359,6 +364,7 @@ class MosheSpecializedScanner(BaseScanner):
 class ZScoreBreakoutScanner(BaseScanner):
     def analyze(self, price_history, open_price, elapsed):
         if self.triggered_signal: return self.triggered_signal
+        if not price_history: return "WAIT"
         if elapsed < 220: return "WAIT_TIME"
         early_data = self.get_price_slice(price_history, 0, 220)
         if not early_data: return "WAIT"

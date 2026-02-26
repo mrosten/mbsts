@@ -79,6 +79,12 @@ class SniperApp(App):
     #cb_live > .toggle--button { color: $surface; background: #550000; }
     #cb_live.-on > .toggle--button { color: #ffffff; background: #ff0000; }
     
+    #live_row { align: left middle; }
+    #inp_cmd { width: 1fr; margin: 0 4; background: #111111; border: none; color: #00ffff; text-align: left; min-width: 20; padding: 0 1; }
+    
+    /* Blinking Animation for Pending Trades */
+    .blinking { text-style: bold; color: yellow; }
+    
     /* Deprecated styling */
     .deprecated_lbl { color: #555555; }
     
@@ -137,7 +143,7 @@ class SniperApp(App):
         
         self.console_log_file = self.sim_broker.log_file.replace(".csv", "_console.txt")
         with open(self.console_log_file, "w", encoding="utf-8") as f:
-            f.write("=== POLYMARKET SNIPER V4 CONSOLE LOG ===\n")
+            f.write("=== POLYMARKET SNIPER V5 CONSOLE LOG ===\n")
         
         self.scanners = {
             "NPattern": NPatternScanner(),
@@ -164,6 +170,7 @@ class SniperApp(App):
         
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0) for name in self.scanners}
         self.window_bets = {} 
+        self.pending_bets = {}
         self.last_second_exit_triggered = False 
         self.window_settled = False
         self.mid_window_lockout = False
@@ -177,7 +184,7 @@ class SniperApp(App):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"15-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
@@ -275,6 +282,7 @@ class SniperApp(App):
         )
         yield Horizontal(
             Checkbox("LIVE MODE", value=False, id="cb_live"),
+            Input(placeholder="Command: e.g., lo=false", id="inp_cmd"),
             Button("⚙ Settings", id="btn_settings"),
             id="live_row",
             classes="live_row"
@@ -283,6 +291,20 @@ class SniperApp(App):
 
     @on(Input.Submitted)
     def on_input_submitted(self, event: Input.Submitted):
+        # Handle command input first
+        if event.input.id == "inp_cmd":
+            cmd = event.input.value.strip().lower()
+            if cmd == "lo=false":
+                if self.mid_window_lockout:
+                    self.mid_window_lockout = False
+                    self.log_msg("[bold green]Admin Command:[/] Mid-window lockout CANCELLED. Trading Enabled.")
+                else:
+                    self.log_msg("[dim]Admin Command:[/] Lockout was not active.")
+            elif cmd:
+                self.log_msg(f"[yellow]Unknown Command:[/] {cmd}")
+            event.input.value = ""
+            return
+            
         # Ignore changes from the Sim Bal display field
         if event.input.id == "inp_sim_bal": return
         
@@ -412,10 +434,10 @@ class SniperApp(App):
         lbl = self.query_one("#header_stats")
         cap_display = f" (B.R.: ${self.risk_manager.risk_bankroll:.2f})" if self.risk_initialized else ""
         if is_live:
-            lbl.update(f"[bold red]15-LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
+            lbl.update(f"[bold red]5-LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
             lbl.classes = "live_mode"
         else:
-            lbl.update(f"15-SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
+            lbl.update(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
             lbl.classes = ""
 
     def update_sell_buttons(self):
@@ -431,7 +453,7 @@ class SniperApp(App):
 
     async def fetch_market_loop(self):
         try:
-            now = datetime.now(timezone.utc); floor = (now.minute // 15) * 15
+            now = datetime.now(timezone.utc); floor = (now.minute // 5) * 5
             ts_start = int(now.replace(minute=floor, second=0, microsecond=0).timestamp())
             if not self.risk_initialized:
                 try:
@@ -446,6 +468,15 @@ class SniperApp(App):
                 is_new_window = True
                 self.window_settled = False # reset latch for new window
                 self.last_second_exit_triggered = False # reset latch for late exits
+                self.pending_bets.clear() # clear pending bets on new window
+                
+                # Reset all blinking UI
+                for name in ALGO_INFO:
+                    try:
+                        lbl = self.query_one(f"#lbl_{name.lower()}")
+                        lbl.remove_class("blinking")
+                    except: pass
+                    
                 if self.mid_window_lockout:
                     self.mid_window_lockout = False
                     self.log_msg("[bold green]Lockout Lifted. Clean Window Started. Trading Enabled.[/]")
@@ -458,7 +489,7 @@ class SniperApp(App):
             if is_first_tick and elapsed > 10:
                 self.mid_window_lockout = True
                 self.log_msg(f"[bold yellow]Booted Mid-Round ({elapsed}s elapsed). Waiting for next clean window to start trading...[/]")
-            slug = f"btc-updown-15m-{ts_start}"
+            slug = f"btc-updown-5m-{ts_start}"
             
             import concurrent.futures
 
@@ -499,6 +530,41 @@ class SniperApp(App):
             fbb = calculate_bb([p['price'] for p in ph[-20:]]) if len(ph) >= 20 else (0,0,0)
 
             scanner_map = {"NPattern":"#cb_npa","Fakeout":"#cb_fak","TailWag":"#cb_tai","RSI":"#cb_rsi","TrapCandle":"#cb_tra","MidGame":"#cb_mid","LateReversal":"#cb_lat","BullFlag":"#cb_sta","PostPump":"#cb_pos","StepClimber":"#cb_ste","Slingshot":"#cb_sli","MinOne":"#cb_min","Liquidity":"#cb_liq","Cobra":"#cb_cob","Mesa":"#cb_mes","MeanReversion":"#cb_mea","GrindSnap":"#cb_gri","VolCheck":"#cb_vol","Moshe":"#cb_mos","ZScore":"#cb_zsc"}
+            
+            # --- Check Pending Bets First ---
+            if not self.mid_window_lockout:
+                try: min_pr = float(self.query_one("#inp_min_price").value)
+                except: min_pr = 0.01
+                try: max_pr = float(self.query_one("#inp_max_price").value)
+                except: max_pr = 0.99
+                
+                for name, info in list(self.pending_bets.items()):
+                    # Re-check price logic
+                    sd = info["side"]
+                    bs = info["bs"]
+                    res = info["res"]
+                    pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                    
+                    if min_pr <= pr <= max_pr:
+                        # Execution criteria met!
+                        is_l = self.query_one("#cb_live").value
+                        ctx = {'signal_price': d["cur"], 'rsi': rsi, 'trend': self.market_data_manager.trend_4h, 'risk_bal': self.risk_manager.risk_bankroll}
+                        
+                        ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=f"Pending: {res}")
+                        if ok:
+                            self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
+                            self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
+                            self.log_msg(f"[bold green]EXECUTED PENDING {name}[/]: {msg}")
+                        else:
+                            self.log_msg(f"[bold red]FAILED PENDING {name}[/]: {msg}")
+                            
+                        # Cleanup pending state regardless of result
+                        del self.pending_bets[name]
+                        try:
+                            lbl = self.query_one(f"#lbl_{name[:3].lower()}")
+                            lbl.remove_class("blinking")
+                        except: pass
+            # --------------------------------
             
             if not self.mid_window_lockout:
                 for name, sc in self.scanners.items():
@@ -549,7 +615,16 @@ class SniperApp(App):
                             except: max_pr = 0.99
                             
                             if pr < min_pr or pr > max_pr:
-                                self.log_msg(f"[dim]SKIP {name} | Price {pr*100:.1f}¢ out of bounds ({min_pr*100:.1f}¢ - {max_pr*100:.1f}¢)[/]")
+                                if pr < min_pr and name not in self.pending_bets:
+                                    # Too cheap -> queue as waiting order
+                                    self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
+                                    try:
+                                        lbl = self.query_one(f"#lbl_{name[:3].lower()}")
+                                        lbl.add_class("blinking")
+                                    except: pass
+                                    self.log_msg(f"[dim]QUEUED {name} | Waiting for price {min_pr*100:.1f}¢ (Now {pr*100:.1f}¢)[/]")
+                                elif pr > max_pr:
+                                    self.log_msg(f"[dim]SKIP {name} | Price {pr*100:.1f}¢ too high (Max {max_pr*100:.1f}¢)[/]")
                                 continue
                             
                             # Override execution price for Moshe Limit Buys

@@ -133,6 +133,7 @@ class SniperApp(App):
         self.trade_executor = TradeExecutor(sim_broker, live_broker, self.risk_manager)
         self.market_data = self.market_data_manager.market_data 
         self.risk_initialized = False 
+        self.last_second_exit_triggered = False
         
         self.console_log_file = self.sim_broker.log_file.replace(".csv", "_console.txt")
         with open(self.console_log_file, "w", encoding="utf-8") as f:
@@ -180,7 +181,6 @@ class SniperApp(App):
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
-            Button("⚙ Settings", id="btn_settings"),
             id="top_bar"
         )
         yield Horizontal(
@@ -275,6 +275,7 @@ class SniperApp(App):
         )
         yield Horizontal(
             Checkbox("LIVE MODE", value=False, id="cb_live"),
+            Button("⚙ Settings", id="btn_settings"),
             id="live_row",
             classes="live_row"
         )
@@ -411,10 +412,10 @@ class SniperApp(App):
         lbl = self.query_one("#header_stats")
         cap_display = f" (B.R.: ${self.risk_manager.risk_bankroll:.2f})" if self.risk_initialized else ""
         if is_live:
-            lbl.update(f"[bold red]LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
+            lbl.update(f"[bold red]5-LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
             lbl.classes = "live_mode"
         else:
-            lbl.update(f"SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
+            lbl.update(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
             lbl.classes = ""
 
     def update_sell_buttons(self):
@@ -444,12 +445,14 @@ class SniperApp(App):
             if not is_first_tick and ts_start != self.market_data["start_ts"]:
                 is_new_window = True
                 self.window_settled = False # reset latch for new window
+                self.last_second_exit_triggered = False # reset latch for late exits
                 if self.mid_window_lockout:
                     self.mid_window_lockout = False
                     self.log_msg("[bold green]Lockout Lifted. Clean Window Started. Trading Enabled.[/]")
 
-            self.market_data["start_ts"] = ts_start
+            # Calculate correct elapsed time using the actual window start
             elapsed = int(now.timestamp()) - ts_start
+            self.market_data["start_ts"] = ts_start
             
             # Mid-Window Safety Lockout Activation
             if is_first_tick and elapsed > 10:
@@ -457,19 +460,29 @@ class SniperApp(App):
                 self.log_msg(f"[bold yellow]Booted Mid-Round ({elapsed}s elapsed). Waiting for next clean window to start trading...[/]")
             slug = f"btc-updown-5m-{ts_start}"
             
-            # Direct sync fetcher for background data gathering
-            def sync_fetch():
-                self.market_data_manager.update_4h_trend()
-                c60, l60, h60, _ = self.market_data_manager.fetch_candles_60m()
-                cur = self.market_data_manager.fetch_current_price()
-                opn = self.market_data_manager.update_history(cur, ts_start, elapsed)
-                poly = self.market_data_manager.fetch_polymarket(slug)
-                return {"c60":c60, "l60":l60, "h60":h60, "cur":cur, "opn":opn, "poly":poly}
+            import concurrent.futures
 
-            d = await asyncio.to_thread(sync_fetch)
-
+            # Fetch Kraken Open Price instantly to avoid API lag from other services
+            cur = await asyncio.to_thread(self.market_data_manager.fetch_current_price)
+            opn = await asyncio.to_thread(self.market_data_manager.update_history, cur, ts_start, elapsed)
+            
             if is_new_window:
-                self.log_msg(f"[bold magenta]🔔 NEW WINDOW STARTED[/] | Open: [bold white]${d['opn']:,.2f}[/]")
+                if self.query_one("#cb_live").value:
+                    self.live_broker.update_balance()
+                self.log_msg(f"[bold magenta]🔔 NEW WINDOW STARTED[/] | Open: [bold white]${opn:,.2f}[/]")
+
+            def gather_rest():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    f1 = executor.submit(self.market_data_manager.update_4h_trend)
+                    f2 = executor.submit(self.market_data_manager.fetch_candles_60m)
+                    f3 = executor.submit(self.market_data_manager.fetch_polymarket, slug)
+                    f1.result() # trend is just an internal state update
+                    return f2.result(), f3.result()
+
+            candles, poly = await asyncio.to_thread(gather_rest)
+            c60, l60, h60, _ = candles
+            
+            d = {"c60":c60, "l60":l60, "h60":h60, "cur":cur, "opn":opn, "poly":poly}
             
             self.market_data.update({
                 "btc_price": d["cur"], "btc_open": d["opn"],
@@ -529,11 +542,30 @@ class SniperApp(App):
                             sd = "UP" if "UP" in str(res) else "DOWN"
                             pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                             
+                            # Apply Option Price Bounds
+                            try: min_pr = float(self.query_one("#inp_min_price").value)
+                            except: min_pr = 0.01
+                            try: max_pr = float(self.query_one("#inp_max_price").value)
+                            except: max_pr = 0.99
+                            
+                            if pr < min_pr or pr > max_pr:
+                                self.log_msg(f"[dim]SKIP {name} | Price {pr*100:.1f}¢ out of bounds ({min_pr*100:.1f}¢ - {max_pr*100:.1f}¢)[/]")
+                                continue
+                            
                             # Override execution price for Moshe Limit Buys
                             if "MOSHE_90" in str(res):
-                                pr = 0.90
-                                self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Executing Limit Buy at $0.90")
-                                
+                                pr = 0.86 
+                                moshe_scanner = self.scanners.get("Moshe")
+                                bs = getattr(moshe_scanner, "bet_size", 1.00)
+                                if bs > self.risk_manager.risk_bankroll:
+                                    bs = self.risk_manager.risk_bankroll
+                                    if bs > 0:
+                                        self.log_msg(f"[yellow]MOSHE RESIZED[/] Bankroll capping bet to ${bs:.2f}")
+                                if bs <= 0.05:
+                                    self.log_msg(f"[red]MOSHE SKIPPED[/] Insufficient Risk Bankroll (${self.risk_manager.risk_bankroll:.2f}).")
+                                    continue
+                                self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Hit 0.86! Placing ${bs:.2f} Market Buy (Lim 0.99).")
+                               
                             if pr and 0.01 < pr < 0.99:
                                 is_l = self.query_one("#cb_live").value
                                 
@@ -550,6 +582,8 @@ class SniperApp(App):
                                     self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
                                     self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
                                     self.log_msg(f"[bold green]EXECUTED {name}[/]: {msg}")
+                                else:
+                                    self.log_msg(f"[bold red]FAILED {name}[/]: {msg}")
 
             self._check_tpsl()
             self.update_balance_ui(); self.update_sell_buttons()
@@ -584,9 +618,9 @@ class SniperApp(App):
                     self.log_msg(f"[bold yellow]⚡ {reason} | Closed {side} @ {cur*100:.1f}¢[/]")
                     info["closed"] = True
                     try: 
-                        # Extract revenue from msg: "Sold X shares for $Y.ZZ (Reason)"
-                        revenue = float(msg.split("$")[1].split(" ")[0])
-                        self._add_risk_revenue(revenue)
+                        # Extract revenue from msg: "✅ LIVE SOLD DOWN: 3.48 Shares @ $0.99 (Total: $3.45)"
+                        revenue = float(msg.split("Total: $")[1].split(")")[0]) if "Total: $" in msg else 0.0
+                        if revenue > 0: self._add_risk_revenue(revenue)
                     except: pass
 
     async def _run_last_second_exit(self, is_live):
@@ -607,30 +641,35 @@ class SniperApp(App):
                 if shares > 0:
                     revenue = shares * cbid
                     # "If we were live we would sell X shares of winning side at 99c right now..."
-                    self.call_from_thread(self.log_msg, f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
+                    self.log_msg(f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
                 
-            # For LIVE: Sell at slightly below Bid to ensure fill (Limit Order)
-            lp = max(0.01, cbid - 0.05) if is_live else 0.0
+            # For LIVE: User requested strict resting limit order at $0.99
+            lp = 0.99 if is_live else 0.0
             
-            ok, msg = self.trade_executor.execute_sell(is_live, side, tid, lp, cbid, reason="Last Second Exit")
+            
+            # Execute synchronously in a background thread to prevent UI lockup 
+            ok, msg = await asyncio.to_thread(self.trade_executor.execute_sell, is_live, side, tid, lp, cbid, "Last Second Exit")
             if ok:
-                self.call_from_thread(self.log_msg, f"[bold {'red' if is_live else 'green'}]⏱ FINAL EXIT {side}: {msg}[/]")
+                self.log_msg(f"[bold {'red' if is_live else 'green'}]⏱ FINAL EXIT {side}: {msg}[/]")
                 for info in self.window_bets.values(): 
                     if info["side"] == side: info["closed"] = True
                 try: 
-                    revenue = float(msg.split("$")[1].split(" ")[0])
-                    self._add_risk_revenue(revenue)
+                    # Extract revenue from msg: "✅ LIVE SOLD DOWN: 3.48 Shares @ $0.99 (Total: $3.45)"
+                    revenue = float(msg.split("Total: $")[1].split(")")[0]) if "Total: $" in msg else 0.0
+                    if revenue > 0: self._add_risk_revenue(revenue)
                 except: pass
+            else:
+                self.log_msg(f"[bold red]⏱ FINAL EXIT {side} FAILED:[/] {msg}")
 
-    def update_timer(self):
+    async def update_timer(self):
         if not self.market_data["start_ts"]: return
         rem = max(0, TradingConfig.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
         self.time_rem_str = f"{rem//60:02d}:{rem%60:02d}"
         self.query_one("#lbl_timer_big").update(self.time_rem_str)
-        if rem <= 8 and not self.last_second_exit_triggered:
+        if rem <= 1 and not self.last_second_exit_triggered:
             self.last_second_exit_triggered = True
-            self.run_worker(self._run_last_second_exit(self.query_one("#cb_live").value), thread=True)
+            await self._run_last_second_exit(self.query_one("#cb_live").value)
             
         # Trigger Settlement precisely on the exact dot of the 59th second
         if rem <= 1 and not self.window_settled:
@@ -671,18 +710,9 @@ class SniperApp(App):
         if self.risk_manager.risk_bankroll > main_bal:
             self.risk_manager.risk_bankroll = main_bal
 
-        # 3. Refill Logic: If we are below target, check if general balance allows for replenishment
-        if self.risk_manager.risk_bankroll < self.risk_manager.target_bankroll:
-            if main_bal >= self.risk_manager.target_bankroll:
-                 self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
-            else:
-                 # If wallet is lower than target, bankroll IS the wallet
-                 self.risk_manager.risk_bankroll = main_bal
-        
-        # 4. Final safety clamp: Never exceed Session Target
+        # 3. Final safety clamp: Never exceed Session Target
         if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
-            self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
-            
+            self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll            
         self.update_balance_ui()
 
     async def on_button_pressed(self, event: Button.Pressed):
@@ -720,6 +750,9 @@ class SniperApp(App):
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
             if self.risk_initialized: self.risk_manager.register_bet(val)
             self.window_bets[f"Manual_{time.time()}"] = {"side":side,"entry":pr or 0.5,"cost":val}
+        else:
+            self.log_msg(f"[bold red]MANUAL BUY FAILED:[/] {msg}")
+            
         self.update_balance_ui(); self.update_sell_buttons()
 
     async def trigger_sell_all(self, side):
@@ -733,6 +766,9 @@ class SniperApp(App):
                 revenue = float(msg.split("$")[1].split(" ")[0])
                 self._add_risk_revenue(revenue)
             except: pass
+        else:
+            self.log_msg(f"[bold red]MANUAL SELL FAILED:[/] {msg}")
+            
         self.update_balance_ui(); self.update_sell_buttons()
 
 from textual.screen import ModalScreen
@@ -815,6 +851,9 @@ class AlgoInfoModal(ModalScreen):
             
             # Additional settings for specific algorithms
             if self.algo_id == "MOS":
+                with Horizontal(id="modal_mos_bet"):
+                    yield Label("Bet Size ($):", id="lbl_mos_bet")
+                    yield Input(placeholder="1.00", id="inp_mos_bet")
                 with Horizontal(id="modal_mos_pt1"):
                     yield Label("Pt1 (T / D$):", id="lbl_mos_pt1")
                     yield Input(placeholder="Time 1", id="inp_mos_t1")
@@ -851,18 +890,19 @@ class AlgoInfoModal(ModalScreen):
         self.query_one("#modal_body").styles.width = "100%"
 
         if self.algo_id == "MOS":
-            for row_id in ["#modal_mos_pt1", "#modal_mos_pt2", "#modal_mos_pt3"]:
+            for row_id in ["#modal_mos_bet", "#modal_mos_pt1", "#modal_mos_pt2", "#modal_mos_pt3"]:
                 row = self.query_one(row_id)
                 row.styles.height = 3
                 row.styles.align = ("center", "middle")
                 row.styles.margin = (0, 0, 1, 0)
                 row.styles.border = ("ascii", "#333333")
             
-            for inp_id in ["#inp_mos_t1", "#inp_mos_d1", "#inp_mos_t2", "#inp_mos_d2", "#inp_mos_t3", "#inp_mos_d3"]:
+            for inp_id in ["#inp_mos_bet", "#inp_mos_t1", "#inp_mos_d1", "#inp_mos_t2", "#inp_mos_d2", "#inp_mos_t3", "#inp_mos_d3"]:
                 self.query_one(inp_id).styles.width = 10
             
             if self.main_app and "Moshe" in self.main_app.scanners:
                 moshe = self.main_app.scanners["Moshe"]
+                if hasattr(moshe, "bet_size"): self.query_one("#inp_mos_bet").value = str(moshe.bet_size)
                 if hasattr(moshe, "t1"): self.query_one("#inp_mos_t1").value = str(moshe.t1)
                 if hasattr(moshe, "d1"): self.query_one("#inp_mos_d1").value = str(moshe.d1)
                 if hasattr(moshe, "t2"): self.query_one("#inp_mos_t2").value = str(moshe.t2)
@@ -879,6 +919,9 @@ class AlgoInfoModal(ModalScreen):
     def close_modal(self):
         if self.algo_id == "MOS" and self.main_app and "Moshe" in self.main_app.scanners:
             moshe = self.main_app.scanners["Moshe"]
+            
+            try: moshe.bet_size = float(self.query_one("#inp_mos_bet").value)
+            except: getattr(moshe, "bet_size", None)
             
             try: moshe.t1 = int(self.query_one("#inp_mos_t1").value)
             except: getattr(moshe, "t1", None)

@@ -126,24 +126,53 @@ class LiveBroker:
     def buy(self, side, usd_amount, price, token_id, context=None, reason="Manual"):
         if not self.client or not token_id: return False, "Client/Token Error"
         try:
-            size = round(usd_amount / price, 2)
+            # MARKET ORDER (GUI Manual or standard Algo)
+            # We use limit_price 0.99 to sweep the book instantly. This is identical to mbsts_sniper.py 
+            # and ensures Polymarket processes it as a Taker/Market order, entirely bypassing the
+            # "5 share minimum" limit rule that causes small manual buys to be rejected.
             limit_price = 0.99
+            size = round(usd_amount / price, 2)
+            
+            # Record balance before order to calculate actual cost
+            pre_bal = self.balance
+            
             o_args = OrderArgs(price=limit_price, size=size, side="BUY", token_id=token_id)
             r = self.client.post_order(self.client.create_order(o_args))
             if r.get("success") or r.get("orderID"):
                 # Enhanced CSV logging for Live Trads
                 main_bal = self.update_balance()
                 
+                # Try getting amount from order response first, or fallback to balance diff
+                taking_val = r.get("takingAmount", 0)
+                try: taking_val = float(taking_val)
+                except: taking_val = 0.0
+                
+                if taking_val > 0: 
+                    actual_cost_usd = taking_val / 10**6
+                else:
+                    import time
+                    for _ in range(3):
+                        time.sleep(1.0)
+                        main_bal = self.update_balance()
+                        actual_cost_usd = pre_bal - main_bal
+                        if actual_cost_usd > 0.01: break
+                        
+                    if actual_cost_usd <= 0.01: actual_cost_usd = usd_amount
+                    
+                actual_price = round(actual_cost_usd / size, 4) if size > 0 else limit_price
+                
                 ctx = context or {}
                 # Update context with live main balance
                 ctx['main_bal'] = main_bal 
                 
                 # We use sim_broker to write to the single log file
-                self.sim_broker.log_trade("LIVE_BUY", side, usd_amount, price, size, context=ctx, note=reason)
+                self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
                 
-                return True, f"✅ LIVE BUY {side} | {price*100:.1f}¢ | Cost: ${usd_amount:.2f} | Pot. Win: ${size:.2f}"
+                return True, f"✅ LIVE BUY {side} | Fill: {actual_price*100:.1f}¢ | Cost: ${actual_cost_usd:.2f} | Size: {size:.2f}"
             else:
-                return False, f"Live Fail: {r.get('errorMsg')}"
+                err = r.get('errorMsg') or str(r)
+                self.sim_broker.write_to_log(f"LIVE_BUY_FAIL: {err}")
+                return False, f"Live Fail: {err}"
         except Exception as e:
             return False, f"Err: {e}"
 

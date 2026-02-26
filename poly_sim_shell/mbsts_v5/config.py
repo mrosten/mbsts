@@ -7,9 +7,9 @@ load_dotenv()
 @dataclass
 class TradingConfig:
     # Time Settings
-    WINDOW_SECONDS: int = 900
+    WINDOW_SECONDS: int = 300
     LOG_INTERVAL: int = 15
-    PHASE1_DURATION: int = 300  # Standard impulse phase for scanners
+    PHASE1_DURATION: int = 60  # Standard impulse phase for scanners
     
     # Risk Management
     DEFAULT_RISK_PCT: float = 0.12
