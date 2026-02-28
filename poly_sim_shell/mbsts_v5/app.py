@@ -2256,6 +2256,72 @@ class ResearchLogger:
         return f"Trades: {len(trades)}, Wins: {wins}, Losses: {losses}, Win Rate: {wins/len(trades)*100:.1f}%, Total Profit: ${total_profit:+.2f}"
 
 
+class BankrollExhaustedModal(ModalScreen):
+    """Full-screen alert shown when the bankroll can no longer cover the minimum bet."""
+
+    def __init__(self, bankroll: float, min_bet: float, mode: str):
+        super().__init__()
+        self.bankroll = bankroll
+        self.min_bet  = min_bet
+        self.mode     = mode
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="frozen_container"):
+            yield Label("🔴  BOT FROZEN", id="frozen_title")
+            yield Label(
+                f"Mode: {self.mode}  |  Bankroll: ${self.bankroll:.2f}  |  Min Bet: ${self.min_bet:.2f}",
+                id="frozen_details"
+            )
+            yield Label(
+                "The bankroll has dropped below minimum bet size.\n"
+                "All market scanning and trade execution has been stopped.\n"
+                "A final CSV snapshot and console log entry have been written.\n\n"
+                "Please top up your bankroll or reduce Bet $ amount\n"
+                "before restarting bot.",
+                id="frozen_body"
+            )
+            yield Button("OK  —  I understand", id="btn_frozen_ok", variant="error")
+
+    def on_mount(self):
+        c = self.query_one("#frozen_container")
+        c.styles.align    = ("center", "middle")
+        c.styles.width    = "80%"
+        c.styles.height   = "auto"
+        c.styles.background = "#1a0000"
+        c.styles.border   = ("heavy", "red")
+        c.styles.padding  = (2, 4)
+
+        t = self.query_one("#frozen_title")
+        t.styles.text_align  = "center"
+        t.styles.color       = "red"
+        t.styles.text_style  = "bold"
+        t.styles.margin      = (0, 0, 1, 0)
+        t.styles.width       = "100%"
+
+        d = self.query_one("#frozen_details")
+        d.styles.text_align  = "center"
+        d.styles.color       = "#ff6666"
+        d.styles.margin      = (0, 0, 2, 0)
+        d.styles.width       = "100%"
+
+        b = self.query_one("#frozen_body")
+        b.styles.text_align  = "center"
+        b.styles.color       = "white"
+        b.styles.margin      = (0, 0, 2, 0)
+        b.styles.width       = "100%"
+
+        btn = self.query_one("#btn_frozen_ok")
+        btn.styles.width = "50%"
+        btn.styles.align = ("center", "middle")
+
+        self.styles.align = ("center", "middle")
+        self.styles.background = "rgba(0,0,0,0.85)"
+
+    @on(Button.Pressed, "#btn_frozen_ok")
+    def dismiss_modal(self):
+        self.dismiss()
+
+
 class BullFlagSettingsModal(ModalScreen):
     """Quick settings modal for BullFlag algorithm improvements."""
     BINDINGS = [("escape", "dismiss", "Dismiss")]
