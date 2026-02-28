@@ -124,15 +124,14 @@ class SniperApp(App):
             
             # Open BullFlag settings modal when STA is clicked
             if code == "STA":
-                if self.main_app:
-                    self.main_app.push_screen(BullFlagSettingsModal(self.main_app))
+                self.push_screen(BullFlagSettingsModal(self))
                 return
             
             # Original logic for other algo codes
             if code in self.scanner_descriptions:
                 desc = self.scanner_descriptions[code]["desc"]
-                self.main_app.push_screen(AlgoInfoModal(code, self.scanner_descriptions[code]["name"], desc, self.main_app))
-                event.stop()
+                self.push_screen(AlgoInfoModal(code, self.scanner_descriptions[code]["name"], desc, self))
+            event.stop()
 
     @on(Button.Pressed, "#btn_algo_all")
     def on_all_algos(self):
