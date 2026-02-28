@@ -1271,23 +1271,36 @@ class SniperApp(App):
                             decision_reason = f"RSI Momentum (RSI: {rsi_1m:.1f} > 70, Trend: {trend_4h})"
                             self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum -> {side} (RSI: {rsi_1m:.1f}, Trend: {trend_4h})[/]")
                     
-                    # Priority 3: Price Gap Logic (original logic with enhancements)
+                    # Priority 3: Price Gap Logic (enhanced based on log analysis)
                     elif side is None:
                         if abs(price_diff) >= 0.02:  # Require minimum 2¢ gap for any decision
-                            side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                            if self.mom_buy_mode == "HYBRID":
-                                decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                            # Enhanced gap logic: Consider market context before following lead
+                            cur_up = self.market_data.get("up_price", 0.5)
+                            cur_dn = self.market_data.get("down_price", 0.5)
+                            winner = "UP" if cur_up >= cur_dn else "DOWN"
+                            
+                            # If strong velocity signal exists, prioritize it over gap following
+                            if velocity <= -300:
+                                # Strong negative velocity overrides gap following
+                                side = "UP"
+                                price = up_ask
+                                decision_reason = f"Velocity Override (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})"
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity override -> {side} (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})[/]")
+                            elif abs(price_diff) >= 0.04:  # Large gap (4¢+) - more reliable
+                                side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
+                                if self.mom_buy_mode == "HYBRID":
+                                    decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                                else:
+                                    decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
                             else:
-                                decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            # Skip gap reversals for gaps < 2¢ (unreliable) - PBN only
-                            if self.mom_buy_mode == "PRE":
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY gap skip (gap:{abs(price_diff)*100:.1f}¢ < 2¢) -> Deferring to window start[/]")
-                                return
-                            # HBR mode: allow small gaps (original behavior preserved)
-                            # No skip logic for HYBRID mode
+                                # Small gaps (2¢-3¢) - defer to window start (unreliable)
+                                if self.mom_buy_mode == "PRE":
+                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY gap skip (gap:{abs(price_diff)*100:.1f}¢ < 4¢) -> Deferring to window start[/]")
+                                    return
+                                # HBR mode: allow small gaps (original behavior preserved)
+                                # No action needed - HBR will handle in main logic
                             
                             # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
                             # and pick the opposite for the next window.
