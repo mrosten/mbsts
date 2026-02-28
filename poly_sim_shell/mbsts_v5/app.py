@@ -1256,13 +1256,13 @@ class SniperApp(App):
                     
                     # Priority 2: RSI Momentum Check (only if velocity didn't trigger)
                     elif side is None and rsi_1m > 70:
-                        # Add trend context check
+                        # Add trend context check with new strength levels
                         trend_4h = self.market_data_manager.trend_4h
                         
-                        if trend_4h == "DOWN":
+                        if trend_4h in ["S-DOWN", "M-DOWN", "W-DOWN"]:
                             # Skip RSI momentum signals during downtrends (insufficient data)
-                            decision_reason = f"RSI Momentum skipped (RSI: {rsi_1m:.1f} > 70 but trend is DOWN)"
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum skipped (RSI: {rsi_1m:.1f}) - Downtrend detected[/]")
+                            decision_reason = f"RSI Momentum skipped (RSI: {rsi_1m:.1f} > 70 but trend is {trend_4h})"
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum skipped (RSI: {rsi_1m:.1f}) - {trend_4h} detected[/]")
                             # Don't set side/price, let it fall through to price gap logic
                         else:
                             # Allow RSI momentum in uptrends or sideways markets
@@ -1299,16 +1299,16 @@ class SniperApp(App):
                             trend_4h = self.market_data_manager.trend_4h
                             
                             # Decision logic for small gaps based on market factors
-                            if trend_4h == "DOWN" and velocity < -100:
-                                # Downtrend with some negative velocity -> UP (mean reversion)
+                            if trend_4h in ["S-DOWN", "M-DOWN"] and velocity < -100:
+                                # Strong/Medium downtrend with some negative velocity -> UP (mean reversion)
                                 side = "UP"
                                 price = up_ask
-                                decision_reason = f"Small Gap Mean Reversion (gap:{abs(price_diff)*100:.1f}¢, trend:DOWN, vel:{velocity:.0f})"
-                            elif trend_4h == "UP" and rsi_1m < 60:
-                                # Uptrend with low RSI -> UP (trend continuation)
+                                decision_reason = f"Small Gap Mean Reversion (gap:{abs(price_diff)*100:.1f}¢, trend:{trend_4h}, vel:{velocity:.0f})"
+                            elif trend_4h in ["S-UP", "M-UP"] and rsi_1m < 60:
+                                # Strong/Medium uptrend with low RSI -> UP (trend continuation)
                                 side = "UP"
                                 price = up_ask
-                                decision_reason = f"Small Gap Trend Follow (gap:{abs(price_diff)*100:.1f}¢, trend:UP, rsi:{rsi_1m:.1f})"
+                                decision_reason = f"Small Gap Trend Follow (gap:{abs(price_diff)*100:.1f}¢, trend:{trend_4h}, rsi:{rsi_1m:.1f})"
                             elif atr > 100:
                                 # High volatility ATR -> follow current winner
                                 side = winner

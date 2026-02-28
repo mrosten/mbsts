@@ -109,7 +109,26 @@ class MarketDataManager:
             data = r.json()
             closes = [float(x[4]) for x in data]
             short = sum(closes[-3:]) / 3; long_ = sum(closes) / len(closes)
-            self.trend_4h = "UP" if short > long_ * 1.002 else ("DOWN" if short < long_ * 0.998 else "NEUTRAL")
+            
+            # Calculate trend strength percentage
+            trend_pct = ((short / long_) - 1) * 100
+            
+            # Determine trend direction and strength
+            if trend_pct >= 0.5:  # Strong uptrend (0.5%+)
+                self.trend_4h = "S-UP"  # Strong UP
+            elif trend_pct >= 0.2:  # Medium uptrend (0.2%+)
+                self.trend_4h = "M-UP"  # Medium UP
+            elif trend_pct >= 0.05:  # Weak uptrend (0.05%+)
+                self.trend_4h = "W-UP"  # Weak UP
+            elif trend_pct <= -0.5:  # Strong downtrend (-0.5%+)
+                self.trend_4h = "S-DOWN"  # Strong DOWN
+            elif trend_pct <= -0.2:  # Medium downtrend (-0.2%+)
+                self.trend_4h = "M-DOWN"  # Medium DOWN
+            elif trend_pct <= -0.05:  # Weak downtrend (-0.05%+)
+                self.trend_4h = "W-DOWN"  # Weak DOWN
+            else:
+                self.trend_4h = "NEUTRAL"
+                
             self.last_4h_update = time.time()
         except requests.RequestException as e:
             self.log(f"[yellow]Warn: 4H Trend Update Failed: {e}[/]")
