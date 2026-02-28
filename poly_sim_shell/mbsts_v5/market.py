@@ -116,23 +116,45 @@ class MarketDataManager:
             return [], [], [], []
 
     def fetch_current_price(self):
+        last_known = self.market_data.get("btc_price", 0)
+
+        def _plausible(price):
+            """Returns True if price is reasonable relative to last known. Always True if no baseline."""
+            if last_known <= 0 or price <= 0:
+                return price > 0
+            return abs(price - last_known) / last_known < 0.05 # Reject if >5% from last known
+
         # 1. Primary: Live Kraken WebSocket Price (Must be fresh < 5 seconds)
         if self.live_price > 0 and (time.time() - self.last_ws_update) < 5:
-            return self.live_price
+            if _plausible(self.live_price):
+                return self.live_price
+            else:
+                pass  # BTC Sanity: WS price rejected silently
 
         # 2. Secondary: Chainlink Oracle Backup
         if self.chainlink_contract:
             try:
-                price = self.chainlink_contract.functions.latestAnswer().call()
-                return float(price) / 10**8 
+                raw = self.chainlink_contract.functions.latestAnswer().call()
+                price = float(raw) / 10**8
+                if _plausible(price):
+                    return price
+                else:
+                    pass  # BTC Sanity: Chainlink price rejected silently
             except: pass
 
         # 3. Tertiary: Binance REST Fallback
         try:
             r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
-            return float(r['price'])
-        except Exception: 
-            return self.market_data.get("btc_price", 0)
+            price = float(r['price'])
+            if _plausible(price):
+                return price
+            else:
+                pass  # BTC Sanity: Binance price rejected silently
+        except Exception: pass
+
+        # 4. Last resort: return last known price (stale but safe)
+        # BTC Sanity: all sources failed — fall back silently to last known price
+        return last_known if last_known > 0 else 0
 
     def fetch_oracle_price(self):
         if self.chainlink_contract:

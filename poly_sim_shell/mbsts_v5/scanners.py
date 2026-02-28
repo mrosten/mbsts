@@ -64,20 +64,57 @@ class FakeoutScanner(BaseScanner):
             return self.triggered_signal
         return "NO_SIGNAL"
 
-class TailWagScanner(BaseScanner):
-    def analyze(self, time_remaining, poly_volume, spot_depth, leader_direction, spot_price, price_history):
+class MomentumScanner(BaseScanner):
+    def __init__(self):
+        super().__init__()
+        self.mode = "TIME"      # "TIME", "PRICE", or "DURATION"
+        self.threshold = 0.60   # For PRICE / DURATION mode (¢ / 100)
+        self.duration = 10      # Seconds a side must stay above threshold (DURATION mode)
+        # Internal tracking for DURATION mode
+        self._above_ts = {}     # {side: timestamp_first_seen_above}
+
+    def reset(self):
+        super().reset()
+        self._above_ts = {}
+
+    def analyze(self, elapsed, up_bid, down_bid):
         if self.triggered_signal: return self.triggered_signal
-        if time_remaining >= 60: return "WAIT_TIME"
-        if not poly_volume or not spot_depth or spot_depth == 0: return "NO_DATA"
-        if float(poly_volume) > (float(spot_depth) * 1.5):
-            recent_prices = [p['price'] for p in price_history if p['elapsed'] >= (TradingConfig.WINDOW_SECONDS-time_remaining-10)]
-            if not recent_prices: return "WAIT_DATA"
-            move_pct = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
-            confirmed = (leader_direction == "UP" and move_pct > 0.0005) or (leader_direction == "DOWN" and move_pct < -0.0005)
-            if confirmed:
-                self.triggered_signal = f"WHALE_LEADER_{leader_direction}|Whale vol > 1.5x Cost + Spot Reacted"
+        # End-of-window safety guard: don't fire in last 20 seconds to avoid turnover noise
+        if elapsed > 280: return "WAIT_EOW"
+
+        if self.mode == "PRICE":
+            if up_bid >= self.threshold:
+                self.triggered_signal = f"BET_UP_MOM|Price Threshold HIT: UP {up_bid*100:.1f}¢"
                 return self.triggered_signal
-        return "NO_SIGNAL"
+            if down_bid >= self.threshold:
+                self.triggered_signal = f"BET_DOWN_MOM|Price Threshold HIT: DOWN {down_bid*100:.1f}¢"
+                return self.triggered_signal
+            return "WAIT_PRICE"
+
+        elif self.mode == "DURATION":
+            import time as _time
+            now = _time.time()
+            for side, bid in (("UP", up_bid), ("DOWN", down_bid)):
+                if bid >= self.threshold:
+                    if side not in self._above_ts:
+                        self._above_ts[side] = now
+                    elif now - self._above_ts[side] >= self.duration:
+                        self.triggered_signal = f"BET_{side}_MOM|Duration {self.duration}s above {self.threshold*100:.0f}¢ HIT"
+                        return self.triggered_signal
+                else:
+                    # Reset timer if it drops below threshold
+                    self._above_ts.pop(side, None)
+            return "WAIT_DUR"
+
+        else:  # TIME mode (default)
+            if elapsed < 10: return "WAIT_TIME"
+            if up_bid > down_bid:
+                self.triggered_signal = f"BET_UP_MOM|Leader @ 10s: UP {up_bid*100:.1f}¢"
+                return self.triggered_signal
+            elif down_bid > up_bid:
+                self.triggered_signal = f"BET_DOWN_MOM|Leader @ 10s: DOWN {down_bid*100:.1f}¢"
+                return self.triggered_signal
+            return "WAIT_TIE"
 
 class RsiScanner(BaseScanner):
     def analyze(self, rsi, price, bb_lower, time_remaining):
@@ -380,7 +417,7 @@ class ZScoreBreakoutScanner(BaseScanner):
 ALGO_INFO = {
     "NPA": {"name": "N-Pattern", "desc": "Detects impulse moves followed by a retracement support and subsequent breakout of the new high."},
     "FAK": {"name": "Fakeout", "desc": "Spots rejected 'rescue' attempts where price spikes above open but fails and sinks back below."},
-    "TAI": {"name": "TailWag", "desc": "Monitors Whale Volume to Spot Depth ratios. Hits when whales lead and the spot price reacts."},
+    "MOM": {"name": "Momentum", "desc": "Dual Mode: TIME (Default 10s lead) or PRICE (Threshold trigger 51-70¢)."},
     "RSI": {"name": "RSI Oversold", "desc": "Standard RSI < 15 check combined with a Bollinger Band lower-touch for extreme reversals."},
     "TRA": {"name": "Trap Candle", "desc": "Fades aggressive breakouts that get >75% retraced within the same 5-minute window."},
     "MID": {"name": "Mid-Game", "desc": "Identifies bulls failing to hold green in the middle of the round, leading to a 'Failed Rescue' drop."},

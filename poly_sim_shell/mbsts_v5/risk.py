@@ -27,9 +27,6 @@ class RiskManager:
         """
         # 1. Base Sizing
         budget_pct = TradingConfig.DEFAULT_RISK_PCT
-        strong_patterns = ["UPTREND", "STRONG_TREND", "COBRA", "LIQ_SWEEP", "LATE_REVERSAL"]
-        if any(p in strategy_type for p in strong_patterns):
-            budget_pct = TradingConfig.STRONG_RISK_PCT
             
         # Use Current Risk Bankroll (what is actually left) as the base
         base = self.risk_bankroll
@@ -61,6 +58,8 @@ class RiskManager:
     def register_bet(self, cost):
         self.risk_bankroll -= cost
         self.allocated_this_window += cost
+        if self.risk_bankroll < 0:
+            self.risk_bankroll = 0.0  # Hard floor - never go negative
         
     def reset_window(self):
         self.allocated_this_window = 0.0
@@ -81,9 +80,6 @@ class AlgorithmPortfolio:
     def calculate_bet_size(self, context, strategy_type):
         if not self.is_active: return 0
         budget_pct = TradingConfig.DEFAULT_RISK_PCT
-        strong_patterns = ["UPTREND", "STRONG_TREND", "COBRA", "LIQ_SWEEP", "LATE_REVERSAL"]
-        if any(p in strategy_type for p in strong_patterns):
-            budget_pct = TradingConfig.STRONG_RISK_PCT
             
         base_capital = context.get('risk_cap', self.balance)
         cost = base_capital * budget_pct

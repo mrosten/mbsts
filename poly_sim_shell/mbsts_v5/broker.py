@@ -78,13 +78,13 @@ class SimBroker:
 
     def sell(self, side, price, reason="Manual"):
         shares = self.shares[side]
-        if shares <= 0: return False, "No shares"
+        if shares <= 0: return False, "No shares", 0.0
         revenue = shares * price
         self.balance += revenue
         self.revenue_this_window += revenue
         self.shares[side] = 0.0
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
-        return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})"
+        return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})", revenue
 
     def settle_window(self, winning_side):
         winning_shares = self.shares[winning_side]
@@ -133,41 +133,32 @@ class LiveBroker:
             limit_price = 0.99
             size = round(usd_amount / price, 2)
             
-            # Record balance before order to calculate actual cost
-            pre_bal = self.balance
             
             o_args = OrderArgs(price=limit_price, size=size, side="BUY", token_id=token_id)
             r = self.client.post_order(self.client.create_order(o_args))
             if r.get("success") or r.get("orderID"):
-                # Enhanced CSV logging for Live Trads
-                main_bal = self.update_balance()
-                
-                # Try getting amount from order response first, or fallback to balance diff
+                # Use usd_amount as the authoritative cost — we control what we sent.
+                # Polymarket rarely returns a meaningful takingAmount immediately;
+                # it can return dust-level values that would make the log show $0.00.
+                actual_cost_usd = usd_amount
+                actual_price = price  # The price we targeted
+
+                # Only refine with takingAmount if Polymarket returns a plausible value
+                # (must be >= 10% of what we sent, to guard against dust/zero responses)
                 taking_val = r.get("takingAmount", 0)
                 try: taking_val = float(taking_val)
                 except: taking_val = 0.0
-                
-                if taking_val > 0: 
-                    actual_cost_usd = taking_val / 10**6
-                else:
-                    import time
-                    for _ in range(3):
-                        time.sleep(1.0)
-                        main_bal = self.update_balance()
-                        actual_cost_usd = pre_bal - main_bal
-                        if actual_cost_usd > 0.01: break
-                        
-                    if actual_cost_usd <= 0.01: actual_cost_usd = usd_amount
-                    
-                actual_price = round(actual_cost_usd / size, 4) if size > 0 else limit_price
-                
+                if taking_val > 0:
+                    refined_cost = taking_val / 10**6
+                    if refined_cost >= usd_amount * 0.10:  # Sanity check: plausible fill
+                        actual_cost_usd = refined_cost
+                        actual_price = round(actual_cost_usd / size, 4) if size > 0 else price
+
+                main_bal = self.update_balance()
                 ctx = context or {}
-                # Update context with live main balance
-                ctx['main_bal'] = main_bal 
-                
-                # We use sim_broker to write to the single log file
+                ctx['main_bal'] = main_bal
+
                 self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
-                
                 return True, f"✅ LIVE BUY {side} | Fill: {actual_price*100:.1f}¢ | Cost: ${actual_cost_usd:.2f} | Size: {size:.2f}"
             else:
                 err = r.get('errorMsg') or str(r)
@@ -177,14 +168,14 @@ class LiveBroker:
             return False, f"Err: {e}"
 
     def sell(self, side, token_id, limit_price=0.02, best_bid=None, reason="Manual"):
-        if not self.client or not token_id: return False, "Client/Token Error"
+        if not self.client or not token_id: return False, "Client/Token Error", 0.0
         try:
             b = self.client.get_balance_allowance(BalanceAllowanceParams(asset_type="CONDITIONAL", token_id=token_id))
             shares = float(b.get("balance", 0)) / 10**6
-            if shares <= 0.001: return False, "No Live Pos"
+            if shares <= 0.001: return False, "No Live Pos", 0.0
             
             size = math.floor(shares * 100) / 100
-            if size <= 0: return False, "Size too small"
+            if size <= 0: return False, "Size too small", 0.0
 
             val_log = f"Selling {size} @ Limit ${limit_price}"
             if best_bid: val_log += f" (Bid: ${best_bid})"
@@ -200,13 +191,13 @@ class LiveBroker:
                 msg = f"✅ LIVE SOLD {side}: {size:.2f} Shares @ ${eff_price:.2f} (Total: ${proceeds:.2f})"
                 self.sim_broker.write_to_log(f"TRADE_EVENT,{datetime.now()},LIVE_SELL,{side},Shares:{size},Price:{eff_price},Total:{proceeds},{reason}")
                 self.update_balance()
-                return True, msg
+                return True, msg, proceeds
             else:
                 err = r.get('errorMsg') or str(r)
                 self.sim_broker.write_to_log(f"LIVE_SELL_FAIL: {err}")
-                return False, f"Live Sell Fail: {err}"
+                return False, f"Live Sell Fail: {err}", 0.0
         except Exception as e:
-            return False, f"Sell Err: {e}"
+            return False, f"Sell Err: {e}", 0.0
 
 class TradeExecutor:
     def __init__(self, sim_broker, live_broker, risk_manager):
