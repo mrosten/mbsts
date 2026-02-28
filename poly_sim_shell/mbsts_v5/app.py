@@ -2166,6 +2166,7 @@ class BullFlagSettingsModal(ModalScreen):
     def __init__(self, main_app=None):
         super().__init__()
         self.main_app = main_app
+        self.main_app = main_app
         
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
