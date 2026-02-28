@@ -231,7 +231,7 @@ class SniperApp(App):
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
-        # Create a time-signatured log file for this session in the /logs directory
+        # Create a time-signatured log file for this session in logs/ subdirectory
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.mom_adv_log_file = f"logs/momentum_adv_{session_time}.csv"
         self._init_mom_adv_log()
@@ -1228,6 +1228,9 @@ class SniperApp(App):
                         self.mom_analytics["pre_15s_gap"] = price_diff
                         self.mom_analytics["btc_pre_15s"] = self.market_data.get("btc_price", 0)
                     
+                    # Debug: Log price difference calculation
+                    self.call_from_thread(self.log_msg, f"[dim]DEBUG PRE-BUY: UP ask={up_ask*100:.1f}¢, DN ask={dn_ask*100:.1f}¢, diff={price_diff*100:.1f}¢, abs={abs(price_diff)*100:.1f}¢[/]")
+                    
                     # Enhanced Decision Logic with Priority System:
                     # Priority 1: Velocity Reversion (Significantly negative velocity -> UP bet for mean reversion)
                     # Priority 2: RSI Trend (High RSI > 70 -> UP bet for trend continuation)
@@ -1245,7 +1248,7 @@ class SniperApp(App):
                             return
                     
                     # Priority 1: Velocity Reversion Check
-                    if velocity <= -150:  # Significantly negative velocity
+                    if velocity <= -300:  # Increased threshold for more reliable signals
                         side = "UP"
                         price = up_ask
                         decision_reason = f"Velocity Reversion (BTC moved {velocity:.0f} down in 60s)"
@@ -1270,7 +1273,7 @@ class SniperApp(App):
                     
                     # Priority 3: Price Gap Logic (original logic with enhancements)
                     elif side is None:
-                        if abs(price_diff) >= 0.02:
+                        if abs(price_diff) >= 0.02:  # Require minimum 2¢ gap for any decision
                             side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
                             if self.mom_buy_mode == "HYBRID":
                                 decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
@@ -1279,9 +1282,12 @@ class SniperApp(App):
                                 decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
                                 self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
                         else:
-                            if self.mom_buy_mode == "HYBRID":
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring to window start[/]")
+                            # Skip gap reversals for gaps < 2¢ (unreliable) - PBN only
+                            if self.mom_buy_mode == "PRE":
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY gap skip (gap:{abs(price_diff)*100:.1f}¢ < 2¢) -> Deferring to window start[/]")
                                 return
+                            # HBR mode: allow small gaps (original behavior preserved)
+                            # No skip logic for HYBRID mode
                             
                             # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
                             # and pick the opposite for the next window.
