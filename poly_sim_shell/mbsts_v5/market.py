@@ -49,8 +49,10 @@ class MarketDataManager:
         self.chainlink_contract = None
         self.price_history = []
         self.trend_4h = "NEUTRAL"
+        self.trend_1h = "NEUTRAL"  # Add 1-hour trend
         self.atr_5m = 0.0
         self.last_4h_update = 0
+        self.last_1h_update = 0  # Add 1h update timer
         self.first_update = True
         
         # Live WebSocket Price variables
@@ -134,6 +136,41 @@ class MarketDataManager:
             self.log(f"[yellow]Warn: 4H Trend Update Failed: {e}[/]")
         except Exception as e:
             self.log(f"[red]Error: 4H Trend Calc Error: {e}[/]")
+
+    def update_1h_trend(self):
+        """Calculate 1-hour trend for more responsive 5-minute market analysis."""
+        if (time.time() - getattr(self, 'last_1h_update', 0)) < 900: return
+        try:
+            r = requests.get("https://api.binance.com/api/v3/klines", params={"symbol":"BTCUSDT","interval":"1h","limit":12}, timeout=3)
+            r.raise_for_status()
+            data = r.json()
+            closes = [float(x[4]) for x in data]
+            short = sum(closes[-3:]) / 3; long_ = sum(closes) / len(closes)
+            
+            # Calculate trend strength percentage
+            trend_pct = ((short / long_) - 1) * 100
+            
+            # Determine trend direction and strength
+            if trend_pct >= 0.3:  # Strong uptrend (0.3%+)
+                self.trend_1h = "S-UP"  # Strong UP
+            elif trend_pct >= 0.15:  # Medium uptrend (0.15%+)
+                self.trend_1h = "M-UP"  # Medium UP
+            elif trend_pct >= 0.05:  # Weak uptrend (0.05%+)
+                self.trend_1h = "W-UP"  # Weak UP
+            elif trend_pct <= -0.3:  # Strong downtrend (-0.3%+)
+                self.trend_1h = "S-DOWN"  # Strong DOWN
+            elif trend_pct <= -0.15:  # Medium downtrend (-0.15%+)
+                self.trend_1h = "M-DOWN"  # Medium DOWN
+            elif trend_pct <= -0.05:  # Weak downtrend (-0.05%+)
+                self.trend_1h = "W-DOWN"  # Weak DOWN
+            else:
+                self.trend_1h = "NEUTRAL"
+                
+            self.last_1h_update = time.time()
+        except requests.RequestException as e:
+            self.log(f"[yellow]Warn: 1H Trend Update Failed: {e}[/]")
+        except Exception as e:
+            self.log(f"[red]Error: 1H Trend Calc Error: {e}[/]")
 
     def update_atr(self):
         """Fetches 1m klines and updates the 5-period ATR (Average True Range)."""
