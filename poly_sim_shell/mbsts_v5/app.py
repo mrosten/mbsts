@@ -1003,12 +1003,12 @@ class SniperApp(App):
             self.query_one("#p_up").update(f"{self.market_data['up_ask']*100:.1f}¢")
             self.query_one("#p_down").update(f"{self.market_data['down_ask']*100:.1f}¢")
             self.query_one("#p_btc").update(f"${self.market_data['btc_price']:,.2f}")
-            self.query_one("#p_trend").update(f"Trend 4H: {self.market_data_manager.trend_4h}")
+            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_4h}")
             self.query_one("#p_atr").update(f"ATR 5m: ${self.market_data_manager.atr_5m:.2f}")
             self.query_one("#p_btc_open").update(f"Open: ${self.market_data['btc_open']:,.2f}")
             df = self.market_data['btc_price'] - self.market_data['btc_open']
             self.query_one("#p_btc_diff").update(f"Diff: {'+' if df>=0 else '-'}${abs(df):.2f}")
-            self.query_one("#p_trend").update(f"Trend 4H: {self.market_data_manager.trend_4h}")
+            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_4h}")
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
 
