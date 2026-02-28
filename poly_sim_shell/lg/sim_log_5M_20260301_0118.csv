@@ -1,0 +1,2 @@
+Timestamp,Mode,SimBal,LiveBal,RiskBankroll,TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,Odds_Score,Trend_Prob,Trend_Score,Sig_Slingshot,Sig_Poly,Sig_Cobra,Sig_Flag,Sig_TrendOdds,Master_Score,Master_Status,UP_Price,DN_Price,UP_Bid,DN_Bid,Shares_UP,Shares_DN,Note
+2026-03-01 01:18:47,SIM,100.00,94.74,100.00,01:13,0.00,0.00,0.00,0.00,0,0.5000,3,WAIT,N/A,WAIT,WAIT,N/A,0,NEUTRAL,0.500,0.500,0.500,0.500,0.00,0.00,-

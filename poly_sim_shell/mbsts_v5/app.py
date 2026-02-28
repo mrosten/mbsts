@@ -6,7 +6,7 @@ import csv
 from datetime import datetime, timezone
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox
+from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static
 from textual import work, on, events
 
 from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
@@ -2324,62 +2324,192 @@ class BankrollExhaustedModal(ModalScreen):
 
 class BullFlagSettingsModal(ModalScreen):
     """Quick settings modal for BullFlag algorithm improvements."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    BINDINGS = [("escape", "dismiss", "Dismiss"), ("a", "apply", "Apply"), ("r", "reset", "Reset")]
     
     def __init__(self, main_app=None):
         super().__init__()
-        self.main_app = main_app
         self.main_app = main_app
         
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
             yield Static("[bold yellow]⚡ BULLFLAG SETTINGS[/]", id="modal_title")
+            yield Static("[dim]Tune BullFlag (StaircaseBreakout) parameters live[/]", id="modal_subtitle")
             
-            with Horizontal(id="settings_grid"):
-                # Quick improvement options
-                yield Static("🎯 Max Price Threshold:", id="label_max_price")
-                yield Input(placeholder="80", id="inp_max_price", value="80")
+            with Vertical(id="bf_scroll_area"):
+                # --- Max Price Threshold ---
+                yield Static("🎯 Max Price Threshold (¢):", id="label_max_price", classes="bf_label")
+                with Horizontal(id="row_max_price", classes="bf_row"):
+                    yield Input(placeholder="80", id="inp_max_price", value="80")
+                    yield Static("[dim]Skip when price > threshold (70-90¢)[/]", classes="bf_hint")
                 
-                yield Static("📊 Volume Filter:", id="label_volume")
-                yield Checkbox("Enable volume confirmation", id="cb_volume_confirm", value=False)
+                # --- Volume Filter ---
+                yield Static("📊 Volume Filter:", id="label_volume", classes="bf_label")
+                with Horizontal(id="row_volume", classes="bf_row"):
+                    yield Checkbox("Enable volume confirmation", id="cb_volume_confirm", value=False)
                 
-                yield Static("⚡ Entry Timing:", id="label_entry_timing")
-                yield Radio("Aggressive", id="rb_aggressive", value=True, name="entry_timing")
-                yield Radio("Conservative", id="rb_conservative", value=False, name="entry_timing")
+                # --- Entry Timing ---
+                yield Static("⚡ Entry Timing:", id="label_entry_timing", classes="bf_label")
+                with Horizontal(id="row_entry_timing", classes="bf_row"):
+                    with RadioSet(id="rs_entry_timing"):
+                        yield RadioButton("Aggressive (enter immediately)", id="rb_aggressive", value=True)
+                        yield RadioButton("Conservative (wait for confirmation)", id="rb_conservative")
                 
-                yield Static("🔧 Pullback Detection:", id="label_pullback")
-                yield Checkbox("Enable pullback detection", id="cb_pullback", value=False)
+                # --- Pullback Detection ---
+                yield Static("🔧 Pullback Detection:", id="label_pullback", classes="bf_label")
+                with Horizontal(id="row_pullback", classes="bf_row"):
+                    yield Checkbox("Enable pullback detection (wait for retest)", id="cb_pullback", value=False)
                 
-                yield Static("🎯 Dynamic Tolerance:", id="label_tolerance")
-                yield Slider(0.05, 0.2, 0.15, 0.3, id="slider_tolerance", value="0.1")
+                # --- Dynamic Tolerance ---
+                yield Static("🎯 Dynamic Tolerance (ATR-based %):", id="label_tolerance", classes="bf_label")
+                with Horizontal(id="row_tolerance", classes="bf_row"):
+                    yield Input(placeholder="0.1", id="inp_tolerance", value="0.1")
+                    yield Static("[dim]Range: 0.05 – 0.30[/]", classes="bf_hint")
                 
-                yield Static("📈 ATR Multiplier:", id="label_atr_mult")
-                yield Slider(1.0, 1.5, 2.0, 3.0, id="slider_atr_mult", value="1.5")
+                # --- ATR Multiplier ---
+                yield Static("📈 ATR Multiplier:", id="label_atr_mult", classes="bf_label")
+                with Horizontal(id="row_atr_mult", classes="bf_row"):
+                    yield Input(placeholder="1.5", id="inp_atr_mult", value="1.5")
+                    yield Static("[dim]Range: 1.0x – 3.0x[/]", classes="bf_hint")
                 
-                yield Static("📊 Research Log:", id="label_research_log")
-                yield Checkbox("Enable research logging", id="cb_research_log", value=False)
-                
-            with Horizontal(id="button_row"):
-                yield Button("APPLY (A)", id="btn_apply", variant="primary")
-                yield Button("RESET (R)", id="btn_reset", variant="default")
-                yield Button("DISMISS", id="btn_dismiss")
+                # --- Research Log ---
+                yield Static("📊 Research Log:", id="label_research_log", classes="bf_label")
+                with Horizontal(id="row_research", classes="bf_row"):
+                    yield Checkbox("Enable research logging (lg/bullflag_research_*.csv)", id="cb_research_log", value=False)
+            
+            # --- Status + Buttons pinned at bottom ---
+            yield Static("", id="bf_status")
+            with Horizontal(id="bf_button_row"):
+                yield Button("APPLY & CLOSE (A)", id="btn_bf_apply", variant="primary")
+                yield Button("RESET (R)", id="btn_bf_reset", variant="default")
+                yield Button("DISMISS", id="btn_bf_dismiss")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        self.styles.background = "rgba(0,0,0,0.85)"
+        
+        c = self.query_one("#modal_container")
+        c.styles.background = "#1a1a00"
+        c.styles.border = ("thick", "#ffaa00")
+        c.styles.padding = (1, 2)
+        c.styles.width = 70
+        c.styles.height = "auto"
+        c.styles.max_height = "85vh"
+        c.styles.align = ("center", "middle")
+        c.styles.overflow_y = "hidden"
+        
+        # Scrollable settings area
+        sa = self.query_one("#bf_scroll_area")
+        sa.styles.height = "auto"
+        sa.styles.max_height = "60vh"
+        sa.styles.overflow_y = "auto"
+        sa.styles.width = "100%"
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.width = "100%"
+        self.query_one("#modal_title").styles.margin = (0, 0, 0, 0)
+        
+        self.query_one("#modal_subtitle").styles.text_align = "center"
+        self.query_one("#modal_subtitle").styles.width = "100%"
+        self.query_one("#modal_subtitle").styles.margin = (0, 0, 1, 0)
+        
+        # Style all section labels
+        for lbl in self.query(".bf_label"):
+            lbl.styles.color = "#ffaa00"
+            lbl.styles.text_style = "bold"
+            lbl.styles.margin = (1, 0, 0, 0)
+            lbl.styles.width = "100%"
+        
+        # Style all rows
+        for row in self.query(".bf_row"):
+            row.styles.height = "auto"
+            row.styles.align = ("left", "middle")
+            row.styles.margin = (0, 0, 0, 2)
+            row.styles.width = "100%"
+        
+        # Style hint text
+        for hint in self.query(".bf_hint"):
+            hint.styles.color = "#666666"
+            hint.styles.margin = (1, 0, 0, 1)
+        
+        # Style input fields
+        for inp_id in ["#inp_max_price", "#inp_tolerance", "#inp_atr_mult"]:
+            self.query_one(inp_id).styles.width = 12
+        
+        # Status line
+        st = self.query_one("#bf_status")
+        st.styles.text_align = "center"
+        st.styles.width = "100%"
+        st.styles.margin = (1, 0, 0, 0)
+        st.styles.color = "#666666"
+        
+        # Button row
+        br = self.query_one("#bf_button_row")
+        br.styles.height = "auto"
+        br.styles.align = ("center", "middle")
+        br.styles.margin = (1, 0, 0, 0)
+        br.styles.width = "100%"
+        
+        # Load current scanner values if available
+        self._load_current_settings()
+    
+    def _load_current_settings(self):
+        """Pre-fill inputs from current scanner state."""
+        if not self.main_app or not hasattr(self.main_app, 'scanners'):
+            return
+        if 'BullFlag' not in self.main_app.scanners:
+            return
+        sc = self.main_app.scanners['BullFlag']
+        try:
+            if hasattr(sc, 'max_price'):
+                self.query_one("#inp_max_price").value = str(sc.max_price)
+            if hasattr(sc, 'volume_confirm'):
+                self.query_one("#cb_volume_confirm").value = bool(sc.volume_confirm)
+            if hasattr(sc, 'entry_timing'):
+                self.query_one("#rb_aggressive").value = (sc.entry_timing == "AGGRESSIVE")
+            if hasattr(sc, 'pullback'):
+                self.query_one("#cb_pullback").value = bool(sc.pullback)
+            if hasattr(sc, 'tolerance_pct'):
+                self.query_one("#inp_tolerance").value = str(sc.tolerance_pct)
+            if hasattr(sc, 'atr_multiplier'):
+                self.query_one("#inp_atr_mult").value = str(sc.atr_multiplier)
+            if hasattr(sc, 'research_enabled'):
+                self.query_one("#cb_research_log").value = bool(sc.research_enabled)
+        except Exception:
+            pass
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn_apply":
+        if event.button.id == "btn_bf_apply":
             self._apply_settings()
-        elif event.button.id == "btn_reset":
-            self._reset_settings()
-        elif event.button.id == "btn_dismiss":
             self.dismiss()
+        elif event.button.id == "btn_bf_reset":
+            self._reset_settings()
+        elif event.button.id == "btn_bf_dismiss":
+            self.dismiss()
+    
+    def action_apply(self):
+        self._apply_settings()
+        self.dismiss()
+    
+    def action_reset(self):
+        self._reset_settings()
     
     def _apply_settings(self):
         """Apply BullFlag improvements based on user selections."""
-        max_price = float(self.query_one("#inp_max_price").value)
+        try:
+            max_price = float(self.query_one("#inp_max_price").value)
+        except ValueError:
+            max_price = 80.0
         volume_confirm = self.query_one("#cb_volume_confirm").value
         entry_timing = self.query_one("#rb_aggressive").value
         pullback = self.query_one("#cb_pullback").value
-        tolerance = float(self.query_one("#slider_tolerance").value)
-        atr_mult = float(self.query_one("#slider_atr_mult").value)
+        try:
+            tolerance = float(self.query_one("#inp_tolerance").value)
+        except ValueError:
+            tolerance = 0.1
+        try:
+            atr_mult = float(self.query_one("#inp_atr_mult").value)
+        except ValueError:
+            atr_mult = 1.5
         research_enabled = self.query_one("#cb_research_log").value
         
         # Update BullFlag scanner with new settings
@@ -2397,11 +2527,18 @@ class BullFlagSettingsModal(ModalScreen):
             if research_enabled and not hasattr(bullflag_scanner, 'research_logger'):
                 bullflag_scanner.research_logger = ResearchLogger(self.main_app)
             
-            self.main_app.log_msg("⚡ BullFlag settings applied: Max=$.2f, Volume=%s, Entry=%s, Pullback=%s, Tolerance=%.2f, ATR=%.1fx, Research=%s" % (
-                max_price, "ON" if volume_confirm else "OFF",
-                entry_timing, "ON" if pullback else "OFF", 
-                tolerance, atr_mult,
-                "ON" if research_enabled else "OFF"))
+            entry_str = "AGGRESSIVE" if entry_timing else "CONSERVATIVE"
+            self.main_app.log_msg(
+                "⚡ BullFlag settings applied: Max=$%.2f, Volume=%s, Entry=%s, Pullback=%s, Tolerance=%.2f, ATR=%.1fx, Research=%s" % (
+                    max_price, "ON" if volume_confirm else "OFF",
+                    entry_str, "ON" if pullback else "OFF",
+                    tolerance, atr_mult,
+                    "ON" if research_enabled else "OFF"))
+            
+            # Update status in modal
+            self.query_one("#bf_status").update("[bold green]✓ Settings applied successfully[/]")
+        else:
+            self.query_one("#bf_status").update("[bold red]✗ BullFlag scanner not found[/]")
     
     def _reset_settings(self):
         """Reset BullFlag settings to defaults."""
@@ -2409,70 +2546,10 @@ class BullFlagSettingsModal(ModalScreen):
         self.query_one("#cb_volume_confirm").value = False
         self.query_one("#rb_aggressive").value = True
         self.query_one("#cb_pullback").value = False
-        self.query_one("#slider_tolerance").value = "0.1"
-        self.query_one("#slider_atr_mult").value = "1.5"
+        self.query_one("#inp_tolerance").value = "0.1"
+        self.query_one("#inp_atr_mult").value = "1.5"
+        self.query_one("#cb_research_log").value = False
         
-        self.main_app.log_msg("🔄 BullFlag settings reset to defaults")
-    """Full-screen alert shown when the bankroll can no longer cover the minimum bet."""
-
-    def __init__(self, bankroll: float, min_bet: float, mode: str):
-        super().__init__()
-        self.bankroll = bankroll
-        self.min_bet  = min_bet
-        self.mode     = mode
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="frozen_container"):
-            yield Label("🔴  BOT FROZEN", id="frozen_title")
-            yield Label(
-                f"Mode: {self.mode}  |  Bankroll: ${self.bankroll:.2f}  |  Min Bet: ${self.min_bet:.2f}",
-                id="frozen_details"
-            )
-            yield Label(
-                "The bankroll has dropped below the minimum bet size.\n"
-                "All market scanning and trade execution has been stopped.\n"
-                "A final CSV snapshot and console log entry have been written.\n\n"
-                "Please top up your bankroll or reduce the Bet $ amount\n"
-                "before restarting the bot.",
-                id="frozen_body"
-            )
-            yield Button("OK  —  I understand", id="btn_frozen_ok", variant="error")
-
-    def on_mount(self):
-        c = self.query_one("#frozen_container")
-        c.styles.align    = ("center", "middle")
-        c.styles.width    = "80%"
-        c.styles.height   = "auto"
-        c.styles.background = "#1a0000"
-        c.styles.border   = ("heavy", "red")
-        c.styles.padding  = (2, 4)
-
-        t = self.query_one("#frozen_title")
-        t.styles.text_align  = "center"
-        t.styles.color       = "red"
-        t.styles.text_style  = "bold"
-        t.styles.margin      = (0, 0, 1, 0)
-        t.styles.width       = "100%"
-
-        d = self.query_one("#frozen_details")
-        d.styles.text_align  = "center"
-        d.styles.color       = "#ff6666"
-        d.styles.margin      = (0, 0, 2, 0)
-        d.styles.width       = "100%"
-
-        b = self.query_one("#frozen_body")
-        b.styles.text_align  = "center"
-        b.styles.color       = "white"
-        b.styles.margin      = (0, 0, 2, 0)
-        b.styles.width       = "100%"
-
-        btn = self.query_one("#btn_frozen_ok")
-        btn.styles.width = "50%"
-        btn.styles.align = ("center", "middle")
-
-        self.styles.align = ("center", "middle")
-        self.styles.background = "rgba(0,0,0,0.85)"
-
-    @on(Button.Pressed, "#btn_frozen_ok")
-    def dismiss_modal(self):
-        self.dismiss()
+        self.query_one("#bf_status").update("[bold cyan]↻ Settings reset to defaults[/]")
+        if self.main_app:
+            self.main_app.log_msg("🔄 BullFlag settings reset to defaults")
