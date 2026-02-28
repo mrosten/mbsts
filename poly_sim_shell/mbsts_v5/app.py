@@ -276,7 +276,7 @@ class SniperApp(App):
                 Label("$0.00", id="p_btc", classes="price_val"),
                 Label("Open: $0", id="p_btc_open", classes="price_sub"),
                 Label("Diff: $0", id="p_btc_diff", classes="price_sub"),
-                Label("Trend 4H: NEUTRAL", id="p_trend", classes="price_sub"),
+                Label("Trend 1H: NEUTRAL", id="p_trend", classes="price_sub"),
                 Label("ATR 5m: $0.00", id="p_atr", classes="price_sub"),
                 id="card_btc", classes="price_card"
             ),
