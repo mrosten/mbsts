@@ -2,6 +2,7 @@ import time
 import asyncio
 import json
 import os
+import csv
 from datetime import datetime, timezone
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -999,7 +1000,7 @@ class SniperApp(App):
                             if pr and 0.01 < pr < 0.99:
                                 ok, msg = self.trade_executor.execute_buy(self.query_one("#cb_live").value, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_4h}, reason=res)
                                 if ok:
-                                    self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
+                                    self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs,"algorithm":name}
                                     self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
                                     self.session_total_trades += 1
                                     self.log_msg(f"BUY {name} {sd} @ {pr*100:.1f}c | {msg}", level="TRADE")
@@ -1355,7 +1356,7 @@ class SniperApp(App):
                             context={}, reason=f"PreBuy_{decision_reason}"
                         )
                         if ok:
-                            pending = {"side": side, "entry": price, "cost": bet_size}
+                            pending = {"side": side, "entry": price, "cost": bet_size, "algorithm": "BullFlag"}
                             self.session_total_trades += 1 # Pre-Buy Trade
                             def _commit(p=pending, s=side, pr=price, m=msg, bs=bet_size):
                                 self.pre_buy_pending = p
@@ -1440,6 +1441,29 @@ class SniperApp(App):
 
         self.log_msg(f"SETTLED: [bold white]{winner}[/] | [dim]{reason}[/]", level="MONEY")
         payout, net_pnl = self.sim_broker.settle_window(winner)
+        
+        # BullFlag Research Logging - Log trades with settings
+        for info in self.window_bets.values():
+            if not info.get("closed") and info.get("algorithm") == "BullFlag":
+                bullflag_scanner = self.scanners.get("BullFlag")
+                if bullflag_scanner and hasattr(bullflag_scanner, 'log_research_trade'):
+                    # Get current market data for research logging
+                    rsi_1m = getattr(self.market_data_manager, 'rsi_1m', 0)
+                    btc_velocity = getattr(self.market_data_manager, 'btc_velocity', 0)
+                    atr_5m = getattr(self.market_data_manager, 'atr_5m', 0)
+                    
+                    # Log the trade with research data
+                    result = "WIN" if info.get("side") == winner else "LOSS"
+                    bullflag_scanner.log_research_trade(
+                        info.get("entry", 0),  # Entry price stored when signal triggered
+                        self.market_data.get("btc_price", 0),  # Exit price at settlement
+                        result,
+                        self.market_data.get("start_ts", 0),  # Window ID
+                        rsi_1m,
+                        btc_velocity,
+                        atr_5m
+                    )
+        
         for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
         
         is_live = self.query_one("#cb_live").value
@@ -2159,6 +2183,80 @@ class MOMExpertModal(ModalScreen):
         self.dismiss()
 
 
+class ResearchLogger:
+    """Handles BullFlag research logging with performance analytics."""
+    
+    def __init__(self, main_app):
+        self.main_app = main_app
+        self.session_stats = {}
+        self.current_settings = {}
+        
+    def log_trade(self, settings, entry_price, exit_price, side, result, window_id, rsi_1m, btc_velocity, atr_5m):
+        """Log a BullFlag trade with current settings and outcome."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Calculate profit/loss
+        if side == "UP":
+            profit = (exit_price - entry_price) if result == "WIN" else (entry_price - exit_price)
+        else:
+            profit = (entry_price - exit_price) if result == "WIN" else (exit_price - entry_price)
+        
+        # Log to research file
+        log_entry = [
+            timestamp,
+            settings["max_price"],
+            "ON" if settings.get("volume_confirm") else "OFF",
+            settings["entry_timing"],
+            "ON" if settings.get("pullback") else "OFF",
+            f"{settings['tolerance_pct']:.2f}",
+            f"{settings['atr_multiplier']:.1f}",
+            f"{entry_price*100:.1f}",
+            f"{exit_price*100:.1f}",
+            side,
+            result,
+            f"{profit:+.2f}" if profit != 0 else "0.00",
+            window_id,
+            f"{rsi_1m:.1f}",
+            f"{btc_velocity:.0f}",
+            f"{atr_5m:.1f}"
+        ]
+        
+        # Update session statistics
+        self.session_stats[timestamp] = log_entry
+        
+        # Write to research log file
+        if settings.get("research_enabled"):
+            session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = f"lg/bullflag_research_{session_time}.csv"
+            
+            # Write header if file doesn't exist
+            if not os.path.exists(log_file):
+                with open(log_file, 'w', newline='') as f:
+                    f.write("Timestamp,Max_Price,Volume_Filter,Entry_Timing,Pullback_Detection,Tolerance,ATR_Multiplier,Entry_Price,Exit_Price,Side,Result,Profit_Loss,Window_ID,RSI_1m,BTC_Velocity,ATR_5m\n")
+            
+            # Append trade data
+            with open(log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(log_entry)
+            
+            self.main_app.log_msg(f"📊 BullFlag research logged: {log_file}")
+    
+    def get_session_stats(self):
+        """Calculate session performance statistics."""
+        if not self.session_stats:
+            return "No data"
+        
+        trades = list(self.session_stats.values())
+        if not trades:
+            return "No trades"
+        
+        wins = sum(1 for trade in trades if trade[11] == "WIN")
+        losses = sum(1 for trade in trades if trade[11] == "LOSS")
+        total_profit = sum(float(trade[12]) for trade in trades)
+        
+        return f"Trades: {len(trades)}, Wins: {wins}, Losses: {losses}, Win Rate: {wins/len(trades)*100:.1f}%, Total Profit: ${total_profit:+.2f}"
+
+
 class BullFlagSettingsModal(ModalScreen):
     """Quick settings modal for BullFlag algorithm improvements."""
     BINDINGS = [("escape", "dismiss", "Dismiss")]
@@ -2188,10 +2286,13 @@ class BullFlagSettingsModal(ModalScreen):
                 yield Checkbox("Enable pullback detection", id="cb_pullback", value=False)
                 
                 yield Static("🎯 Dynamic Tolerance:", id="label_tolerance")
-                yield Slider(0.05, 0.2, 0.15, 0.3, id="slider_tolerance", value=0.1)
+                yield Slider(0.05, 0.2, 0.15, 0.3, id="slider_tolerance", value="0.1")
                 
                 yield Static("📈 ATR Multiplier:", id="label_atr_mult")
-                yield Slider(1.0, 1.5, 2.0, 3.0, id="slider_atr_mult", value=1.5)
+                yield Slider(1.0, 1.5, 2.0, 3.0, id="slider_atr_mult", value="1.5")
+                
+                yield Static("📊 Research Log:", id="label_research_log")
+                yield Checkbox("Enable research logging", id="cb_research_log", value=False)
                 
             with Horizontal(id="button_row"):
                 yield Button("APPLY (A)", id="btn_apply", variant="primary")
@@ -2214,6 +2315,7 @@ class BullFlagSettingsModal(ModalScreen):
         pullback = self.query_one("#cb_pullback").value
         tolerance = float(self.query_one("#slider_tolerance").value)
         atr_mult = float(self.query_one("#slider_atr_mult").value)
+        research_enabled = self.query_one("#cb_research_log").value
         
         # Update BullFlag scanner with new settings
         if hasattr(self.main_app, 'scanners') and 'BullFlag' in self.main_app.scanners:
@@ -2224,11 +2326,17 @@ class BullFlagSettingsModal(ModalScreen):
             bullflag_scanner.pullback = pullback
             bullflag_scanner.tolerance_pct = tolerance
             bullflag_scanner.atr_multiplier = atr_mult
+            bullflag_scanner.research_enabled = research_enabled
             
-            self.main_app.log_msg("⚡ BullFlag settings applied: Max=$.2f, Volume=%s, Entry=%s, Pullback=%s, Tolerance=%.2f, ATR=%.1fx" % (
+            # Initialize research logger if enabled
+            if research_enabled and not hasattr(bullflag_scanner, 'research_logger'):
+                bullflag_scanner.research_logger = ResearchLogger(self.main_app)
+            
+            self.main_app.log_msg("⚡ BullFlag settings applied: Max=$.2f, Volume=%s, Entry=%s, Pullback=%s, Tolerance=%.2f, ATR=%.1fx, Research=%s" % (
                 max_price, "ON" if volume_confirm else "OFF",
                 entry_timing, "ON" if pullback else "OFF", 
-                tolerance, atr_mult))
+                tolerance, atr_mult,
+                "ON" if research_enabled else "OFF"))
     
     def _reset_settings(self):
         """Reset BullFlag settings to defaults."""

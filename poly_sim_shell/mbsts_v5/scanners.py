@@ -176,6 +176,9 @@ class StaircaseBreakoutScanner(BaseScanner):
         self.pullback = False  # Default pullback detection off
         self.tolerance_pct = 0.1  # Default tolerance 10%
         self.atr_multiplier = 1.5  # Default ATR multiplier
+        self.research_enabled = False  # Research logging off by default
+        self.research_logger = None  # Research logger instance
+        self.entry_price = None  # Track entry price for research logging
         
     def analyze(self, close_prices):
         if self.triggered_signal: return self.triggered_signal
@@ -201,6 +204,7 @@ class StaircaseBreakoutScanner(BaseScanner):
                     # Wait for pullback before entering
                     if window[-1] < (recent_high * 0.995):
                         self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed (Pullback)"
+                        self.entry_price = current_price  # Store for research logging
                         return self.triggered_signal
                     else:
                         return "WAIT_PULLBACK"
@@ -208,6 +212,7 @@ class StaircaseBreakoutScanner(BaseScanner):
                     # Conservative entry - wait for confirmation
                     if window[-1] >= (recent_high * 0.999):
                         self.triggered_signal = "BET_UP_CONSERVATIVE|Staircase Breakout Confirmed"
+                        self.entry_price = current_price  # Store for research logging
                         return self.triggered_signal
                     else:
                         return "WAIT_CONSERVATIVE"
@@ -215,8 +220,28 @@ class StaircaseBreakoutScanner(BaseScanner):
                     # Aggressive entry - original logic
                     if window[-1] >= (recent_high * 0.9995):
                         self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed"
+                        self.entry_price = current_price  # Store for research logging
                         return self.triggered_signal
         return "WAIT"
+    
+    def log_research_trade(self, exit_price, result, window_id, rsi_1m, btc_velocity, atr_5m):
+        """Log trade to research file if enabled."""
+        if self.research_enabled and self.research_logger and self.entry_price:
+            settings = {
+                "max_price": self.max_price,
+                "volume_confirm": self.volume_confirm,
+                "entry_timing": self.entry_timing,
+                "pullback": self.pullback,
+                "tolerance_pct": self.tolerance_pct,
+                "atr_multiplier": self.atr_multiplier,
+                "research_enabled": self.research_enabled
+            }
+            
+            side = "UP" if "UP" in self.triggered_signal else "DOWN"
+            self.research_logger.log_trade(
+                settings, self.entry_price, exit_price, side, 
+                result, window_id, rsi_1m, btc_velocity, atr_5m
+            )
 
 class PostPumpScanner(BaseScanner):
     def analyze(self, current_price, current_open, last_window):
