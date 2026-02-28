@@ -1273,34 +1273,54 @@ class SniperApp(App):
                     
                     # Priority 3: Price Gap Logic (enhanced based on log analysis)
                     elif side is None:
-                        if abs(price_diff) >= 0.02:  # Require minimum 2¢ gap for any decision
-                            # Enhanced gap logic: Consider market context before following lead
-                            cur_up = self.market_data.get("up_price", 0.5)
-                            cur_dn = self.market_data.get("down_price", 0.5)
-                            winner = "UP" if cur_up >= cur_dn else "DOWN"
+                        # Enhanced gap logic: Consider market context before following lead
+                        cur_up = self.market_data.get("up_price", 0.5)
+                        cur_dn = self.market_data.get("down_price", 0.5)
+                        winner = "UP" if cur_up >= cur_dn else "DOWN"
+                        
+                        # If strong velocity signal exists, prioritize it over gap following
+                        if velocity <= -300:
+                            # Strong negative velocity overrides gap following
+                            side = "UP"
+                            price = up_ask
+                            decision_reason = f"Velocity Override (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})"
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity override -> {side} (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})[/]")
+                        elif abs(price_diff) >= 0.03:  # Large gap (3¢+) - follow lead
+                            side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
+                            if self.mom_buy_mode == "HYBRID":
+                                decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                            else:
+                                decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                        else:
+                            # Small gaps (0¢-2¢) - make decision based on other factors
+                            atr = getattr(self.market_data_manager, "atr_5m", 0)
+                            trend_4h = self.market_data_manager.trend_4h
                             
-                            # If strong velocity signal exists, prioritize it over gap following
-                            if velocity <= -300:
-                                # Strong negative velocity overrides gap following
+                            # Decision logic for small gaps based on market factors
+                            if trend_4h == "DOWN" and velocity < -100:
+                                # Downtrend with some negative velocity -> UP (mean reversion)
                                 side = "UP"
                                 price = up_ask
-                                decision_reason = f"Velocity Override (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})"
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity override -> {side} (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})[/]")
-                            elif abs(price_diff) >= 0.04:  # Large gap (4¢+) - more reliable
-                                side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                                if self.mom_buy_mode == "HYBRID":
-                                    decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                                else:
-                                    decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                                decision_reason = f"Small Gap Mean Reversion (gap:{abs(price_diff)*100:.1f}¢, trend:DOWN, vel:{velocity:.0f})"
+                            elif trend_4h == "UP" and rsi_1m < 60:
+                                # Uptrend with low RSI -> UP (trend continuation)
+                                side = "UP"
+                                price = up_ask
+                                decision_reason = f"Small Gap Trend Follow (gap:{abs(price_diff)*100:.1f}¢, trend:UP, rsi:{rsi_1m:.1f})"
+                            elif atr > 100:
+                                # High volatility ATR -> follow current winner
+                                side = winner
+                                price = up_ask if side == "UP" else dn_ask
+                                decision_reason = f"Small Gap Volatility Follow (gap:{abs(price_diff)*100:.1f}¢, atr:{atr:.1f})"
                             else:
-                                # Small gaps (2¢-3¢) - defer to window start (unreliable)
-                                if self.mom_buy_mode == "PRE":
-                                    self.call_from_thread(self.log_msg, f"[dim]PRE-BUY gap skip (gap:{abs(price_diff)*100:.1f}¢ < 4¢) -> Deferring to window start[/]")
-                                    return
-                                # HBR mode: allow small gaps (original behavior preserved)
-                                # No action needed - HBR will handle in main logic
+                                # Default: reversal for small gaps
+                                side = "DOWN" if winner == "UP" else "UP"
+                                price = up_ask if side == "UP" else dn_ask
+                                decision_reason = f"Small Gap Reversal (gap:{abs(price_diff)*100:.1f}¢, winner:{winner})"
+                            
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY small gap decision -> {side} ({decision_reason})[/]")
                             
                             # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
                             # and pick the opposite for the next window.
