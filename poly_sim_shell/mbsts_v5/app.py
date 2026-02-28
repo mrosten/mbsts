@@ -231,29 +231,35 @@ class SniperApp(App):
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
-        # Create a time-signatured log file for this session
+        # Create a time-signatured log file for this session in the /logs directory
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.mom_adv_log_file = f"momentum_adv_{session_time}.csv"
+        self.mom_adv_log_file = f"logs/momentum_adv_{session_time}.csv"
         self._init_mom_adv_log()
 
     def _reset_mom_analytics(self):
         return {
-            "pre_15s_gap": None,
-            "gap_5s": None,
-            "gap_10s": None,
-            "gap_15s": None,
+            "pre_15s_gap": None, "btc_pre_15s": None,
+            "btc_pre_60s": None,
+            "gap_5s": None,      "btc_5s": None,
+            "gap_10s": None,     "btc_10s": None,
+            "gap_15s": None,     "btc_15s": None,
+            "up_bid_15s": None,  "down_bid_15s": None, "spread_15s": None,
             "first_55c_side": None, "first_55c_time": None,
             "first_60c_side": None, "first_60c_time": None,
             "first_65c_side": None, "first_65c_time": None,
+            "window_low": None,  "window_high": None,
         }
 
     def _init_mom_adv_log(self):
         if not os.path.exists(self.mom_adv_log_file):
             with open(self.mom_adv_log_file, 'w') as f:
                 header = (
-                    "Window_ID,Pre_15s_Gap,Gap_5s,Gap_10s,Gap_15s,"
+                    "Window_ID,Pre_15s_Gap,BTC_Pre_15s,BTC_Pre_60s,BTC_Velocity_60s,"
+                    "Gap_5s,BTC_5s,Gap_10s,BTC_10s,Gap_15s,BTC_15s,Poly_Spread_15s,"
+                    "UP_Bid_15s,DN_Bid_15s,"
                     "First_55c_Side,First_55c_Time,First_60c_Side,First_60c_Time,"
-                    "First_65c_Side,First_65c_Time,ATR_5m,Winner"
+                    "First_65c_Side,First_65c_Time,RSI_1m,V_1m,"
+                    "Drawdown_UP,Drawdown_DN,ATR_5m,BTC_Open,BTC_Close,Winner"
                 )
                 f.write(header + "\n")
 
@@ -791,12 +797,27 @@ class SniperApp(App):
             fbb = calculate_bb([p['price'] for p in ph[-20:]]) if len(ph) >= 20 else (0,0,0)
 
             # --- Momentum Analytics (v5.9.4) ---
+            cur_btc = d["cur"]
+            if self.mom_analytics["window_low"] is None or cur_btc < self.mom_analytics["window_low"]:
+                self.mom_analytics["window_low"] = cur_btc
+            if self.mom_analytics["window_high"] is None or cur_btc > self.mom_analytics["window_high"]:
+                self.mom_analytics["window_high"] = cur_btc
+
             if elapsed == 5 and self.mom_analytics["gap_5s"] is None:
                 self.mom_analytics["gap_5s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+                self.mom_analytics["btc_5s"] = d["cur"]
             elif elapsed == 10 and self.mom_analytics["gap_10s"] is None:
                 self.mom_analytics["gap_10s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+                self.mom_analytics["btc_10s"] = d["cur"]
             elif elapsed == 15 and self.mom_analytics["gap_15s"] is None:
                 self.mom_analytics["gap_15s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+                self.mom_analytics["btc_15s"] = d["cur"]
+                self.mom_analytics["up_bid_15s"] = d["poly"]["up_bid"]
+                self.mom_analytics["down_bid_15s"] = d["poly"]["down_bid"]
+                # Capture spread at 15s entry mark (standardized for UP side)
+                u_ask, u_bid = d["poly"]["up_ask"], d["poly"]["up_bid"]
+                if u_ask > 0 and u_bid > 0:
+                    self.mom_analytics["spread_15s"] = u_ask - u_bid
 
             # Monitor Milestones: 55c, 60c, 65c
             u_bid, d_bid = d["poly"]["up_bid"], d["poly"]["down_bid"]
@@ -1131,6 +1152,10 @@ class SniperApp(App):
             self.last_second_exit_triggered = True
             await self._run_last_second_exit(self.query_one("#cb_live").value)
 
+        # --- ADV MOM Analytics: 60s Pre-Open Velocity ---
+        if rem == 60 and self.mom_analytics["btc_pre_60s"] is None:
+            self.mom_analytics["btc_pre_60s"] = self.market_data.get("btc_price", 0)
+
         # --- NEXT WINDOW PREVIEW ---
         # 20 seconds before end, fetch the NEXT window's UP/DOWN prices and log them.
         # Next slug = btc-updown-5m-{current_start_ts + 300}
@@ -1192,9 +1217,10 @@ class SniperApp(App):
                     #     - Stable Override: (Reserved for future aggressive logic if needed).
                     #     - Default: Follow 2¢ rule or skip.
                     price_diff = up_ask - dn_ask
-                    # Capture exact 15s pre-window gap for analytics
+                    # Capture exact 15s pre-window gap and BTC price for analytics
                     if self.mom_analytics["pre_15s_gap"] is None:
                         self.mom_analytics["pre_15s_gap"] = price_diff
+                        self.mom_analytics["btc_pre_15s"] = self.market_data.get("btc_price", 0)
                     
                     if self.mom_buy_mode == "ADV":
                         atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
@@ -1368,20 +1394,54 @@ class SniperApp(App):
         # --- Write Momentum Analytics (v5.9.4) ---
         try:
             ma = self.mom_analytics
+            btc_open = self.market_data.get("btc_open", 0)
+            btc_pre_60 = ma.get("btc_pre_60s")
+            velocity = (btc_open - btc_pre_60) if btc_open and btc_pre_60 else 0
+            
+            dd_up = (btc_open - ma["window_low"]) if btc_open and ma["window_low"] else 0
+            dd_dn = (ma["window_high"] - btc_open) if btc_open and ma["window_high"] else 0
+
+            # 1m RSI and Volume
+            rsi_1m, vol_1m = 50.0, 0.0
+            try:
+                closes, _, _, raw = self.market_data_manager.fetch_candles_60m()
+                if closes:
+                    from .market import calculate_rsi
+                    rsi_1m = calculate_rsi(closes, period=14)
+                    if len(raw) >= 2:
+                        vol_1m = float(raw[-2][5]) # Index 5 is volume
+            except: pass
+
             line = (
                 f"{self.market_data['start_ts']},"
                 f"{ma['pre_15s_gap'] if ma['pre_15s_gap'] is not None else ''},"
+                f"{ma['btc_pre_15s'] if ma['btc_pre_15s'] is not None else ''},"
+                f"{ma['btc_pre_60s'] if ma['btc_pre_60s'] is not None else ''},"
+                f"{velocity:.2f},"
                 f"{ma['gap_5s'] if ma['gap_5s'] is not None else ''},"
+                f"{ma['btc_5s'] if ma['btc_5s'] is not None else ''},"
                 f"{ma['gap_10s'] if ma['gap_10s'] is not None else ''},"
+                f"{ma['btc_10s'] if ma['btc_10s'] is not None else ''},"
                 f"{ma['gap_15s'] if ma['gap_15s'] is not None else ''},"
+                f"{ma['btc_15s'] if ma['btc_15s'] is not None else ''},"
+                f"{ma['spread_15s'] if ma['spread_15s'] is not None else ''},"
+                f"{ma['up_bid_15s'] if ma['up_bid_15s'] is not None else ''},"
+                f"{ma['down_bid_15s'] if ma['down_bid_15s'] is not None else ''},"
                 f"{ma['first_55c_side'] or ''},{ma['first_55c_time'] if ma['first_55c_time'] is not None else ''},"
                 f"{ma['first_60c_side'] or ''},{ma['first_60c_time'] if ma['first_60c_time'] is not None else ''},"
                 f"{ma['first_65c_side'] or ''},{ma['first_65c_time'] if ma['first_65c_time'] is not None else ''},"
-                f"{self.market_data_manager.atr_5m:.2f},{winner}"
+                f"{rsi_1m:.2f},{vol_1m:.0f},"
+                f"{dd_up:.2f},{dd_dn:.2f},"
+                f"{self.market_data_manager.atr_5m:.2f},"
+                f"{btc_open:.2f},"
+                f"{self.market_data.get('btc_price', 0):.2f},"
+                f"{winner}"
             )
             with open(self.mom_adv_log_file, 'a') as f:
                 f.write(line + "\n")
-        except: pass
+        except Exception as e:
+            self.log_msg(f"[yellow]MOM Analytics Log Error: {e}[/]")
+
         self.mom_analytics = self._reset_mom_analytics()
 
         self.log_msg("────────────────── WINDOW END ──────────────────", level="ADMIN")

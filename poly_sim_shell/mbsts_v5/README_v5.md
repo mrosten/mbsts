@@ -145,6 +145,23 @@ The **MOM ADV** mode introduces Tier-based trading:
 
 ---
 
+## Momentum Analytics Log (v5.9.4)
+
+A specialized session log `logs/momentum_adv_YYYYMMDD_HHMMSS.csv` is generated automatically to help optimize momentum parameters. It captures one consolidated row per window with these fields:
+
+| Category | Fields |
+|---|---|
+| **Timing** | Window ID (start_ts), Winner (UP/DOWN) |
+| **Pre-Window** | BTC Price & Gap at -15s and -60s. **BTC Velocity** (Move in last 60s). |
+| **Early Open** | BTC Price & Poly Gap at 5s, 10s, and 15s. |
+| **Entry Depth** | UP/DOWN Bids and **Spread** at the 15s mark. |
+| **Milestones** | First side and elapsed time to hit **55¢, 60¢, and 65¢**. |
+| **Volume/RSI** | **1m BTC Volume** and **1m RSI** at settlement. |
+| **Drawdown** | **Max Against** (Window High/Low vs Open) to calculate optimal SL. |
+| **ATR** | 5m Average True Range at settlement. |
+
+---
+
 ## Settlement
 
 At window close:
