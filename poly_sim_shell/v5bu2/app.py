@@ -9,7 +9,7 @@ from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Check
 from textual import work, on, events
 
 from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
-from .market import MarketDataManager, calculate_rsi, calculate_bb, calculate_atr
+from .market import MarketDataManager, calculate_rsi, calculate_bb
 from .risk import RiskManager, AlgorithmPortfolio
 from .broker import TradeExecutor
 from .scanners import (
@@ -96,9 +96,7 @@ class SniperApp(App):
 
     @on(Checkbox.Changed)
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        cb = event.checkbox
-        cb_id = cb.id
-        
+        cb_id = event.checkbox.id
         if cb_id and cb_id.startswith("cb_"):
             code = cb_id[3:]
             try:
@@ -106,14 +104,12 @@ class SniperApp(App):
                 if event.value:
                     lbl.styles.color = "#00ff00"
                     lbl.styles.text_style = "bold"
-                    self.log_msg(f"ENABLED {code.upper()}", level="ADMIN")
+                    self.log_msg(f"Admin: [green]ENABLED[/] {code.upper()}")
                 else:
                     lbl.styles.color = "#666666"
                     lbl.styles.text_style = "none"
-                    self.log_msg(f"DISABLED {code.upper()}", level="ADMIN")
-            except Exception:
-                # Catch NoMatches or KeyErrors from modal checkboxes that bubble up
-                pass
+                    self.log_msg(f"Admin: [red]DISABLED[/] {code.upper()}")
+            except: pass
 
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
@@ -148,12 +144,6 @@ class SniperApp(App):
         self.market_data = self.market_data_manager.market_data 
         self.risk_initialized = False 
         self.last_second_exit_triggered = False
-        self.next_window_preview_triggered = False
-        self.pre_buy_pending = None        # { side, entry, cost } — held outside window_bets across settlement
-        self.pre_buy_triggered = False     # latch: only one pre-buy per window
-        self.mom_buy_mode = "STD"          # "STD" = standard signal | "PRE" = pre-buy next window
-        self.window_realized_revenue = 0.0 # cumulative revenue added this window (TP/SL/manual sells)
-        self.halted = False                # True = bankroll exhausted, all scanning stopped
         self.sl_plus_mode = True
         self.committed_tp = 0.95  # Default TP 95% — only updated on Enter
         self.committed_sl = 0.40  # Default SL 40% — only updated on Enter
@@ -193,26 +183,15 @@ class SniperApp(App):
         self.mid_window_lockout = False
         self.saved_sim_bankroll = None
         self.app_start_time = time.time()
-        self.session_win_count = 0 
-        self.session_total_trades = 0
-        self.session_windows_settled = 0
         self.time_rem_str = "00:00"
         self.blink_state = False
         self.skipped_logs = set()
-        self.session_date_logged = False
         
         # Adjustable global settings
         self.csv_log_freq = 15
         self.last_log_dump = 0
         
         # Persistent algorithm weights
-        # Momentum Advanced Settings (v5.9)
-        self.mom_adv_settings = {
-            "atr_low": 20, "atr_high": 40,
-            "stable_offset": -5, "chaos_offset": 10,
-            "auto_stn_chaos": True, "auto_pbn_stable": False,
-            "shield_time": 45, "shield_reach": 5
-        }
         self.settings_file = "v5_settings.json"
         
         # Base 1.0 weight with 1.67x (20% / 12%) modifier for historically "Strong" scanners
@@ -244,7 +223,6 @@ class SniperApp(App):
                 Label("Open: $0", id="p_btc_open", classes="price_sub"),
                 Label("Diff: $0", id="p_btc_diff", classes="price_sub"),
                 Label("Trend 4H: NEUTRAL", id="p_trend", classes="price_sub"),
-                Label("ATR 5m: $0.00", id="p_atr", classes="price_sub"),
                 id="card_btc", classes="price_card"
             ),
             Vertical(
@@ -461,7 +439,6 @@ class SniperApp(App):
                 except: pass
                 # Flags
                 self.sl_plus_mode = bool(s.get("sl_plus_mode", True))
-                self.mom_buy_mode = s.get("mom_buy_mode", "STD")  # "STD" or "PRE"
                 self.log_msg("[dim]Settings restored from disk.[/]")
         except Exception as e:
             self.log_msg(f"[yellow]Could not restore settings: {e}[/]")
@@ -494,69 +471,18 @@ class SniperApp(App):
             self.risk_initialized = True
 
     @on(Checkbox.Changed, "#cb_tp_active")
-    @on(Checkbox.Changed, "#cb_strong")
     @on(Checkbox.Changed, "#cb_one_trade")
-    @on(Checkbox.Changed, "#cb_whale")
     def on_settings_checkbox_changed(self, event: Checkbox.Changed):
-        """Auto-persist setting checkboxes and log them."""
+        """Auto-persist TP/SL active and 1-Trade-Max checkbox state immediately."""
         self.save_settings()
-        cid = event.checkbox.id
-        name = ""
-        if cid == "cb_tp_active": name = "TP/SL Monitoring"
-        elif cid == "cb_strong": name = "Strong Only Mode"
-        elif cid == "cb_one_trade": name = "1 Trade Max Guard"
-        elif cid == "cb_whale": name = "Whale Protect"
-        
-        if name:
-            state = "ENABLED" if event.value else "DISABLED"
-            self.log_msg(f"{state} {name}", level="ADMIN")
 
-    def log_msg(self, msg, level="INFO"):
-        """
-        Enhanced logging with TTG (Time-To-Go) prefixes and categorization.
-        Levels: ADMIN (Blue), SCAN (Gray), TRADE (Green/Red), MONEY (Gold), ERROR (Banner)
-        """
-        now_ts = time.time()
-        timestamp = datetime.fromtimestamp(now_ts).strftime('%H:%M:%S')
+    def log_msg(self, msg):
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        self.query_one(RichLog).write(f"[{timestamp}] {msg}")
         
-        # Calculate TTG Prefix [T-MM:SS]
-        ttg_str = ""
-        if self.market_data.get("start_ts", 0) > 0:
-            rem = max(0, TradingConfig.WINDOW_SECONDS - int(now_ts - self.market_data["start_ts"]))
-            ttg_str = f"[T-{rem//60:02d}:{rem%60:02d}] "
-
-        # Color/Category Mapping
-        lv = level.upper()
-        tag = f"[{lv:<8}]"
-        prefix = f"{ttg_str}{tag}"
-        
-        # Outcome-based coloring (overrides category color)
-        msg_lower = msg.lower()
-        is_profit = any(x in msg_lower for x in ["profit", "win", "pnl: +", "rev: +", "refill: +"])
-        is_loss = any(x in msg_lower for x in ["loss", "lose", "failed", "pnl: -", "err"])
-        
-        if not getattr(self, "session_date_logged", False):
-            self.session_date_logged = True
-            date_str = datetime.fromtimestamp(now_ts).strftime('%Y-%m-%d')
-            self.query_one(RichLog).write(f"[bold white]=== SESSION START: {date_str} ===[/]")
-
-        if is_profit:         display_msg = f"[bold green]{prefix}{msg}[/]"
-        elif is_loss:         display_msg = f"[bold red]{prefix}{msg}[/]"
-        elif lv == "ADMIN":   display_msg = f"[bold sky_blue3]{prefix}{msg}[/]"
-        elif lv == "SCAN":    display_msg = f"[dim white]{prefix}{msg}[/]"
-        elif lv == "TRADE":   display_msg = f"[bold green]{prefix}{msg}[/]"
-        elif lv == "MONEY":   display_msg = f"[bold gold3]{prefix}{msg}[/]"
-        elif lv == "ERROR":   display_msg = f"[bold white on red] !!! {lv:<8}: {msg} !!! [/]"
-        else:                display_msg = f"{ttg_str}{msg}" # Default INFO style
-
-        self.query_one(RichLog).write(display_msg)
-        
-        # Mirror to console log file for persistence (pure ASCII scrubbing)
+        # Strip simple rich tags like [bold red] or [/]
         import re
-        # 1. Strip Rich tags
-        clean_msg = re.sub(r'\[/?[a-z #0-9,.]+\]', '', display_msg if lv != "INFO" else msg)
-        # 2. Strip non-ASCII characters (emojis/symbols)
-        clean_msg = clean_msg.encode('ascii', 'ignore').decode('ascii').strip()
+        clean_msg = re.sub(r'\[.*?\]', '', msg)
         
         try:
             with open(self.console_log_file, "a", encoding="utf-8") as f:
@@ -605,7 +531,6 @@ class SniperApp(App):
                 "cb_tp_active":  _cb("#cb_tp_active", False),
                 "cb_one_trade":  _cb("#cb_one_trade", False),
                 "sl_plus_mode":  self.sl_plus_mode,
-                "mom_buy_mode":  self.mom_buy_mode,
             }
             with open(self.settings_file, "w") as f:
                 json.dump(data, f, indent=4)
@@ -650,14 +575,9 @@ class SniperApp(App):
             btn_sd.label = f"SELL DN\n(${sd * md['down_bid']:.2f})" if sd > 0 else "SELL DN"
 
     async def fetch_market_loop(self):
-        if self.halted: return  # Bot frozen — bankroll exhausted
         try:
             now = datetime.now(timezone.utc); floor = (now.minute // 5) * 5
             ts_start = int(now.replace(minute=floor, second=0, microsecond=0).timestamp())
-            
-            # Map scanner names to their UI checkbox IDs
-            scanner_map = {name: f"#cb_{name.lower()}" for name in self.scanners}
-            
             if not self.risk_initialized:
                 try:
                     val = float(self.query_one("#inp_risk_alloc").value)
@@ -667,31 +587,10 @@ class SniperApp(App):
             is_new_window = False
             is_first_tick = (self.market_data["start_ts"] == 0)
             
-            if ts_start != self.market_data["start_ts"]:
-                if not is_first_tick:
-                    is_new_window = True
-                
-                self.market_data["start_ts"] = ts_start # Latch immediately to prevent double-trigger
-                self.sim_broker.promote_prebuy()  # Move any pre-buy shares/costs to current window
-                now_ts = time.time()
-                wall_time = datetime.fromtimestamp(now_ts).strftime('%H:%M:%S')
-                self.log_msg(f"[{wall_time}] ════════ NEW WINDOW #{ts_start} STARTING ════════", level="ADMIN")
-                
+            if not is_first_tick and ts_start != self.market_data["start_ts"]:
+                is_new_window = True
                 self.window_settled = False # reset latch for new window
                 self.last_second_exit_triggered = False # reset latch for late exits
-                self.next_window_preview_triggered = False # reset next-window preview latch
-                self.pre_buy_triggered = False # reset pre-buy latch for new window
-                self.window_realized_revenue = 0.0 # reset revenue tracker for new window
-                
-                # Transfer any pre-buy position into window_bets so TP/SL monitors it
-                if self.pre_buy_pending:
-                    sd = self.pre_buy_pending.get("side", "??")
-                    key = f"Momentum_PreBuy_{time.time()}"
-                    self.window_bets[key] = self.pre_buy_pending
-                    # Note: Shares are promoted by sim_broker.promote_prebuy() above.
-                    self.pre_buy_pending = None
-                    self.log_msg(f"[bold cyan]🚀 PRE-BUY {sd} transferred to new window — now under TP/SL monitoring[/]")
-
                 self.skipped_logs.clear() # reset the spam preventer
                 self.pending_bets.clear() # discard any stale pending bets from last window
                 for sc in self.scanners.values(): sc.reset() # reset all scanner signals/timers
@@ -702,7 +601,7 @@ class SniperApp(App):
 
             # Calculate correct elapsed time using the actual window start
             elapsed = int(now.timestamp()) - ts_start
-            # Moved self.market_data["start_ts"] = ts_start up to the is_new_window block for race safety
+            self.market_data["start_ts"] = ts_start
             
             # Mid-Window Safety Lockout Activation (If booting the bot deeply into a round)
             if is_first_tick and elapsed > 10:
@@ -722,15 +621,7 @@ class SniperApp(App):
             if is_new_window:
                 if self.query_one("#cb_live").value:
                     self.live_broker.update_balance()
-                
-                # Check for active positions inherited (like pre-buys)
-                active_str = ""
-                open_bets = [info for info in self.window_bets.values() if not info.get("closed")]
-                if open_bets:
-                    unique_sides = sorted(list(set(info["side"] for info in open_bets)))
-                    active_str = f" | [bold green]Active: {', '.join(unique_sides)}[/]"
-                
-                self.log_msg(f"NEW WINDOW STARTED | Open: [bold white]${opn:,.2f}[/]{active_str}")
+                self.log_msg(f"[bold magenta]🔔 NEW WINDOW STARTED[/] | Open: [bold white]${opn:,.2f}[/]")
 
             def gather_rest():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
@@ -742,10 +633,6 @@ class SniperApp(App):
 
             candles, poly = await asyncio.to_thread(gather_rest)
             c60, l60, h60, _ = candles
-            
-            # Update ATR 5m
-            if h60 and l60 and c60:
-                self.market_data_manager.atr_5m = calculate_atr(h60, l60, c60, period=5)
             
             d = {"c60":c60, "l60":l60, "h60":h60, "cur":cur, "opn":opn, "poly":poly}
             
@@ -804,95 +691,56 @@ class SniperApp(App):
 
                 for name, sc in self.scanners.items():
                     if not self.query_one(scanner_map[name]).value: continue
-                    
-                    # 1. Check Signal
-                    res = sc.get_signal(d) if hasattr(sc, "get_signal") else "WAIT"
-                    # Backward compatibility for scanners without get_signal() wrapper
-                    if res == "WAIT" and name == "NPattern": res = sc.analyze(ph, d["opn"])
-                    elif res == "WAIT" and name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
-                    elif res == "WAIT" and name == "Momentum":
-                        if self.mom_buy_mode == "ADV":
-                            atr = getattr(self.market_data_manager, "atr_5m", 0)
-                            base_t = float(self.query_one("#inp_mom_threshold").value) / 100.0
-                            adj = 0
-                            if atr <= self.mom_adv_settings["atr_low"]: adj = self.mom_adv_settings["stable_offset"] / 100.0
-                            elif atr >= self.mom_adv_settings["atr_high"]: adj = self.mom_adv_settings["chaos_offset"] / 100.0
-                            sc.threshold = base_t + adj
-                        else:
-                            try: sc.threshold = float(self.query_one("#inp_mom_threshold").value) / 100.0
-                            except: pass
-                        res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
-                    elif res == "WAIT" and name == "TrapCandle": res = sc.analyze(ph, d["opn"])
-                    elif res == "WAIT" and name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
-                    elif res == "WAIT" and name == "LateReversal": res = sc.analyze(ph, d["opn"], elapsed)
-                    elif res == "WAIT" and name == "BullFlag": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "PostPump": res = sc.analyze(d["cur"], d["opn"], {})
-                    elif res == "WAIT" and name == "StepClimber": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "Slingshot": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "MinOne": res = sc.analyze(ph, elapsed)
-                    elif res == "WAIT" and name == "Liquidity": res = sc.analyze(d["cur"], min(d["l60"]) if d["l60"] else 0, d["opn"])
-                    elif res == "WAIT" and name == "Cobra": res = sc.analyze(d["c60"], d["cur"], elapsed)
-                    elif res == "WAIT" and name == "Mesa": res = sc.analyze(ph, d["opn"], elapsed)
-                    elif res == "WAIT" and name == "MeanReversion": res = sc.analyze(ph, fbb, self.market_data_manager.trend_4h)
-                    elif res == "WAIT" and name == "GrindSnap": res = sc.analyze(ph, elapsed)
-                    elif res == "WAIT" and name == "VolCheck": res = sc.analyze(d["c60"], d["cur"], d["opn"], elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
+                    res = "WAIT"
+                    if name == "NPattern": res = sc.analyze(ph, d["opn"])
+                    elif name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
+                    elif name == "Momentum": res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
+                    elif name == "TrapCandle": res = sc.analyze(ph, d["opn"])
+                    elif name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
+                    elif name == "LateReversal": res = sc.analyze(ph, d["opn"], elapsed)
+                    elif name == "BullFlag": res = sc.analyze(d["c60"])
+                    elif name == "PostPump": res = sc.analyze(d["cur"], d["opn"], {})
+                    elif name == "StepClimber": res = sc.analyze(d["c60"])
+                    elif name == "Slingshot": res = sc.analyze(d["c60"])
+                    elif name == "MinOne": res = sc.analyze(ph, elapsed)
+                    elif name == "Liquidity": res = sc.analyze(d["cur"], min(d["l60"]) if d["l60"] else 0, d["opn"])
+                    elif name == "Cobra": res = sc.analyze(d["c60"], d["cur"], elapsed)
+                    elif name == "Mesa": res = sc.analyze(ph, d["opn"], elapsed)
+                    elif name == "MeanReversion": res = sc.analyze(ph, fbb, self.market_data_manager.trend_4h)
+                    elif name == "GrindSnap": res = sc.analyze(ph, elapsed)
+                    elif name == "VolCheck": res = sc.analyze(d["c60"], d["cur"], d["opn"], elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
 
-                    if res == "WAIT": continue
-                    if res == "NONE":
-                        reason = getattr(sc, "last_skip_reason", None)
-                        if reason and f"SKIP_{name}_{reason}" not in self.skipped_logs:
-                            self.log_msg(f"SKIP {name} | {reason}", level="SCAN")
-                            self.skipped_logs.add(f"SKIP_{name}_{reason}")
-                        continue
-                        
-                    if "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
-                        # 2. 1-Trade-Max Guard
+                    if res and "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
                         if self.query_one("#cb_one_trade").value and self.window_bets: continue
                         
-                        # 3. Strong Only Filter
-                        if self.query_one("#cb_strong").value:
-                            strong_keywords = {"STRONG", "CONFIRMED", "HEAVY", "MAX", "90", "SNIPER"}
-                            if not any(k in str(res).upper() for k in strong_keywords):
-                                if f"SKIP_STRONG_{name}" not in self.skipped_logs:
-                                    self.log_msg(f"SKIP {name} | Strong Only active (Sig: {res})", level="SCAN")
-                                    self.skipped_logs.add(f"SKIP_STRONG_{name}")
-                                continue
-
-                        # 4. Minimum Difference Filter
+                        # Apply Min Diff filter
                         try: min_diff = float(self.query_one("#inp_min_diff").value)
-                        except: min_diff = 0
-                        if abs(d["cur"] - d["opn"]) < min_diff:
-                            if f"SKIP_DIFF_{name}" not in self.skipped_logs:
-                                self.log_msg(f"SKIP {name} | Diff ${abs(d['cur']-d['opn']):.2f} < Min ${min_diff:.2f}", level="SCAN")
-                                self.skipped_logs.add(f"SKIP_DIFF_{name}")
-                            continue
-
-                        # 5. Bet Sizing
+                        except: min_diff = 0.0
+                        if min_diff > 0:
+                            diff = abs(d["cur"] - d["opn"])
+                            if diff < min_diff:
+                                self.log_msg(f"[dim]SKIP {name} | Diff ${diff:.2f} < Min ${min_diff:.0f}[/]")
+                                continue
+                                
                         bs = self.risk_manager.calculate_bet_size(str(res), self.portfolios[name].balance, self.portfolios[name].consecutive_losses, {'trend_4h':self.market_data_manager.trend_4h, 'direction':"UP" if "UP" in str(res) else "DOWN"})
                         if "MOM" in str(res):
-                            if getattr(self, "mom_buy_mode", "STD") != "STD":
-                                continue
-                            try: bs = float(self.query_one("#inp_amount").value)
+                            try: bs = float(self.query_one("#inp_amount").value)  # MOM: use UI Bet $ field
                             except: bs = self.portfolios[name].balance * 0.12
                         
+                        # Apply Scanner Weight Multiplier
                         weight = self.scanner_weights.get(name[:3].upper(), 1.0)
+                        if weight <= 0.0:
+                            continue
                         bs = bs * weight
-
-                        # 6. Whale Protect
-                        if self.query_one("#cb_whale").value:
-                            max_whale = self.risk_manager.risk_bankroll * 0.25
-                            if bs > max_whale:
-                                self.log_msg(f"Whale Protect cap {name} ${bs:.2f} -> ${max_whale:.2f}", level="ADMIN")
-                                bs = max_whale
                         
                         if bs > 0:
                             sd = "UP" if "UP" in str(res) else "DOWN"
                             pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                             
-                            # 7. Price Bounds
+                            # Apply Option Price Bounds
                             try: min_pr = float(self.query_one("#inp_min_price").value)
                             except: min_pr = 0.01
                             try: max_pr = float(self.query_one("#inp_max_price").value)
@@ -900,41 +748,57 @@ class SniperApp(App):
                             
                             if pr < min_pr or pr > max_pr:
                                 if pr < min_pr and name not in self.pending_bets:
+                                    # Too cheap -> queue as waiting order
                                     self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
-                                    try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
+                                    try:
+                                        lbl = self.query_one(f"#lbl_{name[:3].lower()}")
+                                        lbl.add_class("blinking")
                                     except: pass
-                                    self.log_msg(f"QUEUED {name} {sd} | Wait for {min_pr*100:.1f}c (Now {pr*100:.1f}c)", level="SCAN")
+                                    self.log_msg(f"[dim]QUEUED {name} {sd} | Waiting for price {min_pr*100:.1f}¢ (Now {pr*100:.1f}¢)[/]")
                                 elif pr > max_pr:
                                     if f"SKIP_MAX_{name}" not in self.skipped_logs:
-                                        self.log_msg(f"SKIP {name} | Price {pr*100:.1f}c > Max {max_pr*100:.1f}c", level="SCAN")
+                                        self.log_msg(f"[dim]SKIP {name} {sd} | Price {pr*100:.1f}¢ too high (Max {max_pr*100:.1f}¢)[/]")
                                         self.skipped_logs.add(f"SKIP_MAX_{name}")
                                 continue
-
-                            # 8. Moshe Override
+                            
+                            # Override execution price for Moshe Limit Buys
                             if "MOSHE_90" in str(res):
-                                pr = 0.86; moshe_scanner = self.scanners.get("Moshe")
+                                pr = 0.86 
+                                moshe_scanner = self.scanners.get("Moshe")
                                 bs = getattr(moshe_scanner, "bet_size", 1.00)
-                                if bs > self.risk_manager.risk_bankroll: bs = self.risk_manager.risk_bankroll
-                                if bs <= 0.05: continue
-                                self.log_msg(f"MOSHE 0.86 Override | Payout Opt: 0.99", level="ADMIN")
-
+                                if bs > self.risk_manager.risk_bankroll:
+                                    bs = self.risk_manager.risk_bankroll
+                                    if bs > 0:
+                                        self.log_msg(f"[yellow]MOSHE RESIZED[/] Bankroll capping bet to ${bs:.2f}")
+                                if bs <= 0.05:
+                                    self.log_msg(f"[red]MOSHE SKIPPED[/] Insufficient Risk Bankroll (${self.risk_manager.risk_bankroll:.2f}).")
+                                    continue
+                                self.log_msg(f"[yellow]MOSHE OVERRIDE[/] Hit 0.86! Placing ${bs:.2f} Market Buy (Lim 0.99).")
+                               
                             if pr and 0.01 < pr < 0.99:
-                                ok, msg = self.trade_executor.execute_buy(self.query_one("#cb_live").value, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_4h}, reason=res)
+                                is_l = self.query_one("#cb_live").value
+                                
+                                # Build Context for Validated Logging
+                                ctx = {
+                                    'signal_price': d["cur"],
+                                    'rsi':rsi,
+                                    'trend': self.market_data_manager.trend_4h,
+                                    'risk_bal': self.risk_manager.risk_bankroll
+                                }
+                                
+                                ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=res)
                                 if ok:
                                     self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
                                     self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
-                                    self.session_total_trades += 1
-                                    self.log_msg(f"BUY {name} {sd} @ {pr*100:.1f}c | {msg}", level="TRADE")
+                                    self.log_msg(f"[bold green]EXECUTED {name}[/]: {msg}")
                                 else:
-                                    self.log_msg(f"BUY FAILED {name}: {msg}", level="ERROR")                            
+                                    self.log_msg(f"[bold red]FAILED {name}[/]: {msg}")
 
             await self._check_tpsl()
             self.update_balance_ui(); self.update_sell_buttons()
-            self.query_one("#p_up").update(f"{self.market_data['up_ask']*100:.1f}¢")
-            self.query_one("#p_down").update(f"{self.market_data['down_ask']*100:.1f}¢")
+            self.query_one("#p_up").update(f"{self.market_data['up_price']*100:.1f}¢")
+            self.query_one("#p_down").update(f"{self.market_data['down_price']*100:.1f}¢")
             self.query_one("#p_btc").update(f"${self.market_data['btc_price']:,.2f}")
-            self.query_one("#p_trend").update(f"Trend 4H: {self.market_data_manager.trend_4h}")
-            self.query_one("#p_atr").update(f"ATR 5m: ${self.market_data_manager.atr_5m:.2f}")
             self.query_one("#p_btc_open").update(f"Open: ${self.market_data['btc_open']:,.2f}")
             df = self.market_data['btc_price'] - self.market_data['btc_open']
             self.query_one("#p_btc_diff").update(f"Diff: {'+' if df>=0 else '-'}${abs(df):.2f}")
@@ -969,15 +833,10 @@ class SniperApp(App):
                 lp = cbid if not is_l else max(0.02, cbid-0.02)
                 ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason)
                 if ok:
+                    self.log_msg(f"[bold yellow]⚡ {reason} | Closed {side} @ {cur*100:.1f}¢[/]")
                     info["closed"] = True
                     realized_loss = info["cost"] - realized_rev
                     if realized_rev > 0: self._add_risk_revenue(realized_rev)
-                    
-                    if realized_rev > info["cost"]:
-                        self.session_win_count += 1 # TP/Max Profit hit
-                        self.log_msg(f"{reason} | [bold green]WIN[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
-                    else:
-                        self.log_msg(f"{reason} | [bold red]LOSS[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
                     
                     # --- SL+ RECOVERY LOGIC ---
                     # Guard: never chain recovery on a recovery bet to prevent infinite loops
@@ -1012,24 +871,9 @@ class SniperApp(App):
             if self.sim_broker.shares["DOWN"] > 0: sides.add("DOWN")
         
         for side in sides:
-            # Emergency Whale Shield (v5.9)
-            if self.mom_buy_mode == "ADV":
-                adv = self.mom_adv_settings
-                rem = TradingConfig.WINDOW_SECONDS - (time.time() - self.market_data["start_ts"])
-                if rem <= adv["shield_time"]:
-                    up_p = self.market_data.get("up_price", 0.5)
-                    reach = adv["shield_reach"] / 100.0
-                    if abs(up_p - 0.50) <= reach:
-                        self.log_msg(f"🛡️ WHALE SHIELD: Market too tight ({up_p*100:.1f}¢). Emergency Exit.", level="MONEY")
-                        await self.trigger_sell_all("UP")
-                        await self.trigger_sell_all("DOWN")
-                        self.last_second_exit_triggered = True
-                        return
-
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
             cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
-
-            # Standard TP/SL Exit logic
+            
             if not is_live:
                 # SIM HYPOTHETICAL LOGGING
                 # Calculate exact shares from window_bets for THIS window
@@ -1039,14 +883,7 @@ class SniperApp(App):
                     # "If we were live we would sell X shares of winning side at 99c right now..."
                     self.log_msg(f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
-
-            # LIVE: Skip if position has clearly lost (bid < 10¢ with no triggered SL).
-            # At this point with seconds left, anything under 10¢ will expire worthless —
-            # attempting a sell just generates PolyApiException / "Size too small" errors.
-            if cbid < 0.10:
-                self.log_msg(f"[dim]⏱ SKIP FINAL EXIT {side} — position at {cbid*100:.1f}¢, clearly lost. Letting expire.[/]")
-                continue
-
+                
             # For LIVE: User requested strict resting limit order at $0.99
             lp = 0.99 if is_live else 0.0
             
@@ -1071,215 +908,55 @@ class SniperApp(App):
                 self.log_msg(f"[bold red]⏱ FINAL EXIT {side} FAILED:[/] {msg}")
 
     async def update_timer(self):
-        # Update session runtime regardless of market data status
-        run = int(time.time() - self.app_start_time)
-        self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d}")
-
         if not self.market_data["start_ts"]: return
-        
         rem = max(0, TradingConfig.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
         self.time_rem_str = f"{rem//60:02d}:{rem%60:02d}"
         self.query_one("#lbl_timer_big").update(self.time_rem_str)
         if rem <= 1 and not self.last_second_exit_triggered:
             self.last_second_exit_triggered = True
             await self._run_last_second_exit(self.query_one("#cb_live").value)
-
-        # --- NEXT WINDOW PREVIEW ---
-        # 20 seconds before end, fetch the NEXT window's UP/DOWN prices and log them.
-        # Next slug = btc-updown-5m-{current_start_ts + 300}
-        if rem <= 20 and not self.next_window_preview_triggered and self.market_data["start_ts"] > 0:
-            self.next_window_preview_triggered = True
-            next_ts = self.market_data["start_ts"] + TradingConfig.WINDOW_SECONDS
-            next_slug = f"btc-updown-5m-{next_ts}"
-            def _fetch_next():
-                try:
-                    d = self.market_data_manager.fetch_polymarket(next_slug)
-                    up_bid  = d.get("up_bid",  0)
-                    dn_bid  = d.get("down_bid", 0)
-                    up_ask  = d.get("up_ask",  0)
-                    dn_ask  = d.get("down_ask", 0)
-                    if up_bid > 0 or dn_bid > 0:
-                        self.call_from_thread(
-                            self.log_msg,
-                            f"NEXT WINDOW ({next_slug}): "
-                            f"UP bid=[dim]{up_bid*100:.1f}¢[/] ask=[bold green]{up_ask*100:.1f}¢[/]  "
-                            f"DN bid=[dim]{dn_bid*100:.1f}¢[/] ask=[bold red]{dn_ask*100:.1f}¢[/]"
-                        )
-                    else:
-                        self.call_from_thread(self.log_msg, f"[dim]🔭 Next window not yet available ({next_slug})[/]")
-                except Exception as e:
-                    self.call_from_thread(self.log_msg, f"[dim]🔭 Next window fetch failed: {e}[/]")
-            import threading
-            threading.Thread(target=_fetch_next, daemon=True).start()
-        # ---------------------------
-
-        # --- PRE-BUY NEXT WINDOW (rem <= 15, MOM Pre-Buy or Hybrid mode) ---
-        if (rem <= 15 and not self.pre_buy_triggered
-                and self.mom_buy_mode in ["PRE", "HYBRID"]
-                and self.market_data["start_ts"] > 0
-                and self.query_one("#cb_mom").value):
-            self.pre_buy_triggered = True
-            next_ts   = self.market_data["start_ts"] + TradingConfig.WINDOW_SECONDS
-            next_slug = f"btc-updown-5m-{next_ts}"
-            is_live   = self.query_one("#cb_live").value
-            try: bet_size = float(self.query_one("#inp_amount").value)
-            except: bet_size = 1.0
-            trend = self.market_data_manager.trend_4h  # "UP" / "DOWN" / "NEUTRAL"
-
-            def _do_prebuy():
-                try:
-                    d = self.market_data_manager.fetch_polymarket(next_slug)
-                    up_ask = d.get("up_ask", 0)
-                    dn_ask = d.get("down_ask", 0)
-                    if up_ask <= 0 and dn_ask <= 0:
-                        self.call_from_thread(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
-                        return
-
-                    # New Selection Logic (v5.6/v5.7/v5.9):
-                    # - If 2¢ lead: Follow it.
-                    # - If < 2¢ gap:
-                    #     - In PRE mode: Reverse the current winner.
-                    #     - In HYBRID mode: Skip and defer to new window.
-                    # - In ADV mode (v5.9):
-                    #     - Chaos Override: Skip if ATR is high and Auto-STN enabled.
-                    #     - Stable Override: (Reserved for future aggressive logic if needed).
-                    #     - Default: Follow 2¢ rule or skip.
-                    price_diff = up_ask - dn_ask
-                    
-                    if self.mom_buy_mode == "ADV":
-                        atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
-                        adv = self.main_app.mom_adv_settings
-                        if atr >= adv["atr_high"] and adv["auto_stn_chaos"]:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY chaos skip (ATR:{atr:.1f}) -> Forcing STN[/]")
-                            return
-                        # Default to 2¢ follow for ADV if no override
-                        if abs(price_diff) >= 0.02:
-                            side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring[/]")
-                            return
-                    elif abs(price_diff) >= 0.02:
-                        side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                        if self.mom_buy_mode == "HYBRID":
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                    else:
-                        if self.mom_buy_mode == "HYBRID":
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring to window start[/]")
-                            return
-                        
-                        # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
-                        # and pick the opposite for the next window.
-                        cur_up = self.market_data.get("up_price", 0.5)
-                        cur_dn = self.market_data.get("down_price", 0.5)
-                        winner = "UP" if cur_up >= cur_dn else "DOWN"
-                        side = "DOWN" if winner == "UP" else "UP"
-                        price = up_ask if side == "UP" else dn_ask
-                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner}) -> {side}[/]")
-
-                    token_id = d.get("up_id" if side == "UP" else "down_id")
-                    ok, msg = self.trade_executor.execute_buy(
-                        is_live, side, bet_size, price, token_id,
-                        context={}, reason="PreBuy_NextWindow"
-                    )
-                    if ok:
-                        pending = {"side": side, "entry": price, "cost": bet_size}
-                        self.session_total_trades += 1 # Pre-Buy Trade
-                        def _commit(p=pending, s=side, pr=price, m=msg, bs=bet_size):
-                            self.pre_buy_pending = p
-                            self.risk_manager.register_bet(bs)
-                            self.log_msg(
-                                f"PRE-BUY NEXT {s} @ {pr*100:.1f}¢[dim] — "
-                                f"${bs:.2f} committed. Holding for next window ({next_slug})[/]"
-                            )
-                            self.update_balance_ui()
-                        self.call_from_thread(_commit)
-                    else:
-                        self.call_from_thread(self.log_msg, f"[bold red]🚀 PRE-BUY FAILED:[/] {msg}")
-                except Exception as e:
-                    self.call_from_thread(self.log_msg, f"[dim]🚀 PRE-BUY error: {e}[/]")
-
-            import threading
-            threading.Thread(target=_do_prebuy, daemon=True).start()
-        # ----------------------------------------------------------
             
         # Trigger Settlement precisely on the exact dot of the 59th second
         if rem <= 1 and not self.window_settled:
             self.window_settled = True
             self.trigger_settlement()
-
-    def _check_bankroll_exhaustion(self):
-        """After each settlement, freeze the bot if it can no longer afford another bet."""
-        if self.halted: return
-
-        br = self.risk_manager.risk_bankroll
-        try: min_bet = float(self.query_one("#inp_amount").value)
-        except: min_bet = 1.0
-        hard_floor = 1.0  # Absolute minimum to even consider a bet
-
-        # Only freeze if a bet was actually placed this window (we lost) AND
-        # the bankroll can no longer cover the minimum bet size.
-        had_bet = bool(self.window_bets)
-        cannot_afford = br < max(min_bet, hard_floor)
-
-        if had_bet and cannot_afford:
-            self.halted = True
-            is_live = self.query_one("#cb_live").value
-            mode_str = "LIVE" if is_live else "SIM"
-
-            # Final CSV snapshot
-            self.dump_state_log()
-
-            final_msg = (
-                f"🔴 BOT FROZEN [{mode_str}] | Bankroll: ${br:.2f} | "
-                f"Min Bet: ${min_bet:.2f} | Cannot place another trade. All scanning stopped."
-            )
-            self.log_msg(f"[bold red]{final_msg}[/]")
-
-            # Write final line to console log file
-            try:
-                from datetime import datetime as _dt
-                with open(self.console_log_file, "a", encoding="utf-8") as f:
-                    f.write(f"\n{'='*60}\nFINAL LOG — {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n{final_msg}\n{'='*60}\n")
-            except: pass
-
-            # Show frozen modal (must run on UI thread)
-            self.push_screen(BankrollExhaustedModal(br, min_bet, mode_str))
+            
+        run = int(time.time() - self.app_start_time)
+        self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d}")
 
     def trigger_settlement(self):
         if self.market_data["start_ts"] == 0: return
-
         winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
-        self.log_msg(f"SETTLED: [bold white]{winner}[/]", level="MONEY")
+        self.log_msg(f"[bold yellow]SETTLED:[/][bold white] {winner}[/]")
+        
+        # --- AUTO-RECOVERY LOGIC (DISABLED) ---
+        # for key, info in self.window_bets.items():
+        #     if info.get("closed"): continue
+        #     if info["side"] != winner:
+        #         name = key.split("_")[0]
+        #         self.pending_bets[name] = {"side": info["side"], "bs": info["cost"], "res": f"LOSS RECOVERY ({name})"}
+        #         try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
+        #         except: pass
+        #         self.log_msg(f"[bold red]RECOVERY QUEUED:[/] {name} lost on {info['side']}. Rolled over to next window.")
+        # ---------------------------------------
+        
         payout, net_pnl = self.sim_broker.settle_window(winner)
         for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
         
+        # In live mode the sim broker has no shares, so net_pnl/payout are always $0 —
+        # suppress the misleading log line. The LIVE Settlement Refill block below handles it.
         is_live = self.query_one("#cb_live").value
-        # Accuracy: Count settlement winners
-        for info in self.window_bets.values():
-            if not info.get("closed") and info.get("side") == winner:
-                self.session_win_count += 1
-        
-        self.session_windows_settled += 1
-        if self.session_windows_settled > 1:
-            acc_val = (self.session_win_count / self.session_total_trades * 100) if self.session_total_trades > 0 else 0
-            acc_str = f"{acc_val:.1f}%"
-        else:
-            acc_str = "N/A"
-
-        upt = int(time.time() - self.app_start_time)
-        upt_str = f"{upt//3600:02d}:{(upt%3600)//60:02d}:{upt%60:02d}"
-        self.log_msg(f"PULSE | RUN: {upt_str} | Session Trades: {self.session_total_trades} | Accuracy: {acc_str}", level="ADMIN")
-        
+        if not is_live:
+            color = "green" if net_pnl >= 0 else "red"
+            self.log_msg(f"[bold {color}]💰 Settlement Net PnL: ${net_pnl:.2f} (Rev: ${payout:.2f})[/]")
         self._add_risk_revenue(payout)
 
-        # --- BANKROLL EXHAUSTION CHECK ---
-        self._check_bankroll_exhaustion()
-        if self.halted: return
-
         # --- LIVE SETTLEMENT REFILL ---
+        # For live positions that settled in-the-money but whose final-exit sell failed
+        # (e.g. PolyApiException), the bankroll was never refilled from the win.
+        # Polymarket settles winning shares at $1.00 each, so we can calculate
+        # the exact payout from window_bets: shares = cost / entry_price.
+        # Reuse is_live already computed above
         if is_live:
             live_win_payout = 0.0
             for info in self.window_bets.values():
@@ -1291,16 +968,14 @@ class SniperApp(App):
                     shares = cost / entry
                     live_win_payout += shares * 1.00  # Settles at $1.00/share
             if live_win_payout > 0:
-                self.log_msg(f"LIVE Settlement Refill: +${live_win_payout:.2f} (winning shares x $1.00)", level="MONEY")
+                self.log_msg(f"[bold green]💰 LIVE Settlement Refill: +${live_win_payout:.2f} (winning shares × $1.00)[/]")
                 self._add_risk_revenue(live_win_payout)
+        # ------------------------------
 
         self.risk_manager.reset_window(); self.last_second_exit_triggered = False
         self.update_balance_ui(); self.window_bets.clear()
         for s in self.scanners.values(): s.reset()
         self.market_data_manager.reset_history()
-
-        self.log_msg("────────────────── WINDOW END ──────────────────", level="ADMIN")
-        self.log_msg("") # Whitespace after window end
 
     def _add_risk_revenue(self, amount):
         """Adds revenue back to the usable bankroll with strict wallet clamping."""
@@ -1311,7 +986,6 @@ class SniperApp(App):
 
         # 1. Add revenue to current bankroll
         self.risk_manager.risk_bankroll += amount
-        self.window_realized_revenue += amount  # track for settlement log
 
         # 2. In LIVE mode: allow target_bankroll to grow with wins so the bankroll
         #    compounds. Without this, every win was silently clamped back to the
@@ -1367,7 +1041,6 @@ class SniperApp(App):
         
         ok, msg = self.trade_executor.execute_buy(is_l, side, val, pr or 0.5, tid, context=ctx, reason="Manual")
         if ok:
-            self.session_total_trades += 1 # Manual Buy
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
             if self.risk_initialized: self.risk_manager.register_bet(val)
             self.window_bets[f"Manual_{time.time()}"] = {"side":side,"entry":pr or 0.5,"cost":val}
@@ -1379,25 +1052,13 @@ class SniperApp(App):
     async def trigger_sell_all(self, side):
         is_l = self.query_one("#cb_live").value
         tid = self.market_data["up_id" if side=="UP" else "down_id"]
-        # Use simple ternary for bid to avoid confusion
-        cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
+        cbid = self.market_data["up_bid" if side=="UP" else "down_bid"]
         lp = cbid if not is_l else max(0.02, cbid-0.05)
-        
-        # Debug shares in sim mode
-        if not is_l:
-            s_shares = self.sim_broker.shares.get(side, 0.0)
-            if s_shares <= 0:
-                self.log_msg(f"[dim]Admin:[/] Manual Sell {side} requested but local shares = {s_shares:.2f}")
-
         ok, msg, revenue = self.trade_executor.execute_sell(is_l, side, tid, lp, cbid, reason="Manual")
         if ok:
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
             if revenue > 0:
                 self._add_risk_revenue(revenue)
-                # Count as win if realized revenue exceeds total cost of that side
-                side_cost = sum(info["cost"] for info in self.window_bets.values() if info.get("side") == side and not info.get("closed"))
-                if revenue > side_cost:
-                    self.session_win_count += 1
             # Mark window_bets as closed so settlement refill doesn't double-count
             for info in self.window_bets.values():
                 if info.get("side") == side and not info.get("closed"):
@@ -1414,7 +1075,6 @@ from textual.widgets import Static
 
 class GlobalSettingsModal(ModalScreen):
     """A modal that shows global settings like CSV log frequency."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
     def __init__(self, main_app=None):
         super().__init__()
         self.main_app = main_app
@@ -1474,7 +1134,6 @@ from textual.widgets import Static
 
 class AlgoInfoModal(ModalScreen):
     """A modal that shows algo details."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
     def __init__(self, name, full_name, description, main_app=None):
         super().__init__()
         self.algo_id = name
@@ -1509,22 +1168,15 @@ class AlgoInfoModal(ModalScreen):
                     yield Input(placeholder="Time 3", id="inp_mos_t3")
                     yield Input(placeholder="Diff 3", id="inp_mos_d3")
             elif self.algo_id == "MOM":
-                with Horizontal(id="modal_mom_row1"):
+                with Horizontal(id="modal_mom_mode"):
                     yield Label("Mode:", id="lbl_mom_mode")
                     yield Input(placeholder="TIME", id="inp_mom_mode")
-                    yield Label("Duration(s):", id="lbl_mom_duration")
-                    yield Input(placeholder="10", id="inp_mom_duration")
                 with Horizontal(id="modal_mom_threshold"):
                     yield Label("Threshold ¢ (51-70):", id="lbl_mom_threshold")
                     yield Input(placeholder="60", id="inp_mom_threshold")
-                with Horizontal(id="modal_mom_buymode"):
-                    yield Label("Buy Mode:", id="lbl_mom_buymode")
-                    yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
-                    yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
-                    yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
-                    yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
-                with Horizontal(id="modal_mom_adv_btn"):
-                    yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
+                with Horizontal(id="modal_mom_duration"):
+                    yield Label("Duration (s):", id="lbl_mom_duration")
+                    yield Input(placeholder="10", id="inp_mom_duration")
             with Horizontal(id="modal_footer"):
                 yield Button("CLOSE/SAVE", id="close_btn", variant="primary")
 
@@ -1580,43 +1232,22 @@ class AlgoInfoModal(ModalScreen):
                 if hasattr(moshe, "t3"): self.query_one("#inp_mos_t3").value = str(moshe.t3)
                 if hasattr(moshe, "d3"): self.query_one("#inp_mos_d3").value = str(moshe.d3)
         elif self.algo_id == "MOM":
-            for row_id in ["#modal_mom_row1", "#modal_mom_threshold"]:
+            for row_id in ["#modal_mom_mode", "#modal_mom_threshold", "#modal_mom_duration"]:
                 row = self.query_one(row_id)
-                row.styles.height = "auto"
+                row.styles.height = 3
                 row.styles.align = ("center", "middle")
                 row.styles.margin = (0, 0, 1, 0)
-
-            # Buy Mode row needs more breathing room for checkbox labels
-            bm = self.query_one("#modal_mom_buymode")
-            bm.styles.height = "auto"
-            bm.styles.align = ("left", "middle")
-            bm.styles.margin = (0, 0, 1, 0)
-            bm.styles.padding = (0, 1)
-
-            self.query_one("#inp_mom_mode").styles.width = 10
-            self.query_one("#inp_mom_duration").styles.width = 6
-            self.query_one("#lbl_mom_duration").styles.margin = (1, 0, 0, 1)
-            self.query_one("#inp_mom_threshold").styles.width = 8
-
+                row.styles.border = ("ascii", "#333333")
+            
+            self.query_one("#inp_mom_mode").styles.width = 12
+            self.query_one("#inp_mom_threshold").styles.width = 10
+            self.query_one("#inp_mom_duration").styles.width = 10
+            
             if self.main_app and "Momentum" in self.main_app.scanners:
                 mom = self.main_app.scanners["Momentum"]
                 self.query_one("#inp_mom_mode").value = str(getattr(mom, "mode", "TIME"))
                 self.query_one("#inp_mom_threshold").value = str(int(getattr(mom, "threshold", 0.6) * 100))
                 self.query_one("#inp_mom_duration").value = str(getattr(mom, "duration", 10))
-
-            # Set Buy Mode checkboxes from app state
-            if self.main_app:
-                m = self.main_app.mom_buy_mode
-                try: self.query_one("#cb_mom_std").value = (m == "STD")
-                except: pass
-                try: self.query_one("#cb_mom_pre").value = (m == "PRE")
-                except: pass
-                try: self.query_one("#cb_mom_hybrid").value = (m == "HYBRID")
-                except: pass
-                try: self.query_one("#cb_mom_adv").value = (m == "ADV")
-                except: pass
-                try: self.query_one("#btn_mom_adv").disabled = (m != "ADV")
-                except: pass
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -1668,266 +1299,5 @@ class AlgoInfoModal(ModalScreen):
                 if d > 0:
                     mom.duration = d
             except: pass
-            # Save Buy Mode
-            try:
-                if self.query_one("#cb_mom_pre").value:
-                    self.main_app.mom_buy_mode = "PRE"
-                elif self.query_one("#cb_mom_hybrid").value:
-                    self.main_app.mom_buy_mode = "HYBRID"
-                elif self.query_one("#cb_mom_adv").value:
-                    self.main_app.mom_buy_mode = "ADV"
-                else:
-                    self.main_app.mom_buy_mode = "STD"
-                self.main_app.save_settings()
-            except: pass
             
-        self.dismiss()
-
-    @on(Checkbox.Changed, "#cb_mom_std")
-    def _mom_std_toggled(self, event: Checkbox.Changed):
-        if event.value:
-            try:
-                self.query_one("#cb_mom_pre").value = False
-                self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
-            except: pass
-
-    @on(Checkbox.Changed, "#cb_mom_pre")
-    def _mom_pre_toggled(self, event: Checkbox.Changed):
-        if event.value:
-            try:
-                self.query_one("#cb_mom_std").value = False
-                self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
-            except: pass
-        else:
-            # Prevent all being unchecked — revert to Standard
-            try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_hybrid").value and
-                    not self.query_one("#cb_mom_adv").value):
-                    self.query_one("#cb_mom_std").value = True
-            except: pass
-
-    @on(Checkbox.Changed, "#cb_mom_hybrid")
-    def _mom_hybrid_toggled(self, event: Checkbox.Changed):
-        if event.value:
-            try:
-                self.query_one("#cb_mom_std").value = False
-                self.query_one("#cb_mom_pre").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
-            except: pass
-        else:
-            # Prevent all being unchecked
-            try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_pre").value and
-                    not self.query_one("#cb_mom_adv").value):
-                    self.query_one("#cb_mom_std").value = True
-            except: pass
-
-    @on(Checkbox.Changed, "#cb_mom_adv")
-    def _mom_adv_toggled(self, event: Checkbox.Changed):
-        if event.value:
-            try:
-                self.query_one("#cb_mom_std").value = False
-                self.query_one("#cb_mom_pre").value = False
-                self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#btn_mom_adv").disabled = False
-            except: pass
-        else:
-            # Prevent all being unchecked
-            try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_pre").value and
-                    not self.query_one("#cb_mom_hybrid").value):
-                    self.query_one("#cb_mom_std").value = True
-                self.query_one("#btn_mom_adv").disabled = True
-            except: pass
-
-    @on(Button.Pressed, "#btn_mom_adv")
-    def _on_mom_adv_click(self):
-        if self.main_app:
-            self.main_app.push_screen(MOMExpertModal(self.main_app))
-
-
-class MOMExpertModal(ModalScreen):
-    """Advanced Momentum settings based on Volatility/ATR."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
-    def __init__(self, main_app):
-        super().__init__()
-        self.main_app = main_app
-        self.s = main_app.mom_adv_settings
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="modal_container"):
-            yield Static("[bold #ffaa00]MOM - Advanced Volatility & ATR Logic[/]", id="modal_title")
-            
-            with Container(id="modal_expert_body"):
-                yield Label("1. ATR Gateways (Boundary ¢):")
-                with Horizontal():
-                    yield Label("Low Vol (Stable):")
-                    yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low")
-                    yield Label("High Vol (Chaos):")
-                    yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
-                
-                yield Label("2. Threshold Offsets (¢):")
-                with Horizontal():
-                    yield Label("Stable Offset:")
-                    yield Input(placeholder="-5", value=str(self.s["stable_offset"]), id="exp_off_stable")
-                    yield Label("Chaos Offset:")
-                    yield Input(placeholder="10", value=str(self.s["chaos_offset"]), id="exp_off_chaos")
-                
-                yield Label("3. Auto-Mode Overrides:")
-                with Horizontal():
-                    yield Checkbox(label="STN on Chaos", value=self.s["auto_stn_chaos"], id="exp_over_stn")
-                    yield Checkbox(label="PBN on Stable", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
-                
-                yield Label("4. Whale Shield (Emergency Exit):")
-                with Horizontal():
-                    yield Label("Zone (s):")
-                    yield Input(placeholder="45", value=str(self.s["shield_time"]), id="exp_wh_time")
-                    yield Label("Reach (¢):")
-                    yield Input(placeholder="5", value=str(self.s["shield_reach"]), id="exp_wh_reach")
-            
-            yield Static("", id="exp_preview")  # Live preview text
-            
-            with Horizontal(id="modal_footer"):
-                yield Button("SAVE & CLOSE", id="btn_exp_save", variant="primary")
-
-    def on_mount(self):
-        self.styles.align = ("center", "middle")
-        c = self.query_one("#modal_container")
-        c.styles.background = "#1a1a1a"
-        c.styles.border = ("thick", "#ffaa00")
-        c.styles.padding = (1, 2)
-        c.styles.width = 75
-        c.styles.height = "auto"
-        
-        self.query_one("#modal_title").styles.text_align = "center"
-        self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
-        
-        body = self.query_one("#modal_expert_body")
-        body.styles.border = ("ascii", "#333333")
-        body.styles.padding = (0, 1)
-        body.styles.margin = (0, 0, 1, 0)
-        
-        for inp in self.query(Input):
-            inp.styles.width = 8
-            inp.styles.margin = (0, 1, 0, 0)
-        
-        prev = self.query_one("#exp_preview")
-        prev.styles.text_align = "center"
-        prev.styles.color = "#aaaaaa"
-        prev.styles.height = 3
-        prev.styles.margin = (1, 0)
-        
-        self.set_interval(1.0, self._update_preview)
-
-    def _update_preview(self):
-        if not self.main_app: return
-        atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
-        mom = self.main_app.scanners.get("Momentum")
-        base_t = int(getattr(mom, "threshold", 0.6) * 100) if mom else 60
-        
-        # Logic Tier
-        tier = 2 # Neutral
-        adj = 0
-        if atr <= self.s["atr_low"]:
-            tier = 1; adj = self.s["stable_offset"]
-        elif atr >= self.s["atr_high"]:
-            tier = 3; adj = self.s["chaos_offset"]
-        
-        final_t = base_t + adj
-        status = "Stable" if tier == 1 else ("Chaos" if tier == 3 else "Neutral")
-        color = "green" if tier == 1 else ("red" if tier == 3 else "cyan")
-        
-        preview = (
-            f"Curr ATR: {float(atr):.1f} | Tier: [bold {color}]{status}[/] | "
-            f"Base: {base_t}¢ | Offset: {adj:+}¢ | [bold white]Target: {final_t}¢[/]"
-        )
-        self.query_one("#exp_preview").update(preview)
-
-    @on(Button.Pressed, "#btn_exp_save")
-    def save_and_close(self):
-        try:
-            self.s["atr_low"] = int(self.query_one("#exp_atr_low").value)
-            self.s["atr_high"] = int(self.query_one("#exp_atr_high").value)
-            self.s["stable_offset"] = int(self.query_one("#exp_off_stable").value)
-            self.s["chaos_offset"] = int(self.query_one("#exp_off_chaos").value)
-            self.s["auto_stn_chaos"] = self.query_one("#exp_over_stn").value
-            self.s["auto_pbn_stable"] = self.query_one("#exp_over_pbn").value
-            self.s["shield_time"] = int(self.query_one("#exp_wh_time").value)
-            self.s["shield_reach"] = int(self.query_one("#exp_wh_reach").value)
-            self.main_app.save_settings()
-        except: pass
-        self.dismiss()
-
-
-class BankrollExhaustedModal(ModalScreen):
-    """Full-screen alert shown when the bankroll can no longer cover the minimum bet."""
-
-    def __init__(self, bankroll: float, min_bet: float, mode: str):
-        super().__init__()
-        self.bankroll = bankroll
-        self.min_bet  = min_bet
-        self.mode     = mode
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="frozen_container"):
-            yield Label("🔴  BOT FROZEN", id="frozen_title")
-            yield Label(
-                f"Mode: {self.mode}  |  Bankroll: ${self.bankroll:.2f}  |  Min Bet: ${self.min_bet:.2f}",
-                id="frozen_details"
-            )
-            yield Label(
-                "The bankroll has dropped below the minimum bet size.\n"
-                "All market scanning and trade execution has been stopped.\n"
-                "A final CSV snapshot and console log entry have been written.\n\n"
-                "Please top up your bankroll or reduce the Bet $ amount\n"
-                "before restarting the bot.",
-                id="frozen_body"
-            )
-            yield Button("OK  —  I understand", id="btn_frozen_ok", variant="error")
-
-    def on_mount(self):
-        c = self.query_one("#frozen_container")
-        c.styles.align    = ("center", "middle")
-        c.styles.width    = "80%"
-        c.styles.height   = "auto"
-        c.styles.background = "#1a0000"
-        c.styles.border   = ("heavy", "red")
-        c.styles.padding  = (2, 4)
-
-        t = self.query_one("#frozen_title")
-        t.styles.text_align  = "center"
-        t.styles.color       = "red"
-        t.styles.text_style  = "bold"
-        t.styles.margin      = (0, 0, 1, 0)
-        t.styles.width       = "100%"
-
-        d = self.query_one("#frozen_details")
-        d.styles.text_align  = "center"
-        d.styles.color       = "#ff6666"
-        d.styles.margin      = (0, 0, 2, 0)
-        d.styles.width       = "100%"
-
-        b = self.query_one("#frozen_body")
-        b.styles.text_align  = "center"
-        b.styles.color       = "white"
-        b.styles.margin      = (0, 0, 2, 0)
-        b.styles.width       = "100%"
-
-        btn = self.query_one("#btn_frozen_ok")
-        btn.styles.width = "50%"
-        btn.styles.align = ("center", "middle")
-
-        self.styles.align = ("center", "middle")
-        self.styles.background = "rgba(0,0,0,0.85)"
-
-    @on(Button.Pressed, "#btn_frozen_ok")
-    def dismiss_modal(self):
         self.dismiss()

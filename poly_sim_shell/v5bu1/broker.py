@@ -11,9 +11,7 @@ class SimBroker:
     def __init__(self, balance, log_file):
         self.balance = balance
         self.shares = {"UP": 0.0, "DOWN": 0.0}
-        self.pre_buy_shares = {"UP": 0.0, "DOWN": 0.0}
         self.invested_this_window = 0.0
-        self.pre_buy_invested = 0.0
         self.revenue_this_window = 0.0
         self.log_file = log_file
         self.init_log()
@@ -73,26 +71,21 @@ class SimBroker:
         if usd_amount > self.balance: return False, "Insufficient Funds"
         shares = usd_amount / price
         self.balance -= usd_amount
-        
-        if reason == "PreBuy_NextWindow":
-            self.pre_buy_shares[side] += shares
-            self.pre_buy_invested += usd_amount
-        else:
-            self.invested_this_window += usd_amount
-            self.shares[side] += shares
-
+        self.invested_this_window += usd_amount
+        self.shares[side] += shares
         self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
         return True, f"Bought {shares:.2f} {side} @ {price*100:.1f}¢ | Cost: ${usd_amount:.2f} ({reason})"
 
     def sell(self, side, price, reason="Manual"):
         shares = self.shares[side]
-        if shares <= 0: return False, "No shares", 0.0
+        if shares <= 0: return False, "No shares"
         revenue = shares * price
         self.balance += revenue
         self.revenue_this_window += revenue
         self.shares[side] = 0.0
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})", revenue
+
     def settle_window(self, winning_side):
         winning_shares = self.shares[winning_side]
         payout = winning_shares * 1.00
@@ -104,16 +97,6 @@ class SimBroker:
         self.invested_this_window = 0.0
         self.revenue_this_window = 0.0
         return payout, net_pnl
-
-    def promote_prebuy(self):
-        """Transfers pre-buy shares/investments to the active window at the start of a new cycle."""
-        for side in ["UP", "DOWN"]:
-            self.shares[side] += self.pre_buy_shares[side]
-        self.invested_this_window += self.pre_buy_invested
-        
-        # Reset buffers
-        self.pre_buy_shares = {"UP": 0.0, "DOWN": 0.0}
-        self.pre_buy_invested = 0.0
 
 class LiveBroker:
     def __init__(self, sim_broker_ref):
@@ -150,32 +133,41 @@ class LiveBroker:
             limit_price = 0.99
             size = round(usd_amount / price, 2)
             
+            # Record balance before order to calculate actual cost
+            pre_bal = self.balance
             
             o_args = OrderArgs(price=limit_price, size=size, side="BUY", token_id=token_id)
             r = self.client.post_order(self.client.create_order(o_args))
             if r.get("success") or r.get("orderID"):
-                # Use usd_amount as the authoritative cost — we control what we sent.
-                # Polymarket rarely returns a meaningful takingAmount immediately;
-                # it can return dust-level values that would make the log show $0.00.
-                actual_cost_usd = usd_amount
-                actual_price = price  # The price we targeted
-
-                # Only refine with takingAmount if Polymarket returns a plausible value
-                # (must be >= 10% of what we sent, to guard against dust/zero responses)
+                # Enhanced CSV logging for Live Trads
+                main_bal = self.update_balance()
+                
+                # Try getting amount from order response first, or fallback to balance diff
                 taking_val = r.get("takingAmount", 0)
                 try: taking_val = float(taking_val)
                 except: taking_val = 0.0
-                if taking_val > 0:
-                    refined_cost = taking_val / 10**6
-                    if refined_cost >= usd_amount * 0.10:  # Sanity check: plausible fill
-                        actual_cost_usd = refined_cost
-                        actual_price = round(actual_cost_usd / size, 4) if size > 0 else price
-
-                main_bal = self.update_balance()
+                
+                if taking_val > 0: 
+                    actual_cost_usd = taking_val / 10**6
+                else:
+                    import time
+                    for _ in range(3):
+                        time.sleep(1.0)
+                        main_bal = self.update_balance()
+                        actual_cost_usd = pre_bal - main_bal
+                        if actual_cost_usd > 0.01: break
+                        
+                    if actual_cost_usd <= 0.01: actual_cost_usd = usd_amount
+                    
+                actual_price = round(actual_cost_usd / size, 4) if size > 0 else limit_price
+                
                 ctx = context or {}
-                ctx['main_bal'] = main_bal
-
+                # Update context with live main balance
+                ctx['main_bal'] = main_bal 
+                
+                # We use sim_broker to write to the single log file
                 self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
+                
                 return True, f"✅ LIVE BUY {side} | Fill: {actual_price*100:.1f}¢ | Cost: ${actual_cost_usd:.2f} | Size: {size:.2f}"
             else:
                 err = r.get('errorMsg') or str(r)
@@ -185,14 +177,14 @@ class LiveBroker:
             return False, f"Err: {e}"
 
     def sell(self, side, token_id, limit_price=0.02, best_bid=None, reason="Manual"):
-        if not self.client or not token_id: return False, "Client/Token Error", 0.0
+        if not self.client or not token_id: return False, "Client/Token Error"
         try:
             b = self.client.get_balance_allowance(BalanceAllowanceParams(asset_type="CONDITIONAL", token_id=token_id))
             shares = float(b.get("balance", 0)) / 10**6
-            if shares <= 0.001: return False, "No Live Pos", 0.0
+            if shares <= 0.001: return False, "No Live Pos"
             
             size = math.floor(shares * 100) / 100
-            if size <= 0: return False, "Size too small", 0.0
+            if size <= 0: return False, "Size too small"
 
             val_log = f"Selling {size} @ Limit ${limit_price}"
             if best_bid: val_log += f" (Bid: ${best_bid})"

@@ -24,16 +24,6 @@ def calculate_bb(prices, period=20):
     std = (sum((x - sma) ** 2 for x in slice_) / period) ** 0.5
     return sma + (std*2), sma, sma - (std*2)
 
-def calculate_atr(highs, lows, closes, period=14):
-    if len(highs) < period + 1: return 0
-    tr_list = []
-    for i in range(1, len(highs)):
-        h, l, pc = highs[i], lows[i], closes[i-1]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        tr_list.append(tr)
-    # Simple Moving Average of TR
-    return sum(tr_list[-period:]) / period
-
 class MarketDataManager:
     def __init__(self, logger_func=None):
         self.logger = logger_func if logger_func else print
@@ -49,7 +39,6 @@ class MarketDataManager:
         self.chainlink_contract = None
         self.price_history = []
         self.trend_4h = "NEUTRAL"
-        self.atr_5m = 0.0
         self.last_4h_update = 0
         self.first_update = True
         
@@ -116,15 +105,6 @@ class MarketDataManager:
         except Exception as e:
             self.log(f"[red]Error: 4H Trend Calc Error: {e}[/]")
 
-    def update_atr(self):
-        """Fetches 1m klines and updates the 5-period ATR (Average True Range)."""
-        try:
-            closes, lows, highs, _ = self.fetch_candles_60m()
-            if highs and lows and closes:
-                self.atr_5m = calculate_atr(highs, lows, closes, period=5)
-        except Exception as e:
-            self.log(f"[yellow]Warn: ATR Update Failed: {e}[/]")
-
     def fetch_candles_60m(self):
         try:
             r = requests.get("https://api.binance.com/api/v3/klines", params={"symbol":"BTCUSDT","interval":"1m","limit":200}, timeout=3)
@@ -136,45 +116,31 @@ class MarketDataManager:
             return [], [], [], []
 
     def fetch_current_price(self):
-        last_known = self.market_data.get("btc_price", 0)
-
-        def _plausible(price):
-            """Returns True if price is reasonable relative to last known. Always True if no baseline."""
-            if last_known <= 0 or price <= 0:
-                return price > 0
-            return abs(price - last_known) / last_known < 0.05 # Reject if >5% from last known
-
         # 1. Primary: Live Kraken WebSocket Price (Must be fresh < 5 seconds)
-        if self.live_price > 0 and (time.time() - self.last_ws_update) < 5:
-            if _plausible(self.live_price):
-                return self.live_price
-            else:
-                pass  # BTC Sanity: WS price rejected silently
+        now = time.time()
+        if self.live_price > 0 and (now - self.last_ws_update) < 5:
+            self._ws_stale_logged = False # Reset latch
+            return self.live_price
+
+        # WS is stale or not yet active - Alert once
+        if not getattr(self, "_ws_stale_logged", False):
+            if self.live_price > 0:
+                self.log(f"[bold yellow]Kraken WS Stale ({(now - self.last_ws_update):.1f}s).[/] Falling back to Chainlink/Binance...")
+            self._ws_stale_logged = True
 
         # 2. Secondary: Chainlink Oracle Backup
         if self.chainlink_contract:
             try:
-                raw = self.chainlink_contract.functions.latestAnswer().call()
-                price = float(raw) / 10**8
-                if _plausible(price):
-                    return price
-                else:
-                    pass  # BTC Sanity: Chainlink price rejected silently
+                price = self.chainlink_contract.functions.latestAnswer().call()
+                return float(price) / 10**8 
             except: pass
 
         # 3. Tertiary: Binance REST Fallback
         try:
             r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
-            price = float(r['price'])
-            if _plausible(price):
-                return price
-            else:
-                pass  # BTC Sanity: Binance price rejected silently
-        except Exception: pass
-
-        # 4. Last resort: return last known price (stale but safe)
-        # BTC Sanity: all sources failed — fall back silently to last known price
-        return last_known if last_known > 0 else 0
+            return float(r['price'])
+        except Exception: 
+            return self.market_data.get("btc_price", 0)
 
     def fetch_oracle_price(self):
         if self.chainlink_contract:
@@ -186,6 +152,7 @@ class MarketDataManager:
 
     def reset_history(self):
         self.price_history = []
+        self.first_update = True
 
     def update_history(self, curr_price, start_ts, elapsed):
         if self.first_update and not self.price_history and elapsed > 5:
@@ -218,20 +185,16 @@ class MarketDataManager:
             m = requests.get(f"https://gamma-api.polymarket.com/markets/slug/{slug}", timeout=2).json()
             ids = json.loads(m["clobTokenIds"]); outs = json.loads(m["outcomes"])
             
-            # Robust outcome check
-            idx_up, idx_down = None, None
-            for i, o in enumerate(outs):
-                o_low = o.lower()
-                if any(x in o_low for x in ["up", "yes", "above", "higher", "top"]):
-                    idx_up = i
-                elif any(x in o_low for x in ["down", "no", "below", "lower", "bottom"]):
-                    idx_down = i
-            
-            if idx_up is not None and idx_down is not None:
-                up_id, down_id = ids[idx_up], ids[idx_down]
-            else:
-                # Fallback to simple order if parsing fails
+            is_up_first = any(x in outs[0].lower() for x in ["up", "yes", "above", "higher", "top"])
+            if is_up_first:
                 up_id, down_id = ids[0], ids[1]
+            else:
+                is_down_first = any(x in outs[0].lower() for x in ["down", "no", "below", "lower", "bottom"])
+                if is_down_first:
+                    down_id, up_id = ids[0], ids[1]
+                else:
+                    up_id = ids[0] if "Up" in outs[0] else ids[1]
+                    down_id = ids[1] if up_id == ids[0] else ids[0]
             
             def get_p(tid, side):
                 try: 
@@ -240,28 +203,22 @@ class MarketDataManager:
             
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                # side="buy" is the price to BUY (Ask), side="sell" is the price to SELL (Bid)
-                f_ua = executor.submit(get_p, up_id, "buy")
-                f_da = executor.submit(get_p, down_id, "buy")
                 f_ub = executor.submit(get_p, up_id, "sell")
                 f_db = executor.submit(get_p, down_id, "sell")
+                f_ua = executor.submit(get_p, up_id, "buy")
+                f_da = executor.submit(get_p, down_id, "buy")
                 
-                up_ask = f_ua.result()
-                down_ask = f_da.result()
                 up_bid = f_ub.result()
                 down_bid = f_db.result()
+                up_ask = f_ua.result()
+                down_ask = f_da.result()
             
         except Exception:
             pass
         
-        # Best Estimate of 'Current Price' is Midpoint or Bid/Ask
-        def _best(b, a):
-            if b > 0 and a > 0: return (b+a)/2
-            return a or b or 0.5
-
         return {
-            "up_price": _best(up_bid, up_ask), 
-            "down_price": _best(down_bid, down_ask),
+            "up_price": up_bid or 0.5, 
+            "down_price": down_bid or 0.5,
             "up_bid": up_bid, 
             "down_bid": down_bid,
             "up_ask": up_ask,

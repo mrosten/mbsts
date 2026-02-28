@@ -195,7 +195,6 @@ class SniperApp(App):
         self.app_start_time = time.time()
         self.session_win_count = 0 
         self.session_total_trades = 0
-        self.session_windows_settled = 0
         self.time_rem_str = "00:00"
         self.blink_state = False
         self.skipped_logs = set()
@@ -206,13 +205,6 @@ class SniperApp(App):
         self.last_log_dump = 0
         
         # Persistent algorithm weights
-        # Momentum Advanced Settings (v5.9)
-        self.mom_adv_settings = {
-            "atr_low": 20, "atr_high": 40,
-            "stable_offset": -5, "chaos_offset": 10,
-            "auto_stn_chaos": True, "auto_pbn_stable": False,
-            "shield_time": 45, "shield_reach": 5
-        }
         self.settings_file = "v5_settings.json"
         
         # Base 1.0 weight with 1.67x (20% / 12%) modifier for historically "Strong" scanners
@@ -810,18 +802,7 @@ class SniperApp(App):
                     # Backward compatibility for scanners without get_signal() wrapper
                     if res == "WAIT" and name == "NPattern": res = sc.analyze(ph, d["opn"])
                     elif res == "WAIT" and name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
-                    elif res == "WAIT" and name == "Momentum":
-                        if self.mom_buy_mode == "ADV":
-                            atr = getattr(self.market_data_manager, "atr_5m", 0)
-                            base_t = float(self.query_one("#inp_mom_threshold").value) / 100.0
-                            adj = 0
-                            if atr <= self.mom_adv_settings["atr_low"]: adj = self.mom_adv_settings["stable_offset"] / 100.0
-                            elif atr >= self.mom_adv_settings["atr_high"]: adj = self.mom_adv_settings["chaos_offset"] / 100.0
-                            sc.threshold = base_t + adj
-                        else:
-                            try: sc.threshold = float(self.query_one("#inp_mom_threshold").value) / 100.0
-                            except: pass
-                        res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
+                    elif res == "WAIT" and name == "Momentum": res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
                     elif res == "WAIT" and name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
                     elif res == "WAIT" and name == "TrapCandle": res = sc.analyze(ph, d["opn"])
                     elif res == "WAIT" and name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
@@ -1012,24 +993,9 @@ class SniperApp(App):
             if self.sim_broker.shares["DOWN"] > 0: sides.add("DOWN")
         
         for side in sides:
-            # Emergency Whale Shield (v5.9)
-            if self.mom_buy_mode == "ADV":
-                adv = self.mom_adv_settings
-                rem = TradingConfig.WINDOW_SECONDS - (time.time() - self.market_data["start_ts"])
-                if rem <= adv["shield_time"]:
-                    up_p = self.market_data.get("up_price", 0.5)
-                    reach = adv["shield_reach"] / 100.0
-                    if abs(up_p - 0.50) <= reach:
-                        self.log_msg(f"🛡️ WHALE SHIELD: Market too tight ({up_p*100:.1f}¢). Emergency Exit.", level="MONEY")
-                        await self.trigger_sell_all("UP")
-                        await self.trigger_sell_all("DOWN")
-                        self.last_second_exit_triggered = True
-                        return
-
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
             cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
 
-            # Standard TP/SL Exit logic
             if not is_live:
                 # SIM HYPOTHETICAL LOGGING
                 # Calculate exact shares from window_bets for THIS window
@@ -1135,31 +1101,14 @@ class SniperApp(App):
                         self.call_from_thread(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
                         return
 
-                    # New Selection Logic (v5.6/v5.7/v5.9):
+                    # New Selection Logic (v5.6/v5.7):
                     # - If 2¢ lead: Follow it.
                     # - If < 2¢ gap:
                     #     - In PRE mode: Reverse the current winner.
                     #     - In HYBRID mode: Skip and defer to new window.
-                    # - In ADV mode (v5.9):
-                    #     - Chaos Override: Skip if ATR is high and Auto-STN enabled.
-                    #     - Stable Override: (Reserved for future aggressive logic if needed).
-                    #     - Default: Follow 2¢ rule or skip.
                     price_diff = up_ask - dn_ask
                     
-                    if self.mom_buy_mode == "ADV":
-                        atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
-                        adv = self.main_app.mom_adv_settings
-                        if atr >= adv["atr_high"] and adv["auto_stn_chaos"]:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY chaos skip (ATR:{atr:.1f}) -> Forcing STN[/]")
-                            return
-                        # Default to 2¢ follow for ADV if no override
-                        if abs(price_diff) >= 0.02:
-                            side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring[/]")
-                            return
-                    elif abs(price_diff) >= 0.02:
+                    if abs(price_diff) >= 0.02:
                         side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
                         if self.mom_buy_mode == "HYBRID":
                             self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
@@ -1250,36 +1199,38 @@ class SniperApp(App):
 
     def trigger_settlement(self):
         if self.market_data["start_ts"] == 0: return
-
+        self.log_msg("────────────────── WINDOW END ──────────────────", level="ADMIN")
+        self.log_msg("") # Whitespace after window end
         winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
         self.log_msg(f"SETTLED: [bold white]{winner}[/]", level="MONEY")
         payout, net_pnl = self.sim_broker.settle_window(winner)
         for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
         
+        # suppress the misleading log line. The LIVE Settlement Refill block below handles it.
         is_live = self.query_one("#cb_live").value
         # Accuracy: Count settlement winners
         for info in self.window_bets.values():
             if not info.get("closed") and info.get("side") == winner:
                 self.session_win_count += 1
-        
-        self.session_windows_settled += 1
-        if self.session_windows_settled > 1:
-            acc_val = (self.session_win_count / self.session_total_trades * 100) if self.session_total_trades > 0 else 0
-            acc_str = f"{acc_val:.1f}%"
-        else:
-            acc_str = "N/A"
 
+        acc = (self.session_win_count / self.session_total_trades * 100) if self.session_total_trades > 0 else 0
         upt = int(time.time() - self.app_start_time)
         upt_str = f"{upt//3600:02d}:{(upt%3600)//60:02d}:{upt%60:02d}"
-        self.log_msg(f"PULSE | RUN: {upt_str} | Session Trades: {self.session_total_trades} | Accuracy: {acc_str}", level="ADMIN")
+        self.log_msg(f"PULSE | RUN: {upt_str} | Session Trades: {self.session_total_trades} | Accuracy: {acc:.1f}%", level="ADMIN")
         
         self._add_risk_revenue(payout)
 
         # --- BANKROLL EXHAUSTION CHECK ---
+        # After each settlement, check whether the bankroll is too low to place
+        # another bet. If so, freeze the bot.
         self._check_bankroll_exhaustion()
         if self.halted: return
 
         # --- LIVE SETTLEMENT REFILL ---
+        # For live positions that settled in-the-money but whose final-exit sell failed
+        # (e.g. PolyApiException), the bankroll was never refilled from the win.
+        # Polymarket settles winning shares at $1.00 each, so we can calculate
+        # the exact payout from window_bets: shares = cost / entry_price.
         if is_live:
             live_win_payout = 0.0
             for info in self.window_bets.values():
@@ -1293,14 +1244,12 @@ class SniperApp(App):
             if live_win_payout > 0:
                 self.log_msg(f"LIVE Settlement Refill: +${live_win_payout:.2f} (winning shares x $1.00)", level="MONEY")
                 self._add_risk_revenue(live_win_payout)
+        # ------------------------------
 
         self.risk_manager.reset_window(); self.last_second_exit_triggered = False
         self.update_balance_ui(); self.window_bets.clear()
         for s in self.scanners.values(): s.reset()
         self.market_data_manager.reset_history()
-
-        self.log_msg("────────────────── WINDOW END ──────────────────", level="ADMIN")
-        self.log_msg("") # Whitespace after window end
 
     def _add_risk_revenue(self, amount):
         """Adds revenue back to the usable bankroll with strict wallet clamping."""
@@ -1414,7 +1363,6 @@ from textual.widgets import Static
 
 class GlobalSettingsModal(ModalScreen):
     """A modal that shows global settings like CSV log frequency."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
     def __init__(self, main_app=None):
         super().__init__()
         self.main_app = main_app
@@ -1474,7 +1422,6 @@ from textual.widgets import Static
 
 class AlgoInfoModal(ModalScreen):
     """A modal that shows algo details."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
     def __init__(self, name, full_name, description, main_app=None):
         super().__init__()
         self.algo_id = name
@@ -1522,9 +1469,6 @@ class AlgoInfoModal(ModalScreen):
                     yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
                     yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
                     yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
-                    yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
-                with Horizontal(id="modal_mom_adv_btn"):
-                    yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
             with Horizontal(id="modal_footer"):
                 yield Button("CLOSE/SAVE", id="close_btn", variant="primary")
 
@@ -1613,10 +1557,6 @@ class AlgoInfoModal(ModalScreen):
                 except: pass
                 try: self.query_one("#cb_mom_hybrid").value = (m == "HYBRID")
                 except: pass
-                try: self.query_one("#cb_mom_adv").value = (m == "ADV")
-                except: pass
-                try: self.query_one("#btn_mom_adv").disabled = (m != "ADV")
-                except: pass
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -1674,8 +1614,6 @@ class AlgoInfoModal(ModalScreen):
                     self.main_app.mom_buy_mode = "PRE"
                 elif self.query_one("#cb_mom_hybrid").value:
                     self.main_app.mom_buy_mode = "HYBRID"
-                elif self.query_one("#cb_mom_adv").value:
-                    self.main_app.mom_buy_mode = "ADV"
                 else:
                     self.main_app.mom_buy_mode = "STD"
                 self.main_app.save_settings()
@@ -1689,8 +1627,6 @@ class AlgoInfoModal(ModalScreen):
             try:
                 self.query_one("#cb_mom_pre").value = False
                 self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
             except: pass
 
     @on(Checkbox.Changed, "#cb_mom_pre")
@@ -1699,15 +1635,11 @@ class AlgoInfoModal(ModalScreen):
             try:
                 self.query_one("#cb_mom_std").value = False
                 self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
             except: pass
         else:
             # Prevent all being unchecked — revert to Standard
             try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_hybrid").value and
-                    not self.query_one("#cb_mom_adv").value):
+                if not self.query_one("#cb_mom_std").value and not self.query_one("#cb_mom_hybrid").value:
                     self.query_one("#cb_mom_std").value = True
             except: pass
 
@@ -1717,154 +1649,13 @@ class AlgoInfoModal(ModalScreen):
             try:
                 self.query_one("#cb_mom_std").value = False
                 self.query_one("#cb_mom_pre").value = False
-                self.query_one("#cb_mom_adv").value = False
-                self.query_one("#btn_mom_adv").disabled = True
             except: pass
         else:
             # Prevent all being unchecked
             try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_pre").value and
-                    not self.query_one("#cb_mom_adv").value):
+                if not self.query_one("#cb_mom_std").value and not self.query_one("#cb_mom_pre").value:
                     self.query_one("#cb_mom_std").value = True
             except: pass
-
-    @on(Checkbox.Changed, "#cb_mom_adv")
-    def _mom_adv_toggled(self, event: Checkbox.Changed):
-        if event.value:
-            try:
-                self.query_one("#cb_mom_std").value = False
-                self.query_one("#cb_mom_pre").value = False
-                self.query_one("#cb_mom_hybrid").value = False
-                self.query_one("#btn_mom_adv").disabled = False
-            except: pass
-        else:
-            # Prevent all being unchecked
-            try:
-                if (not self.query_one("#cb_mom_std").value and 
-                    not self.query_one("#cb_mom_pre").value and
-                    not self.query_one("#cb_mom_hybrid").value):
-                    self.query_one("#cb_mom_std").value = True
-                self.query_one("#btn_mom_adv").disabled = True
-            except: pass
-
-    @on(Button.Pressed, "#btn_mom_adv")
-    def _on_mom_adv_click(self):
-        if self.main_app:
-            self.main_app.push_screen(MOMExpertModal(self.main_app))
-
-
-class MOMExpertModal(ModalScreen):
-    """Advanced Momentum settings based on Volatility/ATR."""
-    BINDINGS = [("escape", "dismiss", "Dismiss")]
-    def __init__(self, main_app):
-        super().__init__()
-        self.main_app = main_app
-        self.s = main_app.mom_adv_settings
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="modal_container"):
-            yield Static("[bold #ffaa00]MOM - Advanced Volatility & ATR Logic[/]", id="modal_title")
-            
-            with Container(id="modal_expert_body"):
-                yield Label("1. ATR Gateways (Boundary ¢):")
-                with Horizontal():
-                    yield Label("Low Vol (Stable):")
-                    yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low")
-                    yield Label("High Vol (Chaos):")
-                    yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
-                
-                yield Label("2. Threshold Offsets (¢):")
-                with Horizontal():
-                    yield Label("Stable Offset:")
-                    yield Input(placeholder="-5", value=str(self.s["stable_offset"]), id="exp_off_stable")
-                    yield Label("Chaos Offset:")
-                    yield Input(placeholder="10", value=str(self.s["chaos_offset"]), id="exp_off_chaos")
-                
-                yield Label("3. Auto-Mode Overrides:")
-                with Horizontal():
-                    yield Checkbox(label="STN on Chaos", value=self.s["auto_stn_chaos"], id="exp_over_stn")
-                    yield Checkbox(label="PBN on Stable", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
-                
-                yield Label("4. Whale Shield (Emergency Exit):")
-                with Horizontal():
-                    yield Label("Zone (s):")
-                    yield Input(placeholder="45", value=str(self.s["shield_time"]), id="exp_wh_time")
-                    yield Label("Reach (¢):")
-                    yield Input(placeholder="5", value=str(self.s["shield_reach"]), id="exp_wh_reach")
-            
-            yield Static("", id="exp_preview")  # Live preview text
-            
-            with Horizontal(id="modal_footer"):
-                yield Button("SAVE & CLOSE", id="btn_exp_save", variant="primary")
-
-    def on_mount(self):
-        self.styles.align = ("center", "middle")
-        c = self.query_one("#modal_container")
-        c.styles.background = "#1a1a1a"
-        c.styles.border = ("thick", "#ffaa00")
-        c.styles.padding = (1, 2)
-        c.styles.width = 75
-        c.styles.height = "auto"
-        
-        self.query_one("#modal_title").styles.text_align = "center"
-        self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
-        
-        body = self.query_one("#modal_expert_body")
-        body.styles.border = ("ascii", "#333333")
-        body.styles.padding = (0, 1)
-        body.styles.margin = (0, 0, 1, 0)
-        
-        for inp in self.query(Input):
-            inp.styles.width = 8
-            inp.styles.margin = (0, 1, 0, 0)
-        
-        prev = self.query_one("#exp_preview")
-        prev.styles.text_align = "center"
-        prev.styles.color = "#aaaaaa"
-        prev.styles.height = 3
-        prev.styles.margin = (1, 0)
-        
-        self.set_interval(1.0, self._update_preview)
-
-    def _update_preview(self):
-        if not self.main_app: return
-        atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
-        mom = self.main_app.scanners.get("Momentum")
-        base_t = int(getattr(mom, "threshold", 0.6) * 100) if mom else 60
-        
-        # Logic Tier
-        tier = 2 # Neutral
-        adj = 0
-        if atr <= self.s["atr_low"]:
-            tier = 1; adj = self.s["stable_offset"]
-        elif atr >= self.s["atr_high"]:
-            tier = 3; adj = self.s["chaos_offset"]
-        
-        final_t = base_t + adj
-        status = "Stable" if tier == 1 else ("Chaos" if tier == 3 else "Neutral")
-        color = "green" if tier == 1 else ("red" if tier == 3 else "cyan")
-        
-        preview = (
-            f"Curr ATR: {float(atr):.1f} | Tier: [bold {color}]{status}[/] | "
-            f"Base: {base_t}¢ | Offset: {adj:+}¢ | [bold white]Target: {final_t}¢[/]"
-        )
-        self.query_one("#exp_preview").update(preview)
-
-    @on(Button.Pressed, "#btn_exp_save")
-    def save_and_close(self):
-        try:
-            self.s["atr_low"] = int(self.query_one("#exp_atr_low").value)
-            self.s["atr_high"] = int(self.query_one("#exp_atr_high").value)
-            self.s["stable_offset"] = int(self.query_one("#exp_off_stable").value)
-            self.s["chaos_offset"] = int(self.query_one("#exp_off_chaos").value)
-            self.s["auto_stn_chaos"] = self.query_one("#exp_over_stn").value
-            self.s["auto_pbn_stable"] = self.query_one("#exp_over_pbn").value
-            self.s["shield_time"] = int(self.query_one("#exp_wh_time").value)
-            self.s["shield_reach"] = int(self.query_one("#exp_wh_reach").value)
-            self.main_app.save_settings()
-        except: pass
-        self.dismiss()
 
 
 class BankrollExhaustedModal(ModalScreen):

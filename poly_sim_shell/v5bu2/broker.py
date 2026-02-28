@@ -11,9 +11,7 @@ class SimBroker:
     def __init__(self, balance, log_file):
         self.balance = balance
         self.shares = {"UP": 0.0, "DOWN": 0.0}
-        self.pre_buy_shares = {"UP": 0.0, "DOWN": 0.0}
         self.invested_this_window = 0.0
-        self.pre_buy_invested = 0.0
         self.revenue_this_window = 0.0
         self.log_file = log_file
         self.init_log()
@@ -73,14 +71,8 @@ class SimBroker:
         if usd_amount > self.balance: return False, "Insufficient Funds"
         shares = usd_amount / price
         self.balance -= usd_amount
-        
-        if reason == "PreBuy_NextWindow":
-            self.pre_buy_shares[side] += shares
-            self.pre_buy_invested += usd_amount
-        else:
-            self.invested_this_window += usd_amount
-            self.shares[side] += shares
-
+        self.invested_this_window += usd_amount
+        self.shares[side] += shares
         self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
         return True, f"Bought {shares:.2f} {side} @ {price*100:.1f}¢ | Cost: ${usd_amount:.2f} ({reason})"
 
@@ -93,6 +85,7 @@ class SimBroker:
         self.shares[side] = 0.0
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})", revenue
+
     def settle_window(self, winning_side):
         winning_shares = self.shares[winning_side]
         payout = winning_shares * 1.00
@@ -104,16 +97,6 @@ class SimBroker:
         self.invested_this_window = 0.0
         self.revenue_this_window = 0.0
         return payout, net_pnl
-
-    def promote_prebuy(self):
-        """Transfers pre-buy shares/investments to the active window at the start of a new cycle."""
-        for side in ["UP", "DOWN"]:
-            self.shares[side] += self.pre_buy_shares[side]
-        self.invested_this_window += self.pre_buy_invested
-        
-        # Reset buffers
-        self.pre_buy_shares = {"UP": 0.0, "DOWN": 0.0}
-        self.pre_buy_invested = 0.0
 
 class LiveBroker:
     def __init__(self, sim_broker_ref):
