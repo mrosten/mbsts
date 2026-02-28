@@ -168,18 +168,54 @@ class LateReversalScanner(BaseScanner):
         return "WAIT"
 
 class StaircaseBreakoutScanner(BaseScanner):
+    def __init__(self):
+        super().__init__()
+        self.max_price = 80.0  # Default max price threshold
+        self.volume_confirm = False  # Default volume confirmation off
+        self.entry_timing = "AGGRESSIVE"  # Default aggressive entry
+        self.pullback = False  # Default pullback detection off
+        self.tolerance_pct = 0.1  # Default tolerance 10%
+        self.atr_multiplier = 1.5  # Default ATR multiplier
+        
     def analyze(self, close_prices):
         if self.triggered_signal: return self.triggered_signal
         if len(close_prices) < 20: return "WAIT_DATA"
+        
+        # Check max price threshold
+        current_price = close_prices[-1]
+        if current_price > self.max_price:
+            return f"SKIP|Price {current_price*100:.1f}c > Max {self.max_price}c"
+        
         window = close_prices[-15:]
         lows = [window[i] for i in range(1, len(window) - 1) if window[i] <= window[i-1] and window[i] <= window[i+1]]
         if len(lows) < 3: return "WAIT_PATTERN"
         if all(lows[i] < lows[i+1] for i in range(len(lows)-1)):
             recent_high = max(window)
-            if (recent_high - min(window)) > (min(window) * TradingConfig.TOLERANCE_PCT):
-                if window[-1] >= (recent_high * 0.9995):
-                     self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed"
-                     return self.triggered_signal
+            
+            # Dynamic tolerance based on ATR multiplier
+            base_tolerance = TradingConfig.TOLERANCE_PCT
+            adjusted_tolerance = base_tolerance * self.atr_multiplier
+            
+            if (recent_high - min(window)) > (min(window) * adjusted_tolerance):
+                if self.pullback:
+                    # Wait for pullback before entering
+                    if window[-1] < (recent_high * 0.995):
+                        self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed (Pullback)"
+                        return self.triggered_signal
+                    else:
+                        return "WAIT_PULLBACK"
+                elif self.entry_timing == "CONSERVATIVE":
+                    # Conservative entry - wait for confirmation
+                    if window[-1] >= (recent_high * 0.999):
+                        self.triggered_signal = "BET_UP_CONSERVATIVE|Staircase Breakout Confirmed"
+                        return self.triggered_signal
+                    else:
+                        return "WAIT_CONSERVATIVE"
+                else:
+                    # Aggressive entry - original logic
+                    if window[-1] >= (recent_high * 0.9995):
+                        self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed"
+                        return self.triggered_signal
         return "WAIT"
 
 class PostPumpScanner(BaseScanner):

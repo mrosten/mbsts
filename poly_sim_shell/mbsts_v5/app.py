@@ -120,9 +120,17 @@ class SniperApp(App):
         lbl_id = event.control.id
         if lbl_id and lbl_id.startswith("lbl_"):
             code = lbl_id[4:].upper()
-            info = ALGO_INFO.get(code)
-            if info:
-                self.push_screen(AlgoInfoModal(code, info['name'], info['desc'], main_app=self))
+            
+            # Open BullFlag settings modal when STA is clicked
+            if code == "STA":
+                if self.main_app:
+                    self.main_app.push_screen(BullFlagSettingsModal(self.main_app))
+                return
+            
+            # Original logic for other algo codes
+            if code in self.scanner_descriptions:
+                desc = self.scanner_descriptions[code]["desc"]
+                self.main_app.push_screen(AlgoInfoModal(code, self.scanner_descriptions[code]["name"], desc, self.main_app))
                 event.stop()
 
     @on(Button.Pressed, "#btn_algo_all")
@@ -2151,7 +2159,86 @@ class MOMExpertModal(ModalScreen):
         self.dismiss()
 
 
-class BankrollExhaustedModal(ModalScreen):
+class BullFlagSettingsModal(ModalScreen):
+    """Quick settings modal for BullFlag algorithm improvements."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold yellow]⚡ BULLFLAG SETTINGS[/]", id="modal_title")
+            
+            with Horizontal(id="settings_grid"):
+                # Quick improvement options
+                yield Static("🎯 Max Price Threshold:", id="label_max_price")
+                yield Input(placeholder="80", id="inp_max_price", value="80")
+                
+                yield Static("📊 Volume Filter:", id="label_volume")
+                yield Checkbox("Enable volume confirmation", id="cb_volume_confirm", value=False)
+                
+                yield Static("⚡ Entry Timing:", id="label_entry_timing")
+                yield Radio("Aggressive", id="rb_aggressive", value=True, name="entry_timing")
+                yield Radio("Conservative", id="rb_conservative", value=False, name="entry_timing")
+                
+                yield Static("🔧 Pullback Detection:", id="label_pullback")
+                yield Checkbox("Enable pullback detection", id="cb_pullback", value=False)
+                
+                yield Static("🎯 Dynamic Tolerance:", id="label_tolerance")
+                yield Slider(0.05, 0.2, 0.15, 0.3, id="slider_tolerance", value=0.1)
+                
+                yield Static("📈 ATR Multiplier:", id="label_atr_mult")
+                yield Slider(1.0, 1.5, 2.0, 3.0, id="slider_atr_mult", value=1.5)
+                
+            with Horizontal(id="button_row"):
+                yield Button("APPLY (A)", id="btn_apply", variant="primary")
+                yield Button("RESET (R)", id="btn_reset", variant="default")
+                yield Button("DISMISS", id="btn_dismiss")
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_apply":
+            self._apply_settings()
+        elif event.button.id == "btn_reset":
+            self._reset_settings()
+        elif event.button.id == "btn_dismiss":
+            self.dismiss()
+    
+    def _apply_settings(self):
+        """Apply BullFlag improvements based on user selections."""
+        max_price = float(self.query_one("#inp_max_price").value)
+        volume_confirm = self.query_one("#cb_volume_confirm").value
+        entry_timing = self.query_one("#rb_aggressive").value
+        pullback = self.query_one("#cb_pullback").value
+        tolerance = float(self.query_one("#slider_tolerance").value)
+        atr_mult = float(self.query_one("#slider_atr_mult").value)
+        
+        # Update BullFlag scanner with new settings
+        if hasattr(self.main_app, 'scanners') and 'BullFlag' in self.main_app.scanners:
+            bullflag_scanner = self.main_app.scanners['BullFlag']
+            bullflag_scanner.max_price = max_price
+            bullflag_scanner.volume_confirm = volume_confirm
+            bullflag_scanner.entry_timing = "AGGRESSIVE" if entry_timing else "CONSERVATIVE"
+            bullflag_scanner.pullback = pullback
+            bullflag_scanner.tolerance_pct = tolerance
+            bullflag_scanner.atr_multiplier = atr_mult
+            
+            self.main_app.log_msg("⚡ BullFlag settings applied: Max=$.2f, Volume=%s, Entry=%s, Pullback=%s, Tolerance=%.2f, ATR=%.1fx" % (
+                max_price, "ON" if volume_confirm else "OFF",
+                entry_timing, "ON" if pullback else "OFF", 
+                tolerance, atr_mult))
+    
+    def _reset_settings(self):
+        """Reset BullFlag settings to defaults."""
+        self.query_one("#inp_max_price").value = "80"
+        self.query_one("#cb_volume_confirm").value = False
+        self.query_one("#rb_aggressive").value = True
+        self.query_one("#cb_pullback").value = False
+        self.query_one("#slider_tolerance").value = "0.1"
+        self.query_one("#slider_atr_mult").value = "1.5"
+        
+        self.main_app.log_msg("🔄 BullFlag settings reset to defaults")
     """Full-screen alert shown when the bankroll can no longer cover the minimum bet."""
 
     def __init__(self, bankroll: float, min_bet: float, mode: str):
