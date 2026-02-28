@@ -230,6 +230,33 @@ class SniperApp(App):
                             self.scanner_weights[k] = float(v)
         except Exception: pass
 
+        self.mom_analytics = self._reset_mom_analytics()
+        # Create a time-signatured log file for this session
+        session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.mom_adv_log_file = f"momentum_adv_{session_time}.csv"
+        self._init_mom_adv_log()
+
+    def _reset_mom_analytics(self):
+        return {
+            "pre_15s_gap": None,
+            "gap_5s": None,
+            "gap_10s": None,
+            "gap_15s": None,
+            "first_55c_side": None, "first_55c_time": None,
+            "first_60c_side": None, "first_60c_time": None,
+            "first_65c_side": None, "first_65c_time": None,
+        }
+
+    def _init_mom_adv_log(self):
+        if not os.path.exists(self.mom_adv_log_file):
+            with open(self.mom_adv_log_file, 'w') as f:
+                header = (
+                    "Window_ID,Pre_15s_Gap,Gap_5s,Gap_10s,Gap_15s,"
+                    "First_55c_Side,First_55c_Time,First_60c_Side,First_60c_Time,"
+                    "First_65c_Side,First_65c_Time,ATR_5m,Winner"
+                )
+                f.write(header + "\n")
+
     def compose(self) -> ComposeResult:
         yield Horizontal(
             Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
