@@ -763,6 +763,26 @@ class SniperApp(App):
             ph = self.market_data_manager.price_history
             fbb = calculate_bb([p['price'] for p in ph[-20:]]) if len(ph) >= 20 else (0,0,0)
 
+            # --- Momentum Analytics (v5.9.4) ---
+            if elapsed == 5 and self.mom_analytics["gap_5s"] is None:
+                self.mom_analytics["gap_5s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+            elif elapsed == 10 and self.mom_analytics["gap_10s"] is None:
+                self.mom_analytics["gap_10s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+            elif elapsed == 15 and self.mom_analytics["gap_15s"] is None:
+                self.mom_analytics["gap_15s"] = d["poly"]["up_ask"] - d["poly"]["down_ask"]
+
+            # Monitor Milestones: 55c, 60c, 65c
+            u_bid, d_bid = d["poly"]["up_bid"], d["poly"]["down_bid"]
+            for threshold in [0.55, 0.60, 0.65]:
+                key_s = f"first_{int(threshold*100)}c_side"
+                key_t = f"first_{int(threshold*100)}c_time"
+                if self.mom_analytics[key_s] is None:
+                    if u_bid >= threshold:
+                        self.mom_analytics[key_s], self.mom_analytics[key_t] = "UP", elapsed
+                    elif d_bid >= threshold:
+                        self.mom_analytics[key_s], self.mom_analytics[key_t] = "DOWN", elapsed
+            # -----------------------------------
+
             scanner_map = {"NPattern":"#cb_npa","Fakeout":"#cb_fak","Momentum":"#cb_mom","RSI":"#cb_rsi","TrapCandle":"#cb_tra","MidGame":"#cb_mid","LateReversal":"#cb_lat","BullFlag":"#cb_sta","PostPump":"#cb_pos","StepClimber":"#cb_ste","Slingshot":"#cb_sli","MinOne":"#cb_min","Liquidity":"#cb_liq","Cobra":"#cb_cob","Mesa":"#cb_mes","MeanReversion":"#cb_mea","GrindSnap":"#cb_gri","VolCheck":"#cb_vol","Moshe":"#cb_mos","ZScore":"#cb_zsc"}
                         # --- Check Pending Bets First ---
             if not self.mid_window_lockout and not is_initial_lockout:
@@ -811,16 +831,16 @@ class SniperApp(App):
                     if res == "WAIT" and name == "NPattern": res = sc.analyze(ph, d["opn"])
                     elif res == "WAIT" and name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
                     elif res == "WAIT" and name == "Momentum":
+                        base_t = getattr(sc, "base_threshold", sc.threshold)
                         if self.mom_buy_mode == "ADV":
                             atr = getattr(self.market_data_manager, "atr_5m", 0)
-                            base_t = float(self.query_one("#inp_mom_threshold").value) / 100.0
                             adj = 0
                             if atr <= self.mom_adv_settings["atr_low"]: adj = self.mom_adv_settings["stable_offset"] / 100.0
                             elif atr >= self.mom_adv_settings["atr_high"]: adj = self.mom_adv_settings["chaos_offset"] / 100.0
                             sc.threshold = base_t + adj
                         else:
-                            try: sc.threshold = float(self.query_one("#inp_mom_threshold").value) / 100.0
-                            except: pass
+                            # Standard mode uses the base directly. No UI querying here!
+                            sc.threshold = base_t
                         res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
                     elif res == "WAIT" and name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
                     elif res == "WAIT" and name == "TrapCandle": res = sc.analyze(ph, d["opn"])
@@ -1145,6 +1165,9 @@ class SniperApp(App):
                     #     - Stable Override: (Reserved for future aggressive logic if needed).
                     #     - Default: Follow 2¢ rule or skip.
                     price_diff = up_ask - dn_ask
+                    # Capture exact 15s pre-window gap for analytics
+                    if self.mom_analytics["pre_15s_gap"] is None:
+                        self.mom_analytics["pre_15s_gap"] = price_diff
                     
                     if self.mom_buy_mode == "ADV":
                         atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
@@ -1251,8 +1274,24 @@ class SniperApp(App):
     def trigger_settlement(self):
         if self.market_data["start_ts"] == 0: return
 
-        winner = "UP" if self.market_data["btc_price"] >= self.market_data["btc_open"] else "DOWN"
-        self.log_msg(f"SETTLED: [bold white]{winner}[/]", level="MONEY")
+        # 1. Poly-Decisive Logic (v5.9.4)
+        # If token price is > 0.90, that side is the definitive winner regardless of BTC sync issues.
+        up_bid = self.market_data.get("up_bid", 0)
+        dn_bid = self.market_data.get("down_bid", 0)
+        btc_p = self.market_data.get("btc_price", 0)
+        btc_o = self.market_data.get("btc_open", 0)
+        
+        if up_bid >= 0.90:
+            winner = "UP"
+            reason = f"Poly-Decisive (UP Bid: {up_bid*100:.0f}¢)"
+        elif dn_bid >= 0.90:
+            winner = "DOWN"
+            reason = f"Poly-Decisive (DOWN Bid: {dn_bid*100:.0f}¢)"
+        else:
+            winner = "UP" if btc_p >= btc_o else "DOWN"
+            reason = f"BTC Move (${btc_p:,.2f} vs Open ${btc_o:,.2f})"
+
+        self.log_msg(f"SETTLED: [bold white]{winner}[/] | [dim]{reason}[/]", level="MONEY")
         payout, net_pnl = self.sim_broker.settle_window(winner)
         for p in self.portfolios.values(): p.settle_window(winner, self.market_data["btc_price"], self.market_data["btc_open"])
         
@@ -1298,6 +1337,25 @@ class SniperApp(App):
         self.update_balance_ui(); self.window_bets.clear()
         for s in self.scanners.values(): s.reset()
         self.market_data_manager.reset_history()
+
+        # --- Write Momentum Analytics (v5.9.4) ---
+        try:
+            ma = self.mom_analytics
+            line = (
+                f"{self.market_data['start_ts']},"
+                f"{ma['pre_15s_gap'] if ma['pre_15s_gap'] is not None else ''},"
+                f"{ma['gap_5s'] if ma['gap_5s'] is not None else ''},"
+                f"{ma['gap_10s'] if ma['gap_10s'] is not None else ''},"
+                f"{ma['gap_15s'] if ma['gap_15s'] is not None else ''},"
+                f"{ma['first_55c_side'] or ''},{ma['first_55c_time'] if ma['first_55c_time'] is not None else ''},"
+                f"{ma['first_60c_side'] or ''},{ma['first_60c_time'] if ma['first_60c_time'] is not None else ''},"
+                f"{ma['first_65c_side'] or ''},{ma['first_65c_time'] if ma['first_65c_time'] is not None else ''},"
+                f"{self.market_data_manager.atr_5m:.2f},{winner}"
+            )
+            with open(self.mom_adv_log_file, 'a') as f:
+                f.write(line + "\n")
+        except: pass
+        self.mom_analytics = self._reset_mom_analytics()
 
         self.log_msg("────────────────── WINDOW END ──────────────────", level="ADMIN")
         self.log_msg("") # Whitespace after window end
@@ -1517,12 +1575,14 @@ class AlgoInfoModal(ModalScreen):
                 with Horizontal(id="modal_mom_threshold"):
                     yield Label("Threshold ¢ (51-70):", id="lbl_mom_threshold")
                     yield Input(placeholder="60", id="inp_mom_threshold")
-                with Horizontal(id="modal_mom_buymode"):
+                with Vertical(id="modal_mom_buymode_grid"):
                     yield Label("Buy Mode:", id="lbl_mom_buymode")
-                    yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
-                    yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
-                    yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
-                    yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
+                    with Horizontal(classes="buy_mode_row"):
+                        yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
+                        yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
+                    with Horizontal(classes="buy_mode_row"):
+                        yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
+                        yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
                 with Horizontal(id="modal_mom_adv_btn"):
                     yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
             with Horizontal(id="modal_footer"):
@@ -1536,8 +1596,9 @@ class AlgoInfoModal(ModalScreen):
         container.styles.background = "#222222"
         container.styles.border = ("thick", "cyan")
         container.styles.padding = (1, 2)
-        container.styles.width = 60
+        container.styles.width = 62
         container.styles.height = "auto"
+        container.styles.max_height = "90vh"
         container.styles.align = ("center", "middle")
         
         self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
@@ -1551,7 +1612,7 @@ class AlgoInfoModal(ModalScreen):
         row_w = self.query_one("#modal_algo_weight")
         row_w.styles.height = 3
         row_w.styles.align = ("center", "middle")
-        row_w.styles.margin = (0, 0, 1, 0)
+        row_w.styles.margin = (0, 0, 0, 0)
         row_w.styles.border = ("ascii", "#333333")
         self.query_one("#inp_algo_weight").styles.width = 10
         
@@ -1586,12 +1647,32 @@ class AlgoInfoModal(ModalScreen):
                 row.styles.align = ("center", "middle")
                 row.styles.margin = (0, 0, 1, 0)
 
-            # Buy Mode row needs more breathing room for checkbox labels
-            bm = self.query_one("#modal_mom_buymode")
-            bm.styles.height = "auto"
-            bm.styles.align = ("left", "middle")
-            bm.styles.margin = (0, 0, 1, 0)
-            bm.styles.padding = (0, 1)
+            # Buy Mode 2x2 Grid Layout (v5.9.2)
+            grid = self.query_one("#modal_mom_buymode_grid")
+            grid.styles.height = "auto"
+            grid.styles.align = ("center", "middle")
+            grid.styles.margin = (1, 0, 0, 0)
+            grid.styles.padding = (0, 0)
+            
+            self.query_one("#lbl_mom_buymode").styles.text_align = "center"
+            self.query_one("#lbl_mom_buymode").styles.width = "100%"
+            self.query_one("#lbl_mom_buymode").styles.margin = (0, 0, 0, 0)
+
+            for row in self.query(".buy_mode_row"):
+                row.styles.height = "auto"
+                row.styles.align = ("center", "middle")
+                row.styles.width = "100%"
+                row.styles.margin = (0, 0)
+
+            for cbid in ["#cb_mom_std", "#cb_mom_pre", "#cb_mom_hybrid", "#cb_mom_adv"]:
+                cb = self.query_one(cbid)
+                cb.styles.width = 15
+                cb.styles.margin = (0, 1)
+
+            abt = self.query_one("#modal_mom_adv_btn")
+            abt.styles.align = ("center", "middle")
+            abt.styles.width = "100%"
+            abt.styles.margin = (1, 0, 0, 0)
 
             self.query_one("#inp_mom_mode").styles.width = 10
             self.query_one("#inp_mom_duration").styles.width = 6
@@ -1662,6 +1743,7 @@ class AlgoInfoModal(ModalScreen):
                 t = int(self.query_one("#inp_mom_threshold").value)
                 if 51 <= t <= 70:
                     mom.threshold = t / 100.0
+                    mom.base_threshold = t / 100.0
             except: pass
             try:
                 d = int(self.query_one("#inp_mom_duration").value)
@@ -1766,36 +1848,38 @@ class MOMExpertModal(ModalScreen):
         with Vertical(id="modal_container"):
             yield Static("[bold #ffaa00]MOM - Advanced Volatility & ATR Logic[/]", id="modal_title")
             
-            with Container(id="modal_expert_body"):
-                yield Label("1. ATR Gateways (Boundary ¢):")
-                with Horizontal():
-                    yield Label("Low Vol (Stable):")
-                    yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low")
-                    yield Label("High Vol (Chaos):")
-                    yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
+            with Vertical(id="modal_expert_payload"):
+                with Vertical(classes="exp_section"):
+                    yield Label("1. ATR Gateways (Tiers)", classes="exp_sec_title")
+                    with Horizontal(classes="exp_row"):
+                        yield Label("Stable Boundary (¢):")
+                        yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low")
+                        yield Label("Chaos Boundary (¢):")
+                        yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
                 
-                yield Label("2. Threshold Offsets (¢):")
-                with Horizontal():
-                    yield Label("Stable Offset:")
-                    yield Input(placeholder="-5", value=str(self.s["stable_offset"]), id="exp_off_stable")
-                    yield Label("Chaos Offset:")
-                    yield Input(placeholder="10", value=str(self.s["chaos_offset"]), id="exp_off_chaos")
+                with Vertical(classes="exp_section"):
+                    yield Label("2. Dynamic Threshold Offsets", classes="exp_sec_title")
+                    with Horizontal(classes="exp_row"):
+                        yield Label("Stable Side Offset (¢):")
+                        yield Input(placeholder="-5", value=str(self.s["stable_offset"]), id="exp_off_stable")
+                        yield Label("Chaos Side Offset (¢):")
+                        yield Input(placeholder="10", value=str(self.s["chaos_offset"]), id="exp_off_chaos")
                 
-                yield Label("3. Auto-Mode Overrides:")
-                with Horizontal():
-                    yield Checkbox(label="STN on Chaos", value=self.s["auto_stn_chaos"], id="exp_over_stn")
-                    yield Checkbox(label="PBN on Stable", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
+                with Vertical(classes="exp_section"):
+                    yield Label("3. Auto-Mode Overrides", classes="exp_sec_title")
+                    with Horizontal(classes="exp_row"):
+                        yield Checkbox(label="STN on Chaos (Safe)", value=self.s["auto_stn_chaos"], id="exp_over_stn")
+                        yield Checkbox(label="PBN on Stable (Aggro)", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
                 
-                yield Label("4. Whale Shield (Emergency Exit):")
-                with Horizontal():
-                    yield Label("Zone (s):")
-                    yield Input(placeholder="45", value=str(self.s["shield_time"]), id="exp_wh_time")
-                    yield Label("Reach (¢):")
-                    yield Input(placeholder="5", value=str(self.s["shield_reach"]), id="exp_wh_reach")
-            
-            yield Static("", id="exp_preview")  # Live preview text
-            
-            with Horizontal(id="modal_footer"):
+                with Vertical(classes="exp_section"):
+                    yield Label("4. Whale Shield Emergency", classes="exp_sec_title")
+                    with Horizontal(classes="exp_row"):
+                        yield Label("Zone (s):")
+                        yield Input(placeholder="45", value=str(self.s["shield_time"]), id="exp_wh_time")
+                        yield Label("Reach (¢):")
+                        yield Input(placeholder="5", value=str(self.s["shield_reach"]), id="exp_wh_reach")
+                
+                yield Static("", id="exp_preview")
                 yield Button("SAVE & CLOSE", id="btn_exp_save", variant="primary")
 
     def on_mount(self):
@@ -1803,27 +1887,54 @@ class MOMExpertModal(ModalScreen):
         c = self.query_one("#modal_container")
         c.styles.background = "#1a1a1a"
         c.styles.border = ("thick", "#ffaa00")
-        c.styles.padding = (1, 2)
-        c.styles.width = 75
+        c.styles.padding = (0, 2)
+        c.styles.width = 65
         c.styles.height = "auto"
         
         self.query_one("#modal_title").styles.text_align = "center"
         self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
+        self.query_one("#modal_title").styles.color = "#ffaa00"
         
-        body = self.query_one("#modal_expert_body")
-        body.styles.border = ("ascii", "#333333")
-        body.styles.padding = (0, 1)
-        body.styles.margin = (0, 0, 1, 0)
-        
+        payload = self.query_one("#modal_expert_payload")
+        payload.styles.align = ("center", "middle")
+        payload.styles.height = "auto"
+
+        for sec in self.query(".exp_section"):
+            sec.styles.border = ("ascii", "#333333")
+            sec.styles.padding = (0, 1)
+            sec.styles.margin = (0, 0, 1, 0)
+            sec.styles.height = "auto"
+            sec.styles.width = "100%"
+
+        for title in self.query(".exp_sec_title"):
+            title.styles.color = "#888888"
+            title.styles.bold = True
+            title.styles.width = "100%"
+            title.styles.text_align = "left"
+
+        for row in self.query(".exp_row"):
+            row.styles.height = "auto"
+            row.styles.align = ("center", "middle")
+            row.styles.width = "100%"
+
         for inp in self.query(Input):
-            inp.styles.width = 8
+            inp.styles.width = 6
             inp.styles.margin = (0, 1, 0, 0)
+        
+        for cb in self.query(Checkbox):
+            cb.styles.width = 25
+            cb.styles.margin = (0, 0)
         
         prev = self.query_one("#exp_preview")
         prev.styles.text_align = "center"
         prev.styles.color = "#aaaaaa"
         prev.styles.height = 3
-        prev.styles.margin = (1, 0)
+        prev.styles.margin = (0, 0)
+        
+        save_btn = self.query_one("#btn_exp_save")
+        save_btn.styles.margin = (1, 0, 0, 0)
+        save_btn.styles.width = 25
+        save_btn.styles.align = ("center", "middle")
         
         self.set_interval(1.0, self._update_preview)
 

@@ -58,7 +58,7 @@ Click any scanner label to open its **Settings Modal** (weight, mode, thresholds
 | TP/SL | Enables automatic Take Profit and Stop Loss monitoring |
 | Strong Only | Restricts to Strong-signal scanners |
 | 1 Trade Max | Only one active position allowed per window |
-| Whale Protect | (reserved) |
+| Whale Protect | (v4 Legacy — see MOM ADV Whale Shield) |
 | LIVE MODE | Switches from simulation to live Polymarket execution |
 
 ### Manual Buttons
@@ -110,13 +110,25 @@ Each Polymarket 5-minute window has unique UP and DOWN token IDs, so positions f
 | TRA | TrapCandle | Candle trap reversal |
 | VOL | VolCheck | Volume+price divergence |
 | ZSC | ZScore | Statistical z-score breakout |
+| MOM | Momentum | Price/time-based momentum (v5.9 Expert) |
 
-### MOM Scanner — Buy Mode
+### MOM Scanner — Buy Modes (v5.9)
 
-The Momentum scanner has two buy modes, set in its Settings Modal:
+The Momentum scanner now supports four exclusive buy modes (2x2 Grid):
 
-- **Standard** — fires on threshold/time/duration signal and buys the current window
-- **Pre-Buy Next** — ignores signals; instead, 15 seconds before the current window ends, fetches the **next** window's prices and buys the higher-ask side (= more market demand). Falls back to 4H trend direction on a 50/50 split. The position is invisible to TP/SL until the new window begins.
+- **Standard (STN)** — Basic threshold/time signals.
+- **Pre-Buy (PBN)** — Advanced entry at -15s based on next-window demand. Follows spreads $\ge$ 2¢; reverses on < 2¢.
+- **Hybrid (HBR)** — Only Pre-Buys on $\ge$ 2¢ leads. If the gap is small, it waits for the window to start (standard behavior).
+- **Expert (ADV)** — Uses **5m ATR** to dynamically shift thresholds and behaviors. Requires configuration via the `CONFIGURE ADV` modal.
+
+---
+
+## Expert & Volatility Logic (v5.9)
+
+The **MOM ADV** mode introduces Tier-based trading:
+- **ATR Gateways**: Define Boundaries for "Stable" vs. "Chaos" tiers.
+- **Dynamic Offsets**: Automatically adds/subtracts from the base threshold (e.g. +10¢ in Chaos).
+- **Whale Shield**: Emergency exit triggered in the final seconds if the price stays within a "reach" (e.g. 5¢) of the 50¢ neutral zone.
 
 ---
 
@@ -175,7 +187,25 @@ All UI settings are auto-saved to `v5_settings.json` on every change and restore
 At **20 seconds** before each window end, the bot fetches the next window's UP/DOWN bid/ask prices and logs them:
 
 ```
-🔭 NEXT WINDOW (btc-updown-5m-XXXXXXXXXX): UP bid=52.0¢ ask=53.0¢  DN bid=48.0¢ ask=48.0¢
-```
 
 If the next market isn't published yet, logs `Next window not yet available`.
+
+---
+
+## Chat Summary & Future Roadmap (Session Feb 2026)
+
+This session focused on hardening the bot for high-volatility environments and refining log accuracy.
+
+### Implemented Specs:
+- **v5.8 Refinements**: Accurate accuracy displays (starts at Window 2), `Esc` key dismissal, and proper log event serialization.
+- **v5.9/v5.9.1/v5.9.2**: The MOM Expert overhaul including ATR-based tiering, Whale Shielding, and a compact 2x2 Grid UI.
+- **v5.9.3 Logic Guard**: Refactored scanner loops to use persistent state (`base_threshold`), resolving background errors when UI modals are closed.
+
+### Discarded / Future Priority Ideas:
+- **Multi-Scanner Expert Tiering**: Applying the ATR-based Gateway logic to other scanners (Cobra, RSI) to dynamically adjust their sensitivity.
+- **Dynamic Bet Scaling**: Automatically increasing $ bet size during "Stable" tiers and reducing it during "Chaos".
+- **Global Whale Shield**: A protection layer that monitors all open positions (not just MOM) for flip-risk near 50¢ in the final seconds.
+- **Historical Gap Guard**: Implementing a data-validation step on boot to ensure no phantom signals are generated from stale Binance/Chainlink data during initial backfill.
+
+> [!IMPORTANT]
+> This chat history is closed as of v5.9.3. Refer to the Roadmap above for priority items in the next development cycle.

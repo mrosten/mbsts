@@ -69,6 +69,7 @@ class MomentumScanner(BaseScanner):
         super().__init__()
         self.mode = "TIME"      # "TIME", "PRICE", or "DURATION"
         self.threshold = 0.60   # For PRICE / DURATION mode (¢ / 100)
+        self.base_threshold = 0.60 # Persistent base for adjustments
         self.duration = 10      # Seconds a side must stay above threshold (DURATION mode)
         # Internal tracking for DURATION mode
         self._above_ts = {}     # {side: timestamp_first_seen_above}
