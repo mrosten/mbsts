@@ -147,7 +147,7 @@ The **MOM ADV** mode introduces Tier-based trading:
 
 ## Momentum Analytics Log (v5.9.4)
 
-A specialized session log `logs/momentum_adv_YYYYMMDD_HHMMSS.csv` is generated automatically to help optimize momentum parameters. It captures one consolidated row per window with these fields:
+A specialized session log `lg/momentum_adv_YYYYMMDD_HHMMSS.csv` is generated automatically to help optimize momentum parameters. It captures one consolidated row per window with these fields:
 
 | Category | Fields |
 |---|---|

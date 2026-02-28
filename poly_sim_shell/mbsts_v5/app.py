@@ -231,9 +231,9 @@ class SniperApp(App):
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
-        # Create a time-signatured log file for this session in logs/ subdirectory
+        # Create a time-signatured log file for this session in lg/ subdirectory
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.mom_adv_log_file = f"logs/momentum_adv_{session_time}.csv"
+        self.mom_adv_log_file = f"lg/momentum_adv_{session_time}.csv"
         self._init_mom_adv_log()
 
     def _reset_mom_analytics(self):
