@@ -1207,20 +1207,35 @@ class SniperApp(App):
                         self.call_from_thread(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
                         return
 
-                    # New Selection Logic (v5.6/v5.7/v5.9):
-                    # - If 2¢ lead: Follow it.
-                    # - If < 2¢ gap:
-                    #     - In PRE mode: Reverse the current winner.
-                    #     - In HYBRID mode: Skip and defer to new window.
-                    # - In ADV mode (v5.9):
-                    #     - Chaos Override: Skip if ATR is high and Auto-STN enabled.
-                    #     - Stable Override: (Reserved for future aggressive logic if needed).
-                    #     - Default: Follow 2¢ rule or skip.
-                    price_diff = up_ask - dn_ask
+                    # Calculate BTC Velocity and RSI for enhanced decision making
+                    btc_open = self.market_data.get("btc_open", 0)
+                    btc_pre_60s = self.mom_analytics.get("btc_pre_60s")
+                    velocity = (btc_open - btc_pre_60s) if btc_open and btc_pre_60s else 0
+                    
+                    # Calculate 1m RSI
+                    rsi_1m = 50.0
+                    try:
+                        closes, _, _, _ = self.market_data_manager.fetch_candles_60m()
+                        if closes:
+                            from .market import calculate_rsi
+                            rsi_1m = calculate_rsi(closes, period=14)
+                    except:
+                        pass
+
                     # Capture exact 15s pre-window gap and BTC price for analytics
+                    price_diff = up_ask - dn_ask
                     if self.mom_analytics["pre_15s_gap"] is None:
                         self.mom_analytics["pre_15s_gap"] = price_diff
                         self.mom_analytics["btc_pre_15s"] = self.market_data.get("btc_price", 0)
+                    
+                    # Enhanced Decision Logic with Priority System:
+                    # Priority 1: Velocity Reversion (Significantly negative velocity -> UP bet for mean reversion)
+                    # Priority 2: RSI Trend (High RSI > 70 -> UP bet for trend continuation)
+                    # Priority 3: Price Gap (Follow lead or reverse based on gap size)
+                    
+                    decision_reason = None
+                    side = None
+                    price = None
                     
                     if self.mom_buy_mode == "ADV":
                         atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
@@ -1228,52 +1243,82 @@ class SniperApp(App):
                         if atr >= adv["atr_high"] and adv["auto_stn_chaos"]:
                             self.call_from_thread(self.log_msg, f"[dim]PRE-BUY chaos skip (ATR:{atr:.1f}) -> Forcing STN[/]")
                             return
-                        # Default to 2¢ follow for ADV if no override
+                    
+                    # Priority 1: Velocity Reversion Check
+                    if velocity <= -150:  # Significantly negative velocity
+                        side = "UP"
+                        price = up_ask
+                        decision_reason = f"Velocity Reversion (BTC moved {velocity:.0f} down in 60s)"
+                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity reversion -> {side} ({velocity:.0f} move)[/]")
+                    
+                    # Priority 2: RSI Momentum Check (only if velocity didn't trigger)
+                    elif side is None and rsi_1m > 70:
+                        # Add trend context check
+                        trend_4h = self.market_data_manager.trend_4h
+                        
+                        if trend_4h == "DOWN":
+                            # Skip RSI momentum signals during downtrends (insufficient data)
+                            decision_reason = f"RSI Momentum skipped (RSI: {rsi_1m:.1f} > 70 but trend is DOWN)"
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum skipped (RSI: {rsi_1m:.1f}) - Downtrend detected[/]")
+                            # Don't set side/price, let it fall through to price gap logic
+                        else:
+                            # Allow RSI momentum in uptrends or sideways markets
+                            side = "UP"
+                            price = up_ask
+                            decision_reason = f"RSI Momentum (RSI: {rsi_1m:.1f} > 70, Trend: {trend_4h})"
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum -> {side} (RSI: {rsi_1m:.1f}, Trend: {trend_4h})[/]")
+                    
+                    # Priority 3: Price Gap Logic (original logic with enhancements)
+                    elif side is None:
                         if abs(price_diff) >= 0.02:
                             side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                            if self.mom_buy_mode == "HYBRID":
+                                decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
+                            else:
+                                decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
                         else:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring[/]")
-                            return
-                    elif abs(price_diff) >= 0.02:
-                        side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                        if self.mom_buy_mode == "HYBRID":
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                    else:
-                        if self.mom_buy_mode == "HYBRID":
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring to window start[/]")
-                            return
-                        
-                        # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
-                        # and pick the opposite for the next window.
-                        cur_up = self.market_data.get("up_price", 0.5)
-                        cur_dn = self.market_data.get("down_price", 0.5)
-                        winner = "UP" if cur_up >= cur_dn else "DOWN"
-                        side = "DOWN" if winner == "UP" else "UP"
-                        price = up_ask if side == "UP" else dn_ask
-                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner}) -> {side}[/]")
+                            if self.mom_buy_mode == "HYBRID":
+                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring to window start[/]")
+                                return
+                            
+                            # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
+                            # and pick the opposite for the next window.
+                            cur_up = self.market_data.get("up_price", 0.5)
+                            cur_dn = self.market_data.get("down_price", 0.5)
+                            winner = "UP" if cur_up >= cur_dn else "DOWN"
+                            side = "DOWN" if winner == "UP" else "UP"
+                            price = up_ask if side == "UP" else dn_ask
+                            decision_reason = f"Reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner})"
+                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner}) -> {side}[/]")
+                    
+                    # ADV mode special handling for small gaps
+                    if self.mom_buy_mode == "ADV" and side is None:
+                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring[/]")
+                        return
 
-                    token_id = d.get("up_id" if side == "UP" else "down_id")
-                    ok, msg = self.trade_executor.execute_buy(
-                        is_live, side, bet_size, price, token_id,
-                        context={}, reason="PreBuy_NextWindow"
-                    )
-                    if ok:
-                        pending = {"side": side, "entry": price, "cost": bet_size}
-                        self.session_total_trades += 1 # Pre-Buy Trade
-                        def _commit(p=pending, s=side, pr=price, m=msg, bs=bet_size):
-                            self.pre_buy_pending = p
-                            self.risk_manager.register_bet(bs)
-                            self.log_msg(
-                                f"PRE-BUY NEXT {s} @ {pr*100:.1f}¢[dim] — "
-                                f"${bs:.2f} committed. Holding for next window ({next_slug})[/]"
-                            )
-                            self.update_balance_ui()
-                        self.call_from_thread(_commit)
-                    else:
-                        self.call_from_thread(self.log_msg, f"[bold red]🚀 PRE-BUY FAILED:[/] {msg}")
+                    # Execute the trade if we have a decision
+                    if side and price:
+                        token_id = d.get("up_id" if side == "UP" else "down_id")
+                        ok, msg = self.trade_executor.execute_buy(
+                            is_live, side, bet_size, price, token_id,
+                            context={}, reason=f"PreBuy_{decision_reason}"
+                        )
+                        if ok:
+                            pending = {"side": side, "entry": price, "cost": bet_size}
+                            self.session_total_trades += 1 # Pre-Buy Trade
+                            def _commit(p=pending, s=side, pr=price, m=msg, bs=bet_size):
+                                self.pre_buy_pending = p
+                                self.risk_manager.register_bet(bs)
+                                self.log_msg(
+                                    f"PRE-BUY NEXT {s} @ {pr*100:.1f}¢[dim] — "
+                                    f"${bs:.2f} committed. {decision_reason}. Holding for next window ({next_slug})[/]"
+                                )
+                                self.update_balance_ui()
+                            self.call_from_thread(_commit)
+                        else:
+                            self.call_from_thread(self.log_msg, f"[bold red]🚀 PRE-BUY FAILED:[/] {msg}")
                 except Exception as e:
                     self.call_from_thread(self.log_msg, f"[dim]🚀 PRE-BUY error: {e}[/]")
 
@@ -1336,10 +1381,10 @@ class SniperApp(App):
         
         if up_bid >= 0.90:
             winner = "UP"
-            reason = f"Poly-Decisive (UP Bid: {up_bid*100:.0f}¢)"
+            reason = "UP side won decisively"
         elif dn_bid >= 0.90:
             winner = "DOWN"
-            reason = f"Poly-Decisive (DOWN Bid: {dn_bid*100:.0f}¢)"
+            reason = "DOWN side won decisively"
         else:
             winner = "UP" if btc_p >= btc_o else "DOWN"
             reason = f"BTC Move (${btc_p:,.2f} vs Open ${btc_o:,.2f})"
@@ -1665,11 +1710,11 @@ class AlgoInfoModal(ModalScreen):
                 with Vertical(id="modal_mom_buymode_grid"):
                     yield Label("Buy Mode:", id="lbl_mom_buymode")
                     with Horizontal(classes="buy_mode_row"):
-                        yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
-                        yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
+                        yield Checkbox(label="STN",  value=True,  id="cb_mom_std", tooltip="Standard Momentum — Threshold/time signals after window opens.")
+                        yield Checkbox(label="PBN", value=False, id="cb_mom_pre", tooltip="Pre-Buy Next — Prediction-based entry at T-15s using velocity and RSI.")
                     with Horizontal(classes="buy_mode_row"):
-                        yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
-                        yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
+                        yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", tooltip="Hybrid Mode — Pre-buys on strong leads, otherwise waits for STN.")
+                        yield Checkbox(label="ADV", value=False, id="cb_mom_adv", tooltip="Advanced/ATR — Uses dynamic ATR tiers to shift thresholds and behavior.")
                 with Horizontal(id="modal_mom_adv_btn"):
                     yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
             with Horizontal(id="modal_footer"):
