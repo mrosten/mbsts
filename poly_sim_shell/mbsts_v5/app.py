@@ -136,9 +136,9 @@ class SniperApp(TradeEngineMixin, App):
                 return
             
             # Original logic for other algo codes
-            if code in self.scanner_descriptions:
-                desc = self.scanner_descriptions[code]["desc"]
-                self.push_screen(AlgoInfoModal(code, self.scanner_descriptions[code]["name"], desc, self))
+            if code in ALGO_INFO:
+                desc = ALGO_INFO[code]["desc"]
+                self.push_screen(AlgoInfoModal(code, ALGO_INFO[code]["name"], desc, self))
             event.stop()
 
     @on(Button.Pressed, "#btn_algo_all")
@@ -174,7 +174,13 @@ class SniperApp(TradeEngineMixin, App):
         self.committed_tp = 0.95  # Default TP 95% — only updated on Enter
         self.committed_sl = 0.40  # Default SL 40% — only updated on Enter
         
-        self.console_log_file = self.sim_broker.log_file.replace(".csv", "_console.txt")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(script_dir, "lg")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        base_log_name = os.path.basename(self.sim_broker.log_file).replace(".csv", "_console.txt")
+        self.console_log_file = os.path.join(log_dir, base_log_name)
         with open(self.console_log_file, "w", encoding="utf-8") as f:
             f.write("=== POLYMARKET SNIPER V5 CONSOLE LOG ===\n")
         
@@ -229,7 +235,8 @@ class SniperApp(TradeEngineMixin, App):
             "auto_stn_chaos": True, "auto_pbn_stable": False,
             "shield_time": 45, "shield_reach": 5
         }
-        self.settings_file = "v5_settings.json"
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.settings_file = os.path.join(script_dir, "v5_settings.json")
         
         # Base 1.0 weight with 1.67x (20% / 12%) modifier for historically "Strong" scanners
         self.scanner_weights = {k: 1.0 for k in ALGO_INFO.keys()}
@@ -247,9 +254,14 @@ class SniperApp(TradeEngineMixin, App):
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
-        # Create a time-signatured log file for this session in lg/ subdirectory
+        # Create a time-signatured log file for this session in lg/ subdirectory of current script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(script_dir, "lg")
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.mom_adv_log_file = f"lg/momentum_adv_{session_time}.csv"
+        self.mom_adv_log_file = os.path.join(log_dir, f"momentum_adv_{session_time}.csv")
         self._init_mom_adv_log()
 
     def _reset_mom_analytics(self):

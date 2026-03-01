@@ -166,6 +166,7 @@ class TradeEngineMixin:
             # -----------------------------------
 
             scanner_map = {"NPattern":"#cb_npa","Fakeout":"#cb_fak","Momentum":"#cb_mom","RSI":"#cb_rsi","TrapCandle":"#cb_tra","MidGame":"#cb_mid","LateReversal":"#cb_lat","BullFlag":"#cb_sta","PostPump":"#cb_pos","StepClimber":"#cb_ste","Slingshot":"#cb_sli","MinOne":"#cb_min","Liquidity":"#cb_liq","Cobra":"#cb_cob","Mesa":"#cb_mes","MeanReversion":"#cb_mea","GrindSnap":"#cb_gri","VolCheck":"#cb_vol","Moshe":"#cb_mos","ZScore":"#cb_zsc"}
+            tick_signals = {}  # Collect scanner signals this tick for CSV analytics
                         # --- Check Pending Bets First ---
             if not self.mid_window_lockout and not is_initial_lockout:
                 try: min_pr = float(self.query_one("#inp_min_price").value)
@@ -242,6 +243,7 @@ class TradeEngineMixin:
                     elif res == "WAIT" and name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
                     elif res == "WAIT" and name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
 
+                    tick_signals[name] = str(res)  # Capture for CSV analytics
                     if res == "WAIT": continue
                     if res == "NONE":
                         reason = getattr(sc, "last_skip_reason", None)
@@ -329,6 +331,37 @@ class TradeEngineMixin:
                                     self.log_msg(f"BUY {name} {sd} @ {pr*100:.1f}c | {msg}", level="TRADE")
                                 else:
                                     self.log_msg(f"BUY FAILED {name}: {msg}", level="ERROR")                            
+
+            # --- Update market_data with live analytics for CSV logging ---
+            # BTC Range: intra-window price range from tick history
+            _ph = self.market_data_manager.price_history
+            if _ph:
+                _prices = [p['price'] for p in _ph]
+                self.market_data['btc_dyn_rng'] = max(_prices) - min(_prices)
+
+            # Polymarket implied-probability skew (cents, positive = UP-favoured)
+            self.market_data['odds_score'] = round((self.market_data['up_bid'] - self.market_data['down_bid']) * 100, 1)
+
+            # Trend strings from market_data_manager
+            self.market_data['trend_4h'] = self.market_data_manager.trend_4h
+            self.market_data['trend_1h'] = self.market_data_manager.trend_1h
+
+            # ATR & RSI
+            self.market_data['atr_5m'] = self.market_data_manager.atr_5m
+            self.market_data['rsi_1m'] = rsi
+
+            # Scanner signal aggregation
+            _up_sigs = sum(1 for v in tick_signals.values() if 'UP' in v)
+            _dn_sigs = sum(1 for v in tick_signals.values() if 'DOWN' in v)
+            self.market_data['active_scanners'] = _up_sigs + _dn_sigs
+            self.market_data['master_score'] = _up_sigs - _dn_sigs
+            self.market_data['master_status'] = 'BUY_UP' if _up_sigs > _dn_sigs else ('BUY_DN' if _dn_sigs > _up_sigs else 'NEUTRAL')
+
+            # Individual key-scanner flags
+            self.market_data['sling_signal'] = tick_signals.get('Slingshot', 'OFF')
+            self.market_data['cobra_signal'] = tick_signals.get('Cobra', 'OFF')
+            self.market_data['flag_signal'] = tick_signals.get('BullFlag', 'OFF')
+            # -----------------------------------------------------------------
 
             await self._check_tpsl()
             self.update_balance_ui(); self.update_sell_buttons()
@@ -777,7 +810,6 @@ class TradeEngineMixin:
                     # Log the trade with research data
                     result = "WIN" if info.get("side") == winner else "LOSS"
                     bullflag_scanner.log_research_trade(
-                        info.get("entry", 0),  # Entry price stored when signal triggered
                         self.market_data.get("btc_price", 0),  # Exit price at settlement
                         result,
                         self.market_data.get("start_ts", 0),  # Window ID

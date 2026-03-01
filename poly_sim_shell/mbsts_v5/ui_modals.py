@@ -245,64 +245,88 @@ class AlgoInfoModal(ModalScreen):
         footer.styles.align = ("center", "middle")
         footer.styles.width = "100%"
 
+    def action_dismiss(self):
+        self.close_modal()
+
     @on(Button.Pressed, "#close_btn")
     def close_modal(self):
+        changes = []
         if self.main_app:
             try:
-                w = float(self.query_one("#inp_algo_weight").value)
-                self.main_app.scanner_weights[self.algo_id] = w
-                self.main_app.save_settings()
+                old_w = self.main_app.scanner_weights.get(self.algo_id, 1.0)
+                new_w = float(self.query_one("#inp_algo_weight").value)
+                if old_w != new_w:
+                    self.main_app.scanner_weights[self.algo_id] = new_w
+                    self.main_app.save_settings()
+                    changes.append(f"Weight: {old_w} -> {new_w}")
             except: pass
 
         if self.algo_id == "MOS" and self.main_app and "Moshe" in self.main_app.scanners:
             moshe = self.main_app.scanners["Moshe"]
             
-            try: moshe.bet_size = float(self.query_one("#inp_mos_bet").value)
-            except: getattr(moshe, "bet_size", None)
-            
-            try: moshe.t1 = int(self.query_one("#inp_mos_t1").value)
-            except: getattr(moshe, "t1", None)
-            try: moshe.d1 = float(self.query_one("#inp_mos_d1").value)
-            except: getattr(moshe, "d1", None)
-            
-            try: moshe.t2 = int(self.query_one("#inp_mos_t2").value)
-            except: getattr(moshe, "t2", None)
-            try: moshe.d2 = float(self.query_one("#inp_mos_d2").value)
-            except: getattr(moshe, "d2", None)
-            
-            try: moshe.t3 = int(self.query_one("#inp_mos_t3").value)
-            except: getattr(moshe, "t3", None)
-            try: moshe.d3 = float(self.query_one("#inp_mos_d3").value)
-            except: getattr(moshe, "d3", None)
+            def check_update(attr, html_id, type_func):
+                try:
+                    old_v = getattr(moshe, attr, None)
+                    new_v = type_func(self.query_one(html_id).value)
+                    if old_v != new_v:
+                        setattr(moshe, attr, new_v)
+                        changes.append(f"Moshe {attr}: {old_v} -> {new_v}")
+                except: pass
+                
+            check_update("bet_size", "#inp_mos_bet", float)
+            check_update("t1", "#inp_mos_t1", int)
+            check_update("d1", "#inp_mos_d1", float)
+            check_update("t2", "#inp_mos_t2", int)
+            check_update("d2", "#inp_mos_d2", float)
+            check_update("t3", "#inp_mos_t3", int)
+            check_update("d3", "#inp_mos_d3", float)
             
         elif self.algo_id == "MOM" and self.main_app and "Momentum" in self.main_app.scanners:
             mom = self.main_app.scanners["Momentum"]
+            
             m = self.query_one("#inp_mom_mode").value.strip().upper()
             if m in ["TIME", "PRICE", "DURATION"]:
-                mom.mode = m
+                if getattr(mom, "mode", None) != m:
+                    changes.append(f"MOM Mode: {getattr(mom, 'mode', None)} -> {m}")
+                    mom.mode = m
             try:
                 t = int(self.query_one("#inp_mom_threshold").value)
                 if 51 <= t <= 70:
-                    mom.threshold = t / 100.0
-                    mom.base_threshold = t / 100.0
+                    old_t = int(getattr(mom, "threshold", 0.6) * 100)
+                    if old_t != t:
+                        mom.threshold = t / 100.0
+                        mom.base_threshold = t / 100.0
+                        changes.append(f"MOM Threshold: {old_t}¢ -> {t}¢")
             except: pass
             try:
                 d = int(self.query_one("#inp_mom_duration").value)
                 if d > 0:
-                    mom.duration = d
+                    old_d = getattr(mom, "duration", 10)
+                    if old_d != d:
+                        mom.duration = d
+                        changes.append(f"MOM Duration: {old_d}s -> {d}s")
             except: pass
             # Save Buy Mode
             try:
                 if self.query_one("#cb_mom_pre").value:
-                    self.main_app.mom_buy_mode = "PRE"
+                    new_bm = "PRE"
                 elif self.query_one("#cb_mom_hybrid").value:
-                    self.main_app.mom_buy_mode = "HYBRID"
+                    new_bm = "HYBRID"
                 elif self.query_one("#cb_mom_adv").value:
-                    self.main_app.mom_buy_mode = "ADV"
+                    new_bm = "ADV"
                 else:
-                    self.main_app.mom_buy_mode = "STD"
-                self.main_app.save_settings()
+                    new_bm = "STD"
+                
+                old_bm = self.main_app.mom_buy_mode
+                if old_bm != new_bm:
+                    self.main_app.mom_buy_mode = new_bm
+                    self.main_app.save_settings()
+                    changes.append(f"MOM Buy Mode: {old_bm} -> {new_bm}")
             except: pass
+            
+        if changes and self.main_app:
+            change_str = ", ".join(changes)
+            self.main_app.log_msg(f"⚙️ Config Update [{self.algo_id}]: {change_str}")
             
         self.dismiss()
 
@@ -502,6 +526,9 @@ class MOMExpertModal(ModalScreen):
             f"Base: {base_t}¢ | Offset: {adj:+}¢ | [bold white]Target: {final_t}¢[/]"
         )
         self.query_one("#exp_preview").update(preview)
+
+    def action_dismiss(self):
+        self.save_and_close()
 
     @on(Button.Pressed, "#btn_exp_save")
     def save_and_close(self):
@@ -730,15 +757,13 @@ class BullFlagSettingsModal(ModalScreen):
         c.styles.padding = (1, 2)
         c.styles.width = 70
         c.styles.height = "auto"
-        c.styles.max_height = "85vh"
+        c.styles.max_height = "90vh"
         c.styles.align = ("center", "middle")
-        c.styles.overflow_y = "hidden"
+        c.styles.overflow_y = "auto"
         
         # Scrollable settings area
         sa = self.query_one("#bf_scroll_area")
         sa.styles.height = "auto"
-        sa.styles.max_height = "60vh"
-        sa.styles.overflow_y = "auto"
         sa.styles.width = "100%"
         
         self.query_one("#modal_title").styles.text_align = "center"

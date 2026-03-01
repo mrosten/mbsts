@@ -42,9 +42,10 @@ class MarketDataManager:
             "up_p": 0.5, "down_p": 0.5, "up_price": 0.5, "down_price": 0.5,
             "up_bid": 0.5, "down_bid": 0.5, "up_ask": 0.51, "down_ask": 0.51,
             "up_id": None, "down_id": None,
-            "sling_signal": "WAIT", "poly_signal": "N/A", "cobra_signal": "WAIT", 
-            "flag_signal": "WAIT", "to_signal": "N/A", "master_score": 0, "master_status": "NEUTRAL",
-            "trend_score": 3, "trend_prob": 0.5, "btc_odds": 0, "btc_dyn_rng": 0
+            "sling_signal": "OFF", "cobra_signal": "OFF", "flag_signal": "OFF",
+            "master_score": 0, "master_status": "NEUTRAL", "active_scanners": 0,
+            "trend_4h": "NEUTRAL", "trend_1h": "NEUTRAL",
+            "rsi_1m": 50.0, "atr_5m": 0.0, "odds_score": 0, "btc_dyn_rng": 0
         }
         self.chainlink_contract = None
         self.price_history = []

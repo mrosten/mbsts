@@ -21,16 +21,52 @@ class SimBroker:
     def init_log(self):
         if not os.path.exists(self.log_file):
             with open(self.log_file, 'w') as f:
-                header = (
-                    "Timestamp,Mode,SimBal,LiveBal,RiskBankroll,"
-                    "TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,"
-                    "Odds_Score,Trend_Prob,Trend_Score,"
-                    "Sig_Slingshot,Sig_Poly,Sig_Cobra,Sig_Flag,Sig_TrendOdds,"
-                    "Master_Score,Master_Status,"
-                    "UP_Price,DN_Price,UP_Bid,DN_Bid,"
-                    "Shares_UP,Shares_DN,Note"
+                meta = (
+                    f"# Polymarket Sniper V5 — Session Log\n"
+                    f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.\n"
+                    f"#\n"
+                    f"# SNAPSHOT FIELDS:\n"
+                    f"#   Timestamp      — Wall-clock time of snapshot\n"
+                    f"#   SimBal         — Simulated wallet balance (USD)\n"
+                    f"#   LiveBal        — Live Polymarket wallet balance (USD)\n"
+                    f"#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)\n"
+                    f"#   TimeRem        — Time remaining in current 5-min window (MM:SS)\n"
+                    f"#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback\n"
+                    f"#   BTC_Open       — BTC price at window open (Kraken REST)\n"
+                    f"#   BTC_Diff       — BTC_Price minus BTC_Open (USD)\n"
+                    f"#   BTC_Range      — Intra-window high-low price range (USD)\n"
+                    f"#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)\n"
+                    f"#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)\n"
+                    f"#   Trend_1H       — 1-hour trend direction (same scale)\n"
+                    f"#   RSI_1m         — 14-period RSI on 1-minute Binance candles\n"
+                    f"#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)\n"
+                    f"#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)\n"
+                    f"#   Sig_Cobra      — Cobra scanner signal this tick\n"
+                    f"#   Sig_Flag       — BullFlag scanner signal this tick\n"
+                    f"#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)\n"
+                    f"#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL\n"
+                    f"#   Active_Scanners— Count of scanners firing a BET signal this tick\n"
+                    f"#   UP_Price       — Polymarket UP option midpoint price\n"
+                    f"#   DN_Price       — Polymarket DOWN option midpoint price\n"
+                    f"#   UP_Bid         — Polymarket UP option best bid\n"
+                    f"#   DN_Bid         — Polymarket DOWN option best bid\n"
+                    f"#   Shares_UP      — Current UP shares held\n"
+                    f"#   Shares_DN      — Current DOWN shares held\n"
+                    f"#\n"
+                    f"# TRADE_EVENT FIELDS (interleaved rows):\n"
+                    f"#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note\n"
                 )
-                f.write(header + "\n")
+                header = (
+                    "Timestamp,SimBal,LiveBal,RiskBankroll,"
+                    "TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,"
+                    "Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,"
+                    "Sig_Slingshot,Sig_Cobra,Sig_Flag,"
+                    "Master_Score,Master_Status,Active_Scanners,"
+                    "UP_Price,DN_Price,UP_Bid,DN_Bid,"
+                    "Shares_UP,Shares_DN"
+                )
+                f.write(meta + header + "\n")
 
     def write_to_log(self, text):
         with open(self.log_file, 'a') as f:
@@ -55,17 +91,17 @@ class SimBroker:
 
     def log_snapshot(self, md, time_rem_str, is_live_active, live_bal, risk_bankroll):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mode = "LIVE" if is_live_active else "SIM"
         diff = md['btc_price'] - md['btc_open']
         
         line = (
-            f"{ts},{mode},{self.balance:.2f},{live_bal:.2f},{risk_bankroll:.2f},"
+            f"{ts},{self.balance:.2f},{live_bal:.2f},{risk_bankroll:.2f},"
             f"{time_rem_str},{md['btc_price']:.2f},{md['btc_open']:.2f},{diff:.2f},{md.get('btc_dyn_rng',0):.2f},"
-            f"{md.get('btc_odds',0)},{md.get('trend_prob',0.5):.4f},{md.get('trend_score',3)},"
-            f"{md.get('sling_signal','WAIT')},{md.get('poly_signal','N/A')},{md.get('cobra_signal','WAIT')},{md.get('flag_signal','WAIT')},{md.get('to_signal','N/A')},"
-            f"{md.get('master_score',0)},{md.get('master_status','NEUTRAL')},"
+            f"{md.get('odds_score',0)},{md.get('trend_4h','NEUTRAL')},{md.get('trend_1h','NEUTRAL')},"
+            f"{md.get('rsi_1m',50):.1f},{md.get('atr_5m',0):.2f},"
+            f"{md.get('sling_signal','OFF')},{md.get('cobra_signal','OFF')},{md.get('flag_signal','OFF')},"
+            f"{md.get('master_score',0)},{md.get('master_status','NEUTRAL')},{md.get('active_scanners',0)},"
             f"{md['up_price']:.3f},{md['down_price']:.3f},{md['up_bid']:.3f},{md['down_bid']:.3f},"
-            f"{self.shares['UP']:.2f},{self.shares['DOWN']:.2f},-"
+            f"{self.shares['UP']:.2f},{self.shares['DOWN']:.2f}"
         )
         self.write_to_log(line)
 

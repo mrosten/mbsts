@@ -20,10 +20,12 @@ def main():
         except: 
             start_bal = 100.00
         
-    if not os.path.exists("lg"): 
-        os.makedirs("lg")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(script_dir, "lg")
+    if not os.path.exists(log_dir): 
+        os.makedirs(log_dir)
         
-    default_log = f"lg/sim_log_5M_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    default_log = os.path.join(log_dir, f"sim_log_5M_{datetime.now().strftime('%Y%m%d_%H%M')}.csv")
     log_file = input(f"Enter Log Filename (default: {default_log}): ").strip()
     if not log_file: 
         log_file = default_log
