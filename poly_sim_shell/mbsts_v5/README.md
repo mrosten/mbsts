@@ -1,6 +1,6 @@
 # Polymarket Sniper V5 — Complete System Reference
 
-> **Version:** 5.9.4  
+> **Version:** 5.9.5  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
 > **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)
 
@@ -11,12 +11,17 @@
 Polymarket Sniper V5 is a fully automated, high-frequency execution bot that trades short-term directional binary options (UP/DOWN) on the Polymarket BTC 5-minute market. It runs inside a rich terminal UI (Textual TUI), evaluates **20 independent technical scanners** every second, manages risk dynamically, and can execute both simulated and live limit orders against the Polymarket CLOB.
 
 Key capabilities:
-- **20 scanners** running in parallel, each with independent signal logic
+- **20 scanners** running in parallel, each with independent signal logic and full configurability
+- **Advanced scanner configuration modals** for all algorithms with individual parameter tuning
+- **Global skepticism filters** for odds and guess conflicts with premium adjustments
 - **Simulation and Live modes** — identical execution path, switchable at runtime
 - **Pending order queue** with automatic delayed execution when price enters bounds
-- **TP/SL monitoring** with SL+ counter-trade recovery
-- **Pre-buy system** for next-window anticipatory entries
+- **TP/SL monitoring** with SL+ counter-trade recovery and per-scanner whale shield
+- **Pre-buy system** for next-window anticipatory entries with mode selection
 - **ATR-based dynamic tiering** (Expert/ADV mode) for volatility-aware thresholds
+- **BriefingScanner** for automated macroscopic window analysis at start
+- **Enhanced MOM/MM2** with Select widgets, mode explanations, and VECTOR scoring
+- **Safe UI thread calls** preventing crashes during shutdown
 - **Comprehensive CSV + console logging** with full field documentation
 - **Persistent settings** saved to `v5_settings.json` across sessions
 
@@ -48,13 +53,13 @@ mbsts_v5/
 | File | Size (bytes) | Lines | Role |
 |---|---|---|---|
 | `main.py` | 1,487 | 44 | CLI entry point. Prompts for SIM/LIVE mode, initial balance, log filename. Creates `SimBroker`, `LiveBroker`, launches `SniperApp`. |
-| `app.py` | 58,658 | ~1,137 | `SniperApp(TradeEngineMixin, App)` — Textual CSS, `__init__`, `compose()` (full UI layout), all event handlers (`on_checkbox_changed`, `on_label_click`, `on_input_submitted`, `on_button_pressed`), `on_mount` (timer setup, settings restore), `log_msg` (Rich + file logging), `save_settings`, `init_web3`, `update_balance_ui`, `update_sell_buttons`. |
-| `trade_engine.py` | 72,950 | ~1,233 | `TradeEngineMixin` — mixed into SniperApp. Contains: `fetch_market_loop` (1Hz main tick), `_check_tpsl`, `_run_last_second_exit`, `update_timer`, `_check_bankroll_exhaustion`, `trigger_settlement`, `_add_risk_revenue`, `trigger_buy`, `trigger_sell_all`, pre-buy logic, MOM analytics writer. |
+| `app.py` | 58,658 | ~1,137 | `SniperApp(TradeEngineMixin, App)` — Textual CSS, `__init__`, `compose()` (full UI layout), all event handlers (`on_checkbox_changed`, `on_label_click`, `on_input_submitted`, `on_button_pressed`), `on_mount` (timer setup, settings restore), `log_msg` (Rich + file logging), `save_settings`, `init_web3`, `update_balance_ui`, `update_sell_buttons`, global skepticism inputs, safe UI calls. |
+| `trade_engine.py` | 72,950 | ~1,233 | `TradeEngineMixin` — mixed into SniperApp. Contains: `fetch_market_loop` (1Hz main tick), `_check_tpsl`, `_run_last_second_exit`, `update_timer`, `_check_bankroll_exhaustion`, `trigger_settlement`, `_add_risk_revenue`, `trigger_buy`, `trigger_sell_all`, pre-buy logic, MOM analytics writer, global skepticism filter, window briefing generation, safe UI thread wrapper. |
 | `broker.py` | 16,267 | ~276 | `SimBroker` (balance, shares, CSV log writer, buy/sell/settle/promote_prebuy), `LiveBroker` (Polymarket CLOB client via `py_clob_client`, real buy/sell against on-chain order book), `TradeExecutor` (routes buy/sell to sim or live broker). |
 | `market.py` | 14,464 | ~328 | `MarketDataManager` — Kraken WebSocket (primary BTC price), Chainlink Oracle (secondary), Binance REST (tertiary fallback), Polymarket CLOB pricing, 4H/1H trend calculation, ATR, RSI, Bollinger Bands, price history tracking. |
 | `risk.py` | 5,836 | ~143 | `RiskManager` — bankroll tracking, bet sizing (12% base, trend penalty, consecutive-loss reduction, min/max clamping). `AlgorithmPortfolio` — per-scanner P&L tracking, win/loss counters, active trade management. |
-| `scanners.py` | 45,532 | ~888 | All 20 scanner classes inheriting from `BaseScanner`, plus the `ALGO_INFO` dictionary that maps 3-letter codes to names and descriptions. |
-| `ui_modals.py` | 59,874 | ~893 | `GlobalSettingsModal` (CSV freq), `AlgoInfoModal` (scanner info + weight editor), `MOMExpertModal` (ATR tier config, Whale Shield), `BullFlagSettingsModal` (entry timing, tolerance, research logging), `BankrollExhaustedModal` (frozen state), `ResearchLogger` (BullFlag trade research CSV). |
+| `scanners.py` | 45,532 | ~888 | All 20 scanner classes inheriting from `BaseScanner` with configurable constructor parameters, plus the `ALGO_INFO` dictionary that maps 3-letter codes to names and descriptions. Includes new `BriefingScanner` and enhanced `Momentum2Scanner`. |
+| `ui_modals.py` | 59,874 | ~893 | `GlobalSettingsModal` (CSV freq), `AlgoInfoModal` (scanner info + weight editor), `MOMExpertModal` (ATR tier config, Whale Shield), `BullFlagSettingsModal` (entry timing, tolerance, research logging), `BankrollExhaustedModal` (frozen state), `ResearchLogger` (BullFlag trade research CSV), **20+ individual scanner configuration modals** with Select widgets and parameter tuning. |
 | `config.py` | 1,357 | 42 | `TradingConfig` dataclass (window duration, risk percentages, bet limits), Polygon RPC list, Chainlink contract address/ABI, env var loading for `PRIVATE_KEY`, `PROXY_ADDRESS`. |
 
 ---
@@ -143,7 +148,163 @@ Updates all UI labels: BTC price, open, diff, trend, ATR, option prices, balance
 
 ---
 
-## 5. Scanners (20 Algorithms)
+## 5. v5.9.5 Major Features
+
+### 5.1 Advanced Scanner Configuration System
+
+**Individual Scanner Modals**
+- **20+ dedicated configuration modals** - one for each scanner algorithm
+- **Click any scanner label** to open its configuration modal
+- **Real-time parameter tuning** with immediate effect
+- **Persistent settings** saved to `v5_settings.json`
+
+**Configuration Parameters by Scanner Type:**
+
+| Scanner | Key Parameters | Default Values |
+|---|---|---|
+| **RSI** | `rsi_threshold`, `time_remaining_min` | 20, 80s |
+| **TrapCandle** | `start_move_pct`, `retrace_ratio` | 0.002, 0.35 |
+| **MidGame** | `min_elapsed`, `max_green_ticks` | 90s, 25 |
+| **LateReversal** | `min_elapsed`, `surge_pct` | 200s, 1.0003 |
+| **PostPump** | `min_pump_pct`, `reversal_depth` | 0.003, 0.9985 |
+| **StepClimber** | `tick_count`, `climb_pct` | 15, 1.001 |
+| **Slingshot** | `ma_period` | 15 |
+| **MinOne** | `wick_multiplier` | 1.5 |
+| **LiquidityVacuum** | `break_structure_pct` | 1.0001 |
+| **Cobra** | `ma_period`, `std_dev_mult` | 15, 1.5 |
+| **Mesa** | `pump_threshold`, `cross_count` | 0.001, 2 |
+| **MeanReversion** | `reversal_threshold` | 0.0005 |
+| **GrindSnap** | `grind_duration`, `snap_duration`, `min_slope_pct`, `reversal_ratio` | 100s, 20s, 0.1%, 0.60 |
+| **VolCheck** | `avg_3m_multiplier` | 1.0 |
+| **Moshe** | `moshe_threshold`, `t1/t2/t3`, `d1/d2/d3` | 0.86, 290/80/15, 2000/80/25 |
+| **ZScore** | `z_threshold`, `coil_threshold` | 3.5, 0.001 |
+| **Briefing** | `rsi_low/high`, `odds_thresh`, `imb_thresh`, `signal_thresh` | 30/70, 5.0, 2.0, 2 |
+
+### 5.2 Global Skepticism Filters
+
+**Purpose:** Automatically apply premium adjustments when market signals conflict with scanner recommendations.
+
+**Filter Types:**
+1. **Odds Conflict Penalty** - When Polymarket odds favor the opposite direction
+2. **Guess Conflict Penalty** - When automated window briefing conflicts with scanner
+
+**Implementation:**
+```python
+def apply_global_skeptic_filter(self, side, price, name="Scanner"):
+    # 1. Check Max Price first (Hard Bound)
+    if price > max_pr and "Moshe" not in name:
+        return False, f"Price {price*100:.1f}c > Max {max_pr*100:.1f}c"
+    
+    # 2. Odds Conflict Penalty
+    odds = self.market_data.get("odds_score", 0)
+    if (side == "UP" and odds < -5.0) or (side == "DOWN" and odds > 5.0):
+        effective_min += odds_skeptic  # Default 5¢ premium
+    
+    # 3. Guess Conflict Penalty  
+    guess_score = self.market_data.get("net_guess_score", 0)
+    guess_side = "UP" if guess_score >= 2 else ("DOWN" if guess_score <= -2 else "NEUTRAL")
+    if guess_side == "NEUTRAL" or guess_side != side:
+        effective_min += guess_skeptic  # Default 3¢ premium
+```
+
+**UI Controls:**
+- **Skeptic Odds:** Input field for odds conflict premium (default 0.05¢)
+- **Skeptic Guess:** Input field for guess conflict premium (default 0.03¢)
+
+### 5.3 Enhanced MOM/MM2 System
+
+**Mode Selection with Select Widgets:**
+- **TIME Mode:** Classic leader-pick after duration (default 10s)
+- **PRICE Mode:** Immediate trigger on cent threshold (default 60¢)
+- **DURATION Mode:** Threshold hold for sustained period
+- **VECTOR Mode (MM2):** Unified scoring analysis
+
+**Dynamic Mode Explanations:**
+Real-time explanations update when mode changes:
+```
+TIME Mode: Classic leader-pick. Waits for the duration (default 10s) and then bets the side that is leading in cents.
+PRICE Mode: Immediate trigger. Bets as soon as either side hits the specified cent threshold (e.g. 60¢).
+DURATION Mode: Threshold hold. Bets if a side stays above the cent threshold for the full duration.
+VECTOR Mode (MM2): Unified scoring. Analyzes Price Lead, BTC Velocity, 1H Trend, Sentiment, and RSI simultaneously.
+```
+
+**MM2 VECTOR Scoring Engine:**
+- **Price Lead:** Current price advantage
+- **BTC Velocity:** 60-second price momentum 
+- **1H Trend:** Macro trend alignment
+- **Sentiment:** RSI positioning
+- **RSI:** Overbought/oversold conditions
+
+### 5.4 BriefingScanner - Automated Window Analysis
+
+**Activation:** Runs automatically at window start (T-05:00)
+
+**Analysis Components:**
+1. **Trend & RSI Assessment**
+   - 1H trend strength (BULLISH/BEARISH/NEUTRAL)
+   - 1m RSI positioning (Oversold/Overbought/Neutral)
+
+2. **Market Context**
+   - BTC velocity (Spiking UP/Dropping DN/Stable)
+   - Volatility regime (HIGH/MODERATE/LOW based on ATR)
+
+3. **Market Microstructure**
+   - Polymarket odds bias (favors UP/DOWN/balanced)
+   - Ask imbalance (UP premium/DN premium/balanced)
+
+4. **Automated Guess Calculation**
+   - Score-based directional prediction
+   - Net score from 8 factors (trend, RSI, odds, imbalance)
+
+**Output Format:**
+```
+📊 WINDOW BRIEFING (T-05:00)
+1. Trend: 1H is BULLISH (S-UP), 1m RSI is Oversold (25).
+2. Context: BTC is Spiking UP (+$45.2), Volatility is HIGH (ATR=52).
+3. Market: Odds favors UP (+7.3¢), Ask is UP premium (+3.1¢).
+🔮 MY GUESS: UP
+────────────────────────────────────
+```
+
+### 5.5 Safe UI Thread Calls
+
+**Problem:** Background threads calling UI updates during app shutdown caused crashes.
+
+**Solution:** `safe_call()` wrapper method
+```python
+def safe_call(self, func, *args, **kwargs):
+    """Utility for background threads to safely update UI without crashing during shutdown."""
+    try:
+        if not getattr(self, "app_active", False): return
+        self.call_from_thread(func, *args, **kwargs)
+    except RuntimeError:
+        pass  # App is shutting down
+```
+
+**Usage:** All background thread UI updates now use `safe_call()` instead of `call_from_thread()`
+
+### 5.6 Enhanced Whale Shield Protection
+
+**Per-Scanner Configuration:**
+- Each scanner (Momentum/MM2) now has independent `adv_settings`
+- **Shield Time:** Activation point in seconds (default 45s = T-45s)
+- **Shield Reach:** Distance from 50¢ that triggers protection (default 5¢)
+- **Automatic Exit:** Sells all positions when price too tight near 50¢
+
+**Logic Enhancement:**
+```python
+if (time.time() - self.market_data["start_ts"]) >= s_time_limit:
+    up_p = self.market_data.get("up_bid", 0.5)
+    reach = adv.get("shield_reach", 5) / 100.0
+    if abs(up_p - 0.50) < reach:
+        self.log_msg(f"🛡️ WHALE SHIELD ({sc_key}): Market too tight ({up_p*100:.1f}¢). Emergency Exit.")
+        await self.trigger_sell_all("UP")
+        await self.trigger_sell_all("DOWN")
+```
+
+---
+
+## 6. Scanners (20 Algorithms)
 
 | Code | Class | Signal Type | Description |
 |---|---|---|---|
@@ -524,6 +685,39 @@ Computed from `(short_SMA / long_SMA − 1) × 100`:
 | **v5.9.2** | BullFlag configurable settings modal, research logging |
 | **v5.9.3** | Scanner loop refactor — persistent `base_threshold` state, background error fix |
 | **v5.9.4** | MOM Analytics log, CSV log overhaul (26 live fields, descriptive headers), 1H trend |
+| **v5.9.5** | **Major Feature Release:** Advanced scanner configuration modals, global skepticism filters, BriefingScanner, enhanced MOM/MM2 with Select widgets, safe UI thread calls, per-scanner whale shield, HDO threshold settings fix |
+
+### v5.9.5 Technical Deep Dive
+
+**Scanner Architecture Refactor:**
+- All scanner classes now accept constructor parameters for configuration
+- Settings persistence moved from UI element access to scanner object attributes
+- Defensive error handling added throughout modal initialization
+- Individual `adv_settings` dictionaries per scanner type
+
+**UI/UX Enhancements:**
+- 20+ new configuration modals with Select widgets and dynamic explanations
+- Mode explanations update in real-time when settings change
+- Enhanced briefing display with comprehensive market analysis
+- Safe UI thread wrapper prevents shutdown crashes
+
+**Risk Management Improvements:**
+- Global skepticism filters automatically apply premium adjustments
+- Per-scanner whale shield configuration with independent timing
+- Enhanced HDO threshold persistence (KeyError fix)
+- Improved settings loading with defensive error handling
+
+**New Scanner: BriefingScanner**
+- Automated macroscopic window analysis at T-05:00
+- 8-factor directional prediction system
+- Market microstructure analysis and volatility assessment
+- Integrated with global skepticism filtering
+
+**Bug Fixes & Stability:**
+- Fixed KeyError 'inp_hdo_thresh' in settings loading
+- Added comprehensive error handling for UI element access
+- Fixed duplicate window_bets initialization in RiskManager
+- Enhanced thread safety for background UI updates
 
 ### Major Architecture Refactor (Latest)
 The original monolithic `app.py` (2,556 lines) was split into three focused modules:
@@ -532,6 +726,7 @@ The original monolithic `app.py` (2,556 lines) was split into three focused modu
 - **`ui_modals.py`** (59,874 bytes) — All modal classes and screens (GlobalSettings, AlgoInfo, MOMExpert, etc.)
 
 ### Recent Git History
+- **v5.9.5** - Major feature release: Advanced scanner configuration, global skepticism, BriefingScanner
 - **0cd0dd0** - Fix modal bugs and standardize log paths
 - **29c82c5** - Major refactor: Split monolithic app.py into 3 modules
 - **38b4bb6** - Pre-refactor checkpoint with BullFlag modal fixes
@@ -565,7 +760,116 @@ The original monolithic `app.py` (2,556 lines) was split into three focused modu
 
 ---
 
-## 20. Future Roadmap
+## 21. v5.9.5 Technical Notes & Troubleshooting
+
+### 21.1 Settings Persistence Changes
+
+**HDO Threshold Fix:**
+- **Problem:** KeyError 'inp_hdo_thresh' during settings loading
+- **Solution:** Moved threshold storage from UI element to scanner object
+- **Implementation:** `hdo_scanner.trigger_threshold` instead of UI field access
+- **Settings Key:** `"hdo_threshold"` (not `"inp_hdo_thresh"`)
+
+**Scanner Configuration Storage:**
+```json
+{
+    "hdo_threshold": 0.59,
+    "cco_settings": {
+        "thresh": 0.25,
+        "history": 60,
+        "recent": 10
+    },
+    "mom_adv_settings": {
+        "atr_low": 20,
+        "atr_high": 40,
+        "shield_time": 45,
+        "shield_reach": 5
+    },
+    "nit_settings": { /* NPatternScanner params */ },
+    "vsn_settings": { /* VolCheckScanner params */ }
+}
+```
+
+### 21.2 UI Thread Safety
+
+**Background Thread UI Updates:**
+- All background thread calls to UI now use `safe_call()`
+- Prevents RuntimeError during app shutdown
+- Example usage:
+```python
+# Old (crashes on shutdown):
+self.call_from_thread(self.log_msg, "message")
+
+# New (safe):
+self.safe_call(self.log_msg, "message")
+```
+
+### 21.3 Modal Initialization Order
+
+**Defensive UI Element Access:**
+```python
+def on_mount(self):
+    # Scanner settings loading with error handling
+    try:
+        self.query_one("#inp_hdo_thresh").value = str(int(hdo.trigger_threshold * 100))
+    except:
+        pass  # UI element might not be ready yet
+```
+
+### 21.4 Global Skepticism Filter Logic
+
+**Filter Application Order:**
+1. **Max Price Check** - Hard bound (except Moshe scanner)
+2. **Odds Conflict** - Apply premium when odds favor opposite side
+3. **Guess Conflict** - Apply premium when briefing conflicts with signal
+4. **Final Price Validation** - Check against adjusted minimum
+
+**Premium Calculation:**
+```python
+# Example: UP signal with odds conflict
+base_min_price = 0.55
+odds_conflict_premium = 0.05  # 5¢
+effective_min = 0.60  # Must be ≥60¢ to execute
+```
+
+### 21.5 BriefingScanner Integration
+
+**Automatic Execution:**
+- Runs at T-05:00 (window start)
+- Results stored in `market_data["net_guess_score"]`
+- Used by global skepticism filter for guess conflicts
+- Output displayed in main log window
+
+**Scoring Factors:**
+- Trend alignment (±2 points)
+- RSI positioning (±1 point)
+- Odds bias (±2 points)
+- Ask imbalance (±1 point)
+- BTC velocity (±1 point)
+- Volatility regime (±0.5 points)
+
+### 21.6 Whale Shield Per-Scanner Configuration
+
+**Independent Settings:**
+Each Momentum/MM2 scanner has separate `adv_settings`:
+```python
+adv_settings = {
+    "shield_time": 45,    # Seconds remaining to activate
+    "shield_reach": 5,   # Distance from 50¢ in cents
+    "atr_low": 20,        # ATR tier thresholds
+    "atr_high": 40
+}
+```
+
+**Activation Logic:**
+```python
+if time_remaining <= shield_time and abs(price - 0.50) < shield_reach/100:
+    # Emergency sell all positions
+```
+
+---
+
+## 22. Future Roadmap
 
 - **Multi-Scanner Expert Tiering** — apply ATR-based Gateway logic to Cobra, RSI, etc.
 - **Dynamic Bet Scaling** — auto-increase bet size in Stable tiers, reduce in Chaos
