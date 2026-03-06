@@ -15,6 +15,105 @@ class TradeEngineMixin:
     
     All methods reference `self` which is the SniperApp instance at runtime.
     """
+    
+    def safe_call(self, func, *args, **kwargs):
+        """Utility for background threads to safely update the UI without crashing during shutdown."""
+        try:
+            if not getattr(self, "app_active", False): return
+            self.call_from_thread(func, *args, **kwargs)
+        except RuntimeError:
+            pass # App is shutting down
+
+    def _handle_successful_buy(self, name, side, cost, act_shares, act_price, is_live):
+        ticket_id = f"{name}_{time.time()}"
+        target_tp = self.committed_tp
+        target_sl = self.committed_sl
+        
+        # Check if algorithm has custom TP/SL
+        sc = self.scanners.get(name)
+        if sc:
+            if getattr(sc, "custom_tp", None): target_tp = float(sc.custom_tp) / 100.0
+            if getattr(sc, "custom_sl", None): target_sl = float(sc.custom_sl) / 100.0
+
+        limit_order_id = None
+        try:
+            use_tranche = self.query_one("#cb_tranche").value
+        except:
+            use_tranche = False
+            
+        if use_tranche and is_live and cost >= TradingConfig.MIN_LIMIT_ORDER_SIZE:
+             # Fire Limit Order!
+             tid = self.market_data["up_id" if side=="UP" else "down_id"]
+             limit_price = target_tp
+             placed, order_or_err = self.trade_executor.live.place_limit_sell(side, tid, act_shares, limit_price)
+             if placed:
+                 limit_order_id = order_or_err
+                 self.log_msg(f"[bold cyan]Tranche Limit Order Placed:[/bold cyan] {act_shares:.2f} {side} @ {limit_price*100:.1f}¢ (ID: {limit_order_id[-6:]})", level="TRADE")
+             else:
+                 self.log_msg(f"[bold yellow]Limit Order Failed:[/bold yellow] {order_or_err}", level="ERROR")
+        elif use_tranche and is_live and cost < TradingConfig.MIN_LIMIT_ORDER_SIZE:
+             self.log_msg(f"[yellow]Tranche too small (${cost:.2f} < $5.50) for limit order. Using global monitor.[/yellow]", level="SCAN")
+             
+        self.risk_manager.register_bet(cost)
+        slug = f"btc-updown-5m-{self.market_data.get('start_ts', 0)}"
+        self.window_bets[ticket_id] = {"side":side,"entry":act_price,"cost":cost,"algorithm":name, "shares":act_shares, "limit_order_id":limit_order_id, "target_tp":target_tp, "target_sl":target_sl, "slug":slug}
+        if name in self.portfolios:
+            self.portfolios[name].record_trade(ticket_id, side, act_price, cost, act_shares, target_tp=target_tp, target_sl=target_sl, contract_price=act_price)
+            if limit_order_id:
+                self.portfolios[name].ledger[ticket_id]["limit_order_id"] = limit_order_id
+
+    def apply_global_skeptic_filter(self, side, price, name="Scanner"):
+        """
+        Calculates the effective minimum entry price based on global skepticism premiums.
+        Returns (True, None) if price is acceptable, else (False, reason_string).
+        """
+        try:
+            base_min = float(self.query_one("#inp_min_price").value)
+            max_pr = float(self.query_one("#inp_max_price").value)
+        except:
+            base_min, max_pr = 0.55, 0.80
+
+        # 1. Check Max Price first (Hard Bound, no penalties apply)
+        # Moshe-90 is explicitly exempt in the main loop call, but we handle it here for safety
+        if price > max_pr and "Moshe" not in name:
+            return False, f"Price {price*100:.1f}c > Max {max_pr*100:.1f}c"
+
+        effective_min = base_min
+        penalties = []
+
+        # 2. Odds Conflict Penalty
+        # Odds favors UP if > 5.0, favors DOWN if < -5.0
+        odds = self.market_data.get("odds_score", 0)
+        try:
+            odds_skeptic = float(self.query_one("#inp_skeptic_odds").value)
+        except:
+            odds_skeptic = getattr(self, "global_skeptic_odds", 0.05)
+        
+        if (side == "UP" and odds < -5.0) or (side == "DOWN" and odds > 5.0):
+            effective_min += odds_skeptic
+            penalties.append(f"Odds Conflict (+{odds_skeptic*100:.0f}c)")
+
+        # 3. Guess Conflict Penalty
+        # Net Guess Score >= 2 is UP, <= -2 is DOWN, others are Neutral/Chop
+        guess_score = self.market_data.get("net_guess_score", 0)
+        try:
+            guess_skeptic = float(self.query_one("#inp_skeptic_guess").value)
+        except:
+            guess_skeptic = getattr(self, "global_skeptic_guess", 0.03)
+        
+        # Conflict if Guess is strictly Neutral or Opposite
+        guess_side = "UP" if guess_score >= 2 else ("DOWN" if guess_score <= -2 else "NEUTRAL")
+        if guess_side == "NEUTRAL" or guess_side != side:
+            effective_min += guess_skeptic
+            penalties.append(f"Guess Conflict (+{guess_skeptic*100:.0f}c)")
+
+        if price < effective_min:
+            reason = f"{price*100:.1f}c < {effective_min*100:.1f}c"
+            if penalties:
+                reason += f" ({', '.join(penalties)})"
+            return False, reason
+
+        return True, None
 
     async def fetch_market_loop(self):
         if self.halted: return  # Bot frozen — bankroll exhausted
@@ -23,7 +122,14 @@ class TradeEngineMixin:
             ts_start = int(now.replace(minute=floor, second=0, microsecond=0).timestamp())
             
             # Map scanner names to their UI checkbox IDs
-            scanner_map = {name: f"#cb_{name.lower()}" for name in self.scanners}
+            scanner_map = {
+                "NPattern": "#cb_npa", "Fakeout": "#cb_fak", "Momentum": "#cb_mom", "MM2": "#cb_mm2",
+                "RSI": "#cb_rsi", "TrapCandle": "#cb_tra", "MidGame": "#cb_mid", "LateReversal": "#cb_lat",
+                "BullFlag": "#cb_sta", "CoiledCobra": "#cb_cco", "PostPump": "#cb_pos", "StepClimber": "#cb_ste",
+                "Slingshot": "#cb_sli", "MinOne": "#cb_min", "Liquidity": "#cb_liq", "Cobra": "#cb_cob",
+                "Mesa": "#cb_mes", "MeanReversion": "#cb_mea", "GrindSnap": "#cb_gri", "VolCheck": "#cb_vol",
+                "Moshe": "#cb_mos", "ZScore": "#cb_zsc", "Nitro": "#cb_nit", "VolSnap": "#cb_vsn", "HDO": "#cb_hdo", "Briefing": "#cb_bri"
+            }
             
             if not self.risk_initialized:
                 try:
@@ -40,27 +146,38 @@ class TradeEngineMixin:
                 
                 self.market_data["start_ts"] = ts_start # Latch immediately to prevent double-trigger
                 self.sim_broker.promote_prebuy()  # Move any pre-buy shares/costs to current window
-                now_ts = time.time()
-                wall_time = datetime.fromtimestamp(now_ts).strftime('%H:%M:%S')
-                self.log_msg(f"[{wall_time}] ════════ NEW WINDOW #{ts_start} STARTING ════════", level="ADMIN")
                 
+                # --- [NEW] Full Wallet Sync Mode ---
+                if getattr(self, "auto_sync_risk", False):
+                    is_live = self.query_one("#cb_live").value
+                    if is_live: self.live_broker.update_balance()
+                    main_bal = self.live_broker.balance if is_live else self.sim_broker.balance
+                    self.risk_manager.risk_bankroll = main_bal
+                    self.risk_manager.target_bankroll = main_bal
+                    self.log_msg(f"[bold gold3]Bankroll Auto-Synced:[/] ${main_bal:.2f} (Full Wallet Mode)", level="ADMIN")
+                # ------------------------------------
+
                 self.window_settled = False # reset latch for new window
                 self.last_second_exit_triggered = False # reset latch for late exits
                 self.next_window_preview_triggered = False # reset next-window preview latch
                 self.pre_buy_triggered = False # reset pre-buy latch for new window
+                self.hdo_fired_in_window = False # reset HDO latch for new window
                 self.window_realized_revenue = 0.0 # reset revenue tracker for new window
                 
                 # Transfer any pre-buy position into window_bets so TP/SL monitors it
                 if self.pre_buy_pending:
                     sd = self.pre_buy_pending.get("side", "??")
+                    reason = self.pre_buy_pending.get("reason", "")
+                    reason_str = f" ({reason})" if reason else ""
                     key = f"Momentum_PreBuy_{time.time()}"
                     self.window_bets[key] = self.pre_buy_pending
                     # Note: Shares are promoted by sim_broker.promote_prebuy() above.
                     self.pre_buy_pending = None
-                    self.log_msg(f"[bold cyan]🚀 PRE-BUY {sd} transferred to new window — now under TP/SL monitoring[/]")
+                    self.log_msg(f"[bold cyan]🚀 PRE-BUY {sd} transferred to new window — now under TP/SL monitoring{reason_str}[/]")
 
                 self.skipped_logs.clear() # reset the spam preventer
-                self.pending_bets.clear() # discard any stale pending bets from last window
+                self.pending_bets.clear()  # discard any stale pending bets from last window
+                self.bounce_pending.clear() # discard any stale bounce entries from last window
                 for sc in self.scanners.values(): sc.reset() # reset all scanner signals/timers
                 
                 if self.mid_window_lockout:
@@ -95,7 +212,9 @@ class TradeEngineMixin:
                     unique_sides = sorted(list(set(info["side"] for info in open_bets)))
                     active_str = f" | [bold green]Active: {', '.join(unique_sides)}[/]"
                 
-                self.log_msg(f"NEW WINDOW STARTED | Open: [bold white]${opn:,.2f}[/]{active_str}")
+                try: t_str = datetime.fromtimestamp(ts_start).strftime('%b %d %H:%M')
+                except: t_str = str(ts_start)
+                self.log_msg(f"WIN {t_str} | Open: [bold white]${opn:,.2f}[/]{active_str}", level="ADMIN")
 
             def gather_rest():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -123,6 +242,8 @@ class TradeEngineMixin:
                 "up_ask": d["poly"]["up_ask"], "down_ask": d["poly"]["down_ask"],
                 "up_id": d["poly"]["up_id"], "down_id": d["poly"]["down_id"]
             })
+            # Sync btc_open into MarketDataManager so next volume refresh can filter around it
+            self.market_data_manager.market_data["btc_open"] = d["opn"]
             
             rsi = calculate_rsi(d["c60"])
             self.market_data['rsi'] = rsi # Store for manual access
@@ -165,37 +286,66 @@ class TradeEngineMixin:
                         self.mom_analytics[key_s], self.mom_analytics[key_t] = "DOWN", elapsed
             # -----------------------------------
 
-            scanner_map = {"NPattern":"#cb_npa","Fakeout":"#cb_fak","Momentum":"#cb_mom","RSI":"#cb_rsi","TrapCandle":"#cb_tra","MidGame":"#cb_mid","LateReversal":"#cb_lat","BullFlag":"#cb_sta","PostPump":"#cb_pos","StepClimber":"#cb_ste","Slingshot":"#cb_sli","MinOne":"#cb_min","Liquidity":"#cb_liq","Cobra":"#cb_cob","Mesa":"#cb_mes","MeanReversion":"#cb_mea","GrindSnap":"#cb_gri","VolCheck":"#cb_vol","Moshe":"#cb_mos","ZScore":"#cb_zsc"}
             tick_signals = {}  # Collect scanner signals this tick for CSV analytics
+
+            # --- Bounce Entry: Per-Tick Monitor ---
+            if self.bounce_pending and not self.mid_window_lockout:
+                for _bname, _binfo in list(self.bounce_pending.items()):
+                    _bsd  = _binfo["side"]
+                    _btgt = _binfo["target_level"]
+                    _bdip = _binfo["dip_depth"]
+                    _bcur = self.market_data["up_ask"] if _bsd == "UP" else self.market_data["down_ask"]
+
+                    if not _binfo["has_dipped"]:
+                        if _bcur < (_btgt - _bdip):
+                            _binfo["has_dipped"] = True
+                            self.log_msg(f"BOUNCE {_bname} | Dip confirmed at {_bcur*100:.1f}¢ — watching for recovery to {_btgt*100:.1f}¢", level="SCAN")
+                    else:
+                        if _bcur >= _btgt:
+                            # Recovery confirmed — execute
+                            _bbs = _binfo["bs"]
+                            if self.risk_manager.risk_bankroll >= _bbs:
+                                _is_l = self.query_one("#cb_live").value
+                                _ok, _msg, _act_sh, _act_pr = self.trade_executor.execute_buy(
+                                    _is_l, _bsd, _bbs, _bcur,
+                                    d["poly"]["up_id" if _bsd == "UP" else "down_id"],
+                                    context={}, reason=f"Bounce:{_binfo['signal']}"
+                                )
+                                if _ok:
+                                    self._handle_successful_buy(_bname, _bsd, _bbs, _act_sh, _act_pr, _is_l)
+                                    self.session_total_trades += 1
+                                    self.log_msg(f"[bold green]BOUNCE EXEC {_bname}[/]: {_msg} ({_binfo['signal']})", level="TRADE")
+                                else:
+                                    self.log_msg(f"[bold red]BOUNCE FAIL {_bname}[/]: {_msg}")
+                            del self.bounce_pending[_bname]
+            # --------------------------------------
                         # --- Check Pending Bets First ---
             if not self.mid_window_lockout and not is_initial_lockout:
-                try: min_pr = float(self.query_one("#inp_min_price").value)
-                except: min_pr = 0.01
-                try: max_pr = float(self.query_one("#inp_max_price").value)
-                except: max_pr = 0.99
-                
                 for name, info in list(self.pending_bets.items()):
-                    # Re-check price logic
                     sd = info["side"]
                     bs = info["bs"]
                     res = info["res"]
                     pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                     
-                    if min_pr <= pr <= max_pr:
+                    ok_filter, filter_reason = self.apply_global_skeptic_filter(sd, pr, name=name)
+                    if ok_filter:
                         # Execution criteria met! But first, check we have enough bankroll.
                         if self.risk_manager.risk_bankroll < bs:
                             # Not enough risk bankroll - skip without logging spam
                             continue
                         is_l = self.query_one("#cb_live").value
-                        ctx = {'signal_price': d["cur"], 'rsi': rsi, 'trend': self.market_data_manager.trend_4h, 'risk_bal': self.risk_manager.risk_bankroll}
+                        ctx = {'signal_price': d["cur"], 'rsi': rsi, 'trend': self.market_data_manager.trend_1h, 'risk_bal': self.risk_manager.risk_bankroll}
                         
-                        ok, msg = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=f"Pending: {res}")
+                        ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=f"Pending: {res}")
                         if ok:
-                            self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs}
-                            self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
-                            self.log_msg(f"[bold green]EXECUTED PENDING {name}[/]: {msg}")
+                            self._handle_successful_buy(name, sd, bs, act_shares, act_price, is_l)
+                            self.session_total_trades += 1 # Pending Execution Count
+                            
+                            short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
+                            prefix = name[:3].upper()
+                            self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})")
                         else:
-                            self.log_msg(f"[bold red]FAILED PENDING {name}[/]: {msg}")
+                            self.log_msg(f"[bold red]FAIL {name}[/]: {msg}")
                             
                         # Cleanup pending state regardless of result
                         del self.pending_bets[name]
@@ -204,133 +354,252 @@ class TradeEngineMixin:
                             lbl.remove_class("blinking")
                         except: pass
             # --------------------------------
+            # Build unified context for all scanners
+            context = {
+                "elapsed": elapsed,
+                "up_bid": d["poly"]["up_bid"],
+                "down_bid": d["poly"]["down_bid"],
+                "up_ask": d["poly"]["up_ask"],
+                "down_ask": d["poly"]["down_ask"],
+                "atr_5m": getattr(self.market_data_manager, "atr_5m", 0),
+                "trend_1h": self.market_data_manager.trend_1h,
+                "odds_score": round((d["poly"]["up_bid"] - d["poly"]["down_bid"]) * 100, 1),
+                "rsi_1m": rsi,
+                "velocity": (d["cur"] - getattr(self.mom_analytics, "btc_pre_60s", 0)) if getattr(self.mom_analytics, "btc_pre_60s", None) is not None else 0,
+                "window_analytics": self.mom_analytics,
+                "history_objs": ph, # List of dicts: {'price': p, 'elapsed': e}
+                "open_price": d["opn"],
+                "prev_window_color": "GREEN" if d["cur"] > d["opn"] else "RED", # Technically current window color, but matching older logic
+                "closes_60m": d["c60"],
+                "current_price": d["cur"],
+                "bb_lower": lbb,
+                "swing_low": min(d["l60"]) if d["l60"] else 0,
+                "last_window": {}, # Kept empty for now to match PostPump signature
+                "fast_bb": fbb,
+                "vol_up": self.market_data.get("vol_up", 0),
+                "vol_dn": self.market_data.get("vol_dn", 0),
+                "btc_open": d["opn"],
+                "btc_price": d["cur"]
+            }
 
-                for name, sc in self.scanners.items():
-                    if not self.query_one(scanner_map[name]).value: continue
-                    
-                    # 1. Check Signal
-                    res = sc.get_signal(d) if hasattr(sc, "get_signal") else "WAIT"
-                    # Backward compatibility for scanners without get_signal() wrapper
-                    if res == "WAIT" and name == "NPattern": res = sc.analyze(ph, d["opn"])
-                    elif res == "WAIT" and name == "Fakeout": res = sc.analyze(ph, d["opn"], "GREEN" if d["cur"] > d["opn"] else "RED")
-                    elif res == "WAIT" and name == "Momentum":
-                        base_t = getattr(sc, "base_threshold", sc.threshold)
-                        if self.mom_buy_mode == "ADV":
-                            atr = getattr(self.market_data_manager, "atr_5m", 0)
-                            adj = 0
-                            if atr <= self.mom_adv_settings["atr_low"]: adj = self.mom_adv_settings["stable_offset"] / 100.0
-                            elif atr >= self.mom_adv_settings["atr_high"]: adj = self.mom_adv_settings["chaos_offset"] / 100.0
-                            sc.threshold = base_t + adj
-                        else:
-                            # Standard mode uses the base directly. No UI querying here!
-                            sc.threshold = base_t
-                        res = sc.analyze(elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "RSI": res = sc.analyze(rsi, d["cur"], lbb, 300-elapsed)
-                    elif res == "WAIT" and name == "TrapCandle": res = sc.analyze(ph, d["opn"])
-                    elif res == "WAIT" and name == "MidGame": res = sc.analyze(ph, d["opn"], elapsed, self.market_data_manager.trend_4h)
-                    elif res == "WAIT" and name == "LateReversal": res = sc.analyze(ph, d["opn"], elapsed)
-                    elif res == "WAIT" and name == "BullFlag": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "PostPump": res = sc.analyze(d["cur"], d["opn"], {})
-                    elif res == "WAIT" and name == "StepClimber": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "Slingshot": res = sc.analyze(d["c60"])
-                    elif res == "WAIT" and name == "MinOne": res = sc.analyze(ph, elapsed)
-                    elif res == "WAIT" and name == "Liquidity": res = sc.analyze(d["cur"], min(d["l60"]) if d["l60"] else 0, d["opn"])
-                    elif res == "WAIT" and name == "Cobra": res = sc.analyze(d["c60"], d["cur"], elapsed)
-                    elif res == "WAIT" and name == "Mesa": res = sc.analyze(ph, d["opn"], elapsed)
-                    elif res == "WAIT" and name == "MeanReversion": res = sc.analyze(ph, fbb, self.market_data_manager.trend_4h)
-                    elif res == "WAIT" and name == "GrindSnap": res = sc.analyze(ph, elapsed)
-                    elif res == "WAIT" and name == "VolCheck": res = sc.analyze(d["c60"], d["cur"], d["opn"], elapsed, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "Moshe": res = sc.analyze(elapsed, d["cur"], d["opn"], self.market_data_manager.trend_4h, d["poly"]["up_bid"], d["poly"]["down_bid"])
-                    elif res == "WAIT" and name == "ZScore": res = sc.analyze(ph, d["opn"], elapsed)
+            for name, sc in self.scanners.items():
+                if not self.query_one(scanner_map[name]).value: continue
+                
+                # --- [NEW] HDO Halt Guard ---
+                if self.hdo_fired_in_window:
+                    if "HDO_HALT_GLOBAL" not in self.skipped_logs:
+                        self.log_msg("HALT Scanners | Window hedged - no further trades allowed.", level="SCAN")
+                        self.skipped_logs.add("HDO_HALT_GLOBAL")
+                    continue
+                # ----------------------------
+                
+                # Dynamic Advanced Settings injection (primarily for Momentum)
+                if hasattr(sc, "adv_settings"):
+                    sc.adv_settings = self.mom_adv_settings
+                if hasattr(sc, "buy_mode"):
+                    sc.buy_mode = self.mom_buy_mode
+                
+                # In PRE/ADV mode at T-15s, let _do_prebuy thread be the sole caller of
+                # get_signal so it reads the NEXT window context and the latch isn't consumed here.
+                if name == "Momentum" and self.mom_buy_mode in ["PRE", "ADV"] and elapsed >= 285:
+                    continue
 
-                    tick_signals[name] = str(res)  # Capture for CSV analytics
-                    if res == "WAIT": continue
-                    if res == "NONE":
-                        reason = getattr(sc, "last_skip_reason", None)
-                        if reason and f"SKIP_{name}_{reason}" not in self.skipped_logs:
+                # Check Signal
+                res = sc.get_signal(context)
+                
+                tick_signals[name] = str(res)  # Capture for CSV analytics
+                if res == "WAIT": continue
+                if res == "NONE":
+                    reason = getattr(sc, "last_skip_reason", None)
+                    if reason:
+                        # Clean reason of dynamic numbers/BTC counts for better suppression
+                        import re
+                        clean_reason = re.sub(r'\d+\.?\d*', 'X', reason)
+                        suppress_key = f"SKIP_{name}_{clean_reason}"
+                        if suppress_key not in self.skipped_logs:
                             self.log_msg(f"SKIP {name} | {reason}", level="SCAN")
-                            self.skipped_logs.add(f"SKIP_{name}_{reason}")
-                        continue
+                            self.skipped_logs.add(suppress_key)
+                    continue
                         
-                    if "BET_" in str(res) and not any(k.startswith(f"{name}_") for k in self.window_bets):
-                        # 2. 1-Trade-Max Guard
-                        if self.query_one("#cb_one_trade").value and self.window_bets: continue
-                        
-                        # 3. Strong Only Filter
-                        if self.query_one("#cb_strong").value:
-                            strong_keywords = {"STRONG", "CONFIRMED", "HEAVY", "MAX", "90", "SNIPER"}
-                            if not any(k in str(res).upper() for k in strong_keywords):
-                                if f"SKIP_STRONG_{name}" not in self.skipped_logs:
-                                    self.log_msg(f"SKIP {name} | Strong Only active (Sig: {res})", level="SCAN")
-                                    self.skipped_logs.add(f"SKIP_STRONG_{name}")
-                                continue
+                if "BET_" in str(res):
+                    sd = "UP" if "UP" in str(res) else "DOWN"
+                    # Robust Duplicate Check: Match algorithm name and side
+                    already_have = any(
+                        info.get("algorithm") == name and info.get("side") == sd and not info.get("closed")
+                        for info in self.window_bets.values()
+                    )
+                    
+                    if already_have: continue
 
-                        # 4. Minimum Difference Filter
-                        try: min_diff = float(self.query_one("#inp_min_diff").value)
-                        except: min_diff = 0
-                        if abs(d["cur"] - d["opn"]) < min_diff:
-                            if f"SKIP_DIFF_{name}" not in self.skipped_logs:
-                                self.log_msg(f"SKIP {name} | Diff ${abs(d['cur']-d['opn']):.2f} < Min ${min_diff:.2f}", level="SCAN")
-                                self.skipped_logs.add(f"SKIP_DIFF_{name}")
+                    # 1b. Mid-Round Lockout: skip execution if booted mid-window or in first 10s
+                    if is_initial_lockout or self.mid_window_lockout:
+                        if f"LOCKOUT_{name}" not in self.skipped_logs:
+                            reason = "mid-round boot" if self.mid_window_lockout else "initial stabilization"
+                            self.log_msg(f"[dim]LOCKOUT {name} | Signal held ({reason}) — waiting for clean window[/]", level="SCAN")
+                            self.skipped_logs.add(f"LOCKOUT_{name}")
+                        continue
+                    # 1c. PRE mode: Momentum only enters via pre-buy, never mid-window (silent)
+                    if name in ["Momentum", "MM2"] and self.mom_buy_mode == "PRE":
+                        continue
+                    # 2. 1-Trade-Max Guard
+                    if self.query_one("#cb_one_trade").value and self.window_bets: continue
+                    
+                    # 3. Strong Only Filter
+                    if self.query_one("#cb_strong").value:
+                        strong_keywords = {"STRONG", "CONFIRMED", "HEAVY", "MAX", "90", "SNIPER"}
+                        if not any(k in str(res).upper() for k in strong_keywords):
+                            if f"SKIP_STRONG_{name}" not in self.skipped_logs:
+                                self.log_msg(f"SKIP {name} | Strong Only active (Sig: {res})", level="SCAN")
+                                self.skipped_logs.add(f"SKIP_STRONG_{name}")
                             continue
 
-                        # 5. Bet Sizing
-                        bs = self.risk_manager.calculate_bet_size(str(res), self.portfolios[name].balance, self.portfolios[name].consecutive_losses, {'trend_4h':self.market_data_manager.trend_4h, 'direction':"UP" if "UP" in str(res) else "DOWN"})
-                        if "MOM" in str(res):
-                            if getattr(self, "mom_buy_mode", "STD") != "STD":
-                                continue
-                            try: bs = float(self.query_one("#inp_amount").value)
-                            except: bs = self.portfolios[name].balance * 0.12
+                    # 4. Minimum Difference Filter
+                    try: min_diff = float(self.query_one("#inp_min_diff").value)
+                    except: min_diff = 0
+                    if abs(d["cur"] - d["opn"]) < min_diff:
+                        if f"SKIP_DIFF_{name}" not in self.skipped_logs:
+                            self.log_msg(f"SKIP {name} | Diff ${abs(d['cur']-d['opn']):.2f} < Min ${min_diff:.2f}", level="SCAN")
+                            self.skipped_logs.add(f"SKIP_DIFF_{name}")
+                        continue
+
+                    # 5. Bet Sizing (Unified Risk Mode with Target Anchor)
+                    try:
+                        # Get base amount from UI
+                        ui_amount = float(self.query_one("#inp_amount").value)
+                        # Get mode (pct vs fixed)
+                        is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
                         
-                        weight = self.scanner_weights.get(name[:3].upper(), 1.0)
-                        bs = bs * weight
+                        if is_pct:
+                            # Percentage of Anchor (Start of Window) Bankroll
+                            bs = self.risk_manager.window_start_bankroll * (ui_amount / 100.0)
+                        else:
+                            # Fixed Dollar Amount
+                            bs = ui_amount
+                    except:
+                        # Default fallback if UI read fails
+                        bs = self.risk_manager.window_start_bankroll * 0.10 if self.risk_manager.window_start_bankroll > 0 else 1.00
 
-                        # 6. Whale Protect
-                        if self.query_one("#cb_whale").value:
-                            max_whale = self.risk_manager.risk_bankroll * 0.25
-                            if bs > max_whale:
-                                self.log_msg(f"Whale Protect cap {name} ${bs:.2f} -> ${max_whale:.2f}", level="ADMIN")
-                                bs = max_whale
+                    # Apply Confidence Multipliers
+                    port = self.portfolios.get(name)
+                    
+                    t_dir = "UP" if "UP" in str(res) else "DOWN"
+                    t4 = self.market_data_manager.trend_1h
+                    trend_bad = (t4 != 'NEUTRAL' and t_dir not in t4)
+                    
+                    if trend_bad:
+                        penalty = getattr(self, "penalty_percentage", 0.10)
+                        bs *= (1.0 - penalty)
+                    
+                    if port and port.consecutive_losses >= 2:
+                        bs *= 0.7
                         
-                        if bs > 0:
-                            sd = "UP" if "UP" in str(res) else "DOWN"
-                            pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
-                            
-                            # 7. Price Bounds
-                            try: min_pr = float(self.query_one("#inp_min_price").value)
-                            except: min_pr = 0.01
-                            try: max_pr = float(self.query_one("#inp_max_price").value)
-                            except: max_pr = 0.99
-                            
-                            if pr < min_pr or pr > max_pr:
-                                if pr < min_pr and name not in self.pending_bets:
-                                    self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
-                                    try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
-                                    except: pass
-                                    self.log_msg(f"QUEUED {name} {sd} | Wait for {min_pr*100:.1f}c (Now {pr*100:.1f}c)", level="SCAN")
-                                elif pr > max_pr:
-                                    if f"SKIP_MAX_{name}" not in self.skipped_logs:
-                                        self.log_msg(f"SKIP {name} | Price {pr*100:.1f}c > Max {max_pr*100:.1f}c", level="SCAN")
-                                        self.skipped_logs.add(f"SKIP_MAX_{name}")
-                                continue
+                    # Clamp to Minimum and Maximum
+                    from .config import TradingConfig
+                    bs = max(TradingConfig.MIN_BET, min(bs, TradingConfig.MAX_BET_SESSION_CAP))
+                        
+                    # Scanner Weights
+                    weight = self.scanner_weights.get(name[:3].upper(), 1.0)
+                    bs = bs * weight
 
-                            # 8. Moshe Override
-                            if "MOSHE_90" in str(res):
-                                pr = 0.86; moshe_scanner = self.scanners.get("Moshe")
-                                bs = getattr(moshe_scanner, "bet_size", 1.00)
-                                if bs > self.risk_manager.risk_bankroll: bs = self.risk_manager.risk_bankroll
-                                if bs <= 0.05: continue
-                                self.log_msg(f"MOSHE 0.86 Override | Payout Opt: 0.99", level="ADMIN")
+                    # 6. Whale Protect
+                    if self.query_one("#cb_whale").value:
+                        max_whale = self.risk_manager.window_start_bankroll * 0.25
+                        if bs > max_whale:
+                            self.log_msg(f"Whale Protect cap {name} ${bs:.2f} -> ${max_whale:.2f}", level="ADMIN")
+                            bs = max_whale
+                            
+                    # Final Safety Cap
+                    if bs > self.risk_manager.risk_bankroll:
+                        bs = self.risk_manager.risk_bankroll
+                        
+                    # Minimum Bet Enforcement ($1.00)
+                    if bs < 1.00:
+                        bs = 1.00
+                    
+                    if bs > 0:
+                        sd = "UP" if "UP" in str(res) else "DOWN"
+                        pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                        
+                        # 7. Moshe Override (Specialized Sniper logic for high-probability end-of-window trades)
+                        is_moshe = "MOSHE_90" in str(res)
+                        if is_moshe:
+                            pr = 0.86; moshe_scanner = self.scanners.get("Moshe")
+                            bs = getattr(moshe_scanner, "bet_size", 1.00)
+                            if bs > self.risk_manager.risk_bankroll: bs = self.risk_manager.risk_bankroll
+                            if bs <= 0.05: continue
+                            self.log_msg(f"MOSHE 0.86 Override | Payout Opt: 0.99", level="ADMIN")
 
-                            if pr and 0.01 < pr < 0.99:
-                                ok, msg = self.trade_executor.execute_buy(self.query_one("#cb_live").value, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_4h}, reason=res)
-                                if ok:
-                                    self.window_bets[f"{name}_{time.time()}"] = {"side":sd,"entry":pr,"cost":bs,"algorithm":name}
-                                    self.risk_manager.register_bet(bs); self.portfolios[name].record_trade(sd, pr, bs, bs/pr)
-                                    self.session_total_trades += 1
-                                    self.log_msg(f"BUY {name} {sd} @ {pr*100:.1f}c | {msg}", level="TRADE")
+                        # 8. Global Skepticism & Price Bounds
+                        ok_filter, filter_reason = self.apply_global_skeptic_filter(sd, pr, name=name)
+                        
+                        if not ok_filter:
+                            if "Price" in filter_reason and "Max" in filter_reason:
+                                # Max Price Block (Log once)
+                                if f"SKIP_MAX_{name}" not in self.skipped_logs:
+                                    self.log_msg(f"SKIP {name} | {filter_reason}", level="SCAN")
+                                    self.skipped_logs.add(f"SKIP_MAX_{name}")
+                            elif name not in self.pending_bets:
+                                # Price too low / Skepticism Block (Queue it)
+                                self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
+                                try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
+                                except: pass
+                                prefix = name[:3].upper()
+                                self.log_msg(f"QUEUED {name} {sd} | {filter_reason} [{prefix}]", level="SCAN")
+                            continue
+
+
+
+                        if pr and 0.01 < pr < 0.99:
+                            is_l = self.query_one("#cb_live").value
+
+                            # Log reasoning for Momentum mid-window entries
+                            if name == "Momentum":
+                                _res_reason = str(res).split("|")[1] if "|" in str(res) else str(res)
+                                _atr_now = getattr(self.market_data_manager, "atr_5m", 0)
+                                _s = self.mom_adv_settings
+                                if self.mom_buy_mode == "ADV":
+                                    _tier = "Stable" if _atr_now <= _s.get("atr_low", 20) else ("Chaos" if _atr_now >= _s.get("atr_high", 40) else "Neutral")
+                                    _offset = _s.get("stable_offset", 0) if _tier == "Stable" else (_s.get("chaos_offset", 0) if _tier == "Chaos" else 0)
+                                    _sc = self.scanners.get("Momentum")
+                                    _base_t = int(getattr(_sc, "base_threshold", 0.6) * 100) if _sc else 60
+                                    self.log_msg(f"[dim]MOM [bold]ADV[/] entry: {_res_reason} | ATR={_atr_now:.1f} Tier=[bold]{_tier}[/] base={_base_t}¢ offset={_offset:+}¢ → thresh={_base_t + _offset}¢[/]", level="SCAN")
                                 else:
-                                    self.log_msg(f"BUY FAILED {name}: {msg}", level="ERROR")                            
+                                    self.log_msg(f"[dim]MOM entry: {_res_reason} | ATR={_atr_now:.1f}[/]", level="SCAN")
+
+                            # --- Bounce Entry Fork ---
+                            # If bounce mode is on and price has moved more than 1 dip-depth
+                            # above the signal price, park it instead of executing immediately.
+                            dip_threshold = getattr(self, "bounce_dip_cents", 0.5) / 100.0
+                            if self.bounce_mode and name not in self.bounce_pending and pr > (pr + dip_threshold):
+                                # Note: signal_price == pr (current ask) at moment of signal;
+                                # we compare against the value we already have.
+                                # Recapture: signal_price was 'pr' before any bounce logic touched it,
+                                # so we just check if ask has risen since (approximated by dip_threshold check).
+                                pass  # falls through — the real price-moved check is below
+
+                            # Actual bounce fork: re-read live ask to compare against execution price
+                            live_ask = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                            if self.bounce_mode and name not in self.bounce_pending and live_ask > (pr + dip_threshold):
+                                self.bounce_pending[name] = {
+                                    "side": sd,
+                                    "target_level": pr,      # the ask at signal time
+                                    "dip_depth": dip_threshold,
+                                    "has_dipped": False,
+                                    "signal": str(res),
+                                    "bs": bs,
+                                }
+                                self.log_msg(f"BOUNCE {name} {sd} | Parked. Waiting for retest of {pr*100:.1f}¢ (now {live_ask*100:.1f}¢)", level="SCAN")
+                            else:
+                                ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_1h}, reason=res)
+                                if ok:
+                                    self._handle_successful_buy(name, sd, bs, act_shares, act_price, is_l)
+                                    self.session_total_trades += 1
+                                    
+                                    short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
+                                    prefix = name[:3].upper()
+                                    self.log_msg(f"{msg} ({prefix}|{short_res})", level="TRADE")
+                                else:
+                                    self.log_msg(f"Fail {name}: {msg}", level="ERROR")
 
             # --- Update market_data with live analytics for CSV logging ---
             # BTC Range: intra-window price range from tick history
@@ -343,7 +612,7 @@ class TradeEngineMixin:
             self.market_data['odds_score'] = round((self.market_data['up_bid'] - self.market_data['down_bid']) * 100, 1)
 
             # Trend strings from market_data_manager
-            self.market_data['trend_4h'] = self.market_data_manager.trend_4h
+            self.market_data['trend_1h'] = self.market_data_manager.trend_1h
             self.market_data['trend_1h'] = self.market_data_manager.trend_1h
 
             # ATR & RSI
@@ -360,49 +629,99 @@ class TradeEngineMixin:
             # Individual key-scanner flags
             self.market_data['sling_signal'] = tick_signals.get('Slingshot', 'OFF')
             self.market_data['cobra_signal'] = tick_signals.get('Cobra', 'OFF')
+            self.market_data['coiled_cobra_signal'] = tick_signals.get('CoiledCobra', 'OFF')
             self.market_data['flag_signal'] = tick_signals.get('BullFlag', 'OFF')
             # -----------------------------------------------------------------
 
+            if is_new_window:
+                self.generate_window_briefing()
+
             await self._check_tpsl()
+            await self._check_hdo()
             self.update_balance_ui(); self.update_sell_buttons()
             self.query_one("#p_up").update(f"{self.market_data['up_ask']*100:.1f}¢")
             self.query_one("#p_down").update(f"{self.market_data['down_ask']*100:.1f}¢")
             self.query_one("#p_btc").update(f"${self.market_data['btc_price']:,.2f}")
-            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_4h}")
+            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_1h}")
             self.query_one("#p_atr").update(f"ATR 5m: ${self.market_data_manager.atr_5m:.2f}")
             self.query_one("#p_btc_open").update(f"Open: ${self.market_data['btc_open']:,.2f}")
             df = self.market_data['btc_price'] - self.market_data['btc_open']
             self.query_one("#p_btc_diff").update(f"Diff: {'+' if df>=0 else '-'}${abs(df):.2f}")
-            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_4h}")
+            self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_1h}")
+            
+            # --- Update Exposure Dashboard ---
+            exp_up_cost = 0.0; exp_up_win = 0.0
+            exp_dn_cost = 0.0; exp_dn_win = 0.0
+            for bid, info in self.window_bets.items():
+                if info.get("closed"): continue
+                if info["side"] == "UP":
+                    exp_up_cost += info["cost"]
+                    exp_up_win += info["shares"] # shares * $1 payout
+                else:
+                    exp_dn_cost += info["cost"]
+                    exp_dn_win += info["shares"]
+            
+            self.query_one("#lbl_owned_up").update(f"UP OWNED: ${exp_up_cost:.0f}/${exp_up_win:.0f}")
+            self.query_one("#lbl_owned_dn").update(f"DN OWNED: ${exp_dn_cost:.0f}/${exp_dn_win:.0f}")
+            # ---------------------------------
+            
+            # Update Volume UI (BTC quantity near window open price)
+            v_up = self.market_data.get("vol_up", 0)
+            v_dn = self.market_data.get("vol_dn", 0)
+            cur_btc = self.market_data.get("btc_price", 0)
+            def fmt_v(v_btc, price):
+                if v_btc >= 100: return f"{v_btc:.0f}B"
+                return f"{v_btc:.1f}B"
+            self.query_one("#lbl_vol_up").update(f"V-UP: {fmt_v(v_up, cur_btc)}")
+            self.query_one("#lbl_vol_dn").update(f"V-DN: {fmt_v(v_dn, cur_btc)}")
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
 
     async def _check_tpsl(self):
         is_tp_active = self.query_one("#cb_tp_active").value
-        tp = self.committed_tp
-        sl = self.committed_sl
+        try: use_tranche = self.query_one("#cb_tranche").value
+        except: use_tranche = False
+
         for bid, info in list(self.window_bets.items()):
             if not isinstance(info, dict): continue
             if info.get("closed"): continue
             side = info["side"]; ent = info["entry"]; cur = self.market_data["up_price"] if side=="UP" else self.market_data["down_price"]
             roi = (cur-ent)/ent; reason = None
             
+            # Use specific tranche targets if available and enabled, else fallback to global
+            tp = info.get("target_tp", self.committed_tp) if use_tranche else self.committed_tp
+            sl = info.get("target_sl", self.committed_sl) if use_tranche else self.committed_sl
+            has_limit_order = bool(info.get("limit_order_id"))
+            
             # 1. Universal Max Profit (99c Guaranteed Win Exit)
-            if cur >= 0.99: 
+            if cur >= 0.99 and not has_limit_order: 
                 reason = f"MAX PROFIT (99¢) | Ent: {ent*100:.1f}¢ -> {cur*100:.1f}¢ (+{roi*100:.1f}%)"
             # 2. UI-configurable TP/SL Check
-            # TP is a PRICE threshold (TP 80 = sell at 80¢). Binary options cap at 99¢,
-            # so ROI-based TP from a 62¢ entry would require 111¢ — never reachable.
-            # SL stays ROI-based (SL 40 = cut loss when down 40% from entry).
             elif is_tp_active:
-                if cur >= tp: reason = f"TP HIT | Ent: {ent*100:.1f}¢ -> {cur*100:.1f}¢ (+{roi*100:.1f}%)"
-                elif roi <= -sl: reason = f"SL HIT | Ent: {ent*100:.1f}¢ -> {cur*100:.1f}¢ ({roi*100:.1f}%)"
+                if cur >= tp and not has_limit_order: 
+                    reason = f"TP HIT | Ent: {ent*100:.1f}¢ -> {cur*100:.1f}¢ (+{roi*100:.1f}%)"
+                elif roi <= -sl: 
+                    reason = f"SL HIT | Ent: {ent*100:.1f}¢ -> {cur*100:.1f}¢ ({roi*100:.1f}%)"
                 
             if reason:
                 is_l = self.query_one("#cb_live").value
+                
+                # If a Limit Order was resting but we hit SL (or another emergency trigger), we MUST cancel it first.
+                if is_l and has_limit_order:
+                    self.trade_executor.live.cancel_limit_order(info["limit_order_id"])
+                    self.log_msg(f"[dim]Cancelled resting Limit Order {info['limit_order_id'][-6:]} due to {reason.split('|')[0]}[/]")
+                    
                 cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
+                # For Market dumps, always undercut the bid slightly to guarantee execution
                 lp = cbid if not is_l else max(0.02, cbid-0.02)
-                ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason)
+                
+                # Use act_shares instead of completely dumping if Tranche is Active
+                if use_tranche and info.get("shares"):
+                    dump_sz = info["shares"]
+                    ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason)
+                else:
+                    # Global Dump
+                    ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason)
                 if ok:
                     info["closed"] = True
                     realized_loss = info["cost"] - realized_rev
@@ -429,33 +748,124 @@ class TradeEngineMixin:
                             
                             if rec_cost >= 0.10:
                                 self.log_msg(f"[bold cyan]SL+ RECOVERY:[/][dim] Loss ${realized_loss:.2f} -> Buying ${rec_cost:.2f} {opp_side} @ {opp_p*100:.1f}¢[/]")
-                                ok_rec, msg_rec = await asyncio.to_thread(self.trade_executor.execute_buy, is_l, opp_side, rec_cost, opp_p, self.market_data["up_id" if opp_side=="UP" else "down_id"], context={}, reason="SL+_Recovery")
+                                ok_rec, msg_rec, rec_shares, rec_price = await asyncio.to_thread(self.trade_executor.execute_buy, is_l, opp_side, rec_cost, opp_p, self.market_data["up_id" if opp_side=="UP" else "down_id"], context={}, reason="SL+_Recovery")
                                 if ok_rec:
-                                    self.window_bets[f"SL+_Recovery_{time.time()}"] = {"side":opp_side,"entry":opp_p,"cost":rec_cost}
-                                    self.risk_manager.register_bet(rec_cost)
+                                    self._handle_successful_buy("Recovery", opp_side, rec_cost, rec_shares, rec_price, is_l)
                                     self.log_msg(f"[bold green]RECOVERY EXECUTED:[/] {msg_rec}")
                                     self.update_balance_ui() # Refresh bankroll display
                                 else:
                                     self.log_msg(f"[bold red]RECOVERY FAILED:[/] {msg_rec}")
 
-    async def _run_last_second_exit(self, is_live):
-        # if not is_live: return # REMOVED: We want Sim Logic for Hypothetical Logging
-        sides = set()
-        if is_live: sides.update(info["side"] for info in self.window_bets.values() if not info.get("closed"))
-        else:
-            if self.sim_broker.shares["UP"] > 0: sides.add("UP")
-            if self.sim_broker.shares["DOWN"] > 0: sides.add("DOWN")
+    async def _check_hdo(self):
+        """
+        Hedge Direction Opposite evaluates if we need to enter an offset trade to protect portfolio delta.
+        v5.9.5: Refactored for single-fire per window and net exposure hedging.
+        """
+        if self.hdo_fired_in_window: return
         
-        for side in sides:
-            # Emergency Whale Shield (v5.9)
-            if self.mom_buy_mode == "ADV":
-                adv = self.mom_adv_settings
+        # Check if HDO is active via weights / existence
+        hdo_scanner = self.scanners.get("HDO")
+        if not hdo_scanner: return
+        
+        hdo_weight = self.scanner_weights.get("HDO", 0.0)
+        if hdo_weight <= 0: return # Consider weight 0 as inactive
+        
+        # Check if actually enabled in UI
+        if not self.query_one("#cb_hdo").value: return
+        
+        hdo_threshold = getattr(hdo_scanner, "trigger_threshold", 0.59)
+        is_l = self.query_one("#cb_live").value
+
+        # 1. Calculate Total Net Exposure for the Window
+        # We need to know the total dollar amount invested in UP vs DOWN.
+        net_exposure = {"UP": 0.0, "DOWN": 0.0}
+        for info in self.window_bets.values():
+            if not isinstance(info, dict) or info.get("closed"): continue
+            if info.get("algorithm") == "HDO": continue 
+            
+            side = info["side"]
+            cost = info["cost"]
+            net_exposure[side] += cost
+
+        # 2. Check if either side's opposite is threatening
+        sides_to_check = []
+        if net_exposure["DOWN"] > net_exposure["UP"]:
+            sides_to_check.append(("DOWN", net_exposure["DOWN"] - net_exposure["UP"]))
+        elif net_exposure["UP"] > net_exposure["DOWN"]:
+            sides_to_check.append(("UP", net_exposure["UP"] - net_exposure["DOWN"]))
+
+        for threatened_side, net_amt in sides_to_check:
+            opp_side = "UP" if threatened_side == "DOWN" else "DOWN"
+            opp_ask = self.market_data["up_ask"] if opp_side == "UP" else self.market_data["down_ask"]
+
+            if opp_ask >= hdo_threshold:
+                # threshold crossed! We execute ONE HEDGE for the ENTIRE net position.
+                self.hdo_fired_in_window = True # Latch immediately
+                
+                self.log_msg(f"[bold magenta]🚨 HDO TRIGGERED:[/] Net {threatened_side} exposure of ${net_amt:.2f} threatened. {opp_side} ask crossed {hdo_threshold*100:.1f}¢!", level="ADMIN")
+                
+                # Formula: We want to buy enough shares such that profit covers net_amt
+                target_shares = net_amt / (1.00 - opp_ask)
+                hedge_bet_size = target_shares * opp_ask
+                
+                # Apply HDO Scanner Weight
+                hdo_weight = self.scanner_weights.get("HDO", 1.0)
+                hedge_bet_size *= hdo_weight
+
+                # Final safety caps
+                if hedge_bet_size > self.risk_manager.risk_bankroll:
+                    hedge_bet_size = self.risk_manager.risk_bankroll
+                    self.log_msg(f"[yellow]HDO CAP:[/] Venture ${hedge_bet_size:.2f} max (Full Bankroll)", level="ADMIN")
+                
+                if hedge_bet_size >= 0.50:
+                    self.log_msg(f"[bold magenta]HDO EXECUTION:[/] Hedging ${net_amt:.2f} {threatened_side} w/ ${hedge_bet_size:.2f} {opp_side} @ {opp_ask*100:.1f}¢", level="ADMIN")
+                    
+                    ok_hedge, msg_hedge, hedge_shares, hedge_price = await asyncio.to_thread(
+                        self.trade_executor.execute_buy, is_l, opp_side, hedge_bet_size, opp_ask, 
+                        self.market_data["up_id" if opp_side=="UP" else "down_id"], 
+                        context={}, reason="HDO_Hedge_Total"
+                    )
+                    
+                    if ok_hedge:
+                        self._handle_successful_buy("HDO", opp_side, hedge_bet_size, hedge_shares, hedge_price, is_l)
+                        self.log_msg(f"[bold green]HDO HALT:[/] Multi-trade hedge complete. All scanning suspended for window.", level="ADMIN")
+                        self.update_balance_ui()
+                    else:
+                        self.log_msg(f"[bold red]HDO FAILED:[/] {msg_hedge}", level="ERROR")
+                        self.hdo_fired_in_window = False # UNLATCH to allow retry
+                return 
+
+    async def _run_last_second_exit(self, ui_is_live):
+        # We find all uniquely opened trades by their side and whether they were actually LIVE or SIM
+        open_bets = set()
+        for info in self.window_bets.values():
+            if not info.get("closed"):
+                open_bets.add((info["side"], info.get("is_live", False), info.get("algorithm")))
+        
+        # Fallback for SIM mode manual/legacy shares not in tracked bets
+        if not open_bets and not ui_is_live:
+            if self.sim_broker.shares["UP"] > 0: open_bets.add(("UP", False, "Manual"))
+            if self.sim_broker.shares["DOWN"] > 0: open_bets.add(("DOWN", False, "Manual"))
+        
+        for side, is_live, algo_id in open_bets:
+            # 1. Emergency Whale Shield
+            # Check which scanner is active and use its specific adv_settings
+            sc_key = None
+            if algo_id == "Momentum": sc_key = "Momentum"
+            elif algo_id == "MM2": sc_key = "MM2"
+            
+            scanner = self.scanners.get(sc_key) if sc_key else None
+            
+            if scanner and self.mom_buy_mode == "ADV":
+                adv = getattr(scanner, "adv_settings", {})
                 rem = TradingConfig.WINDOW_SECONDS - (time.time() - self.market_data["start_ts"])
-                if rem <= adv["shield_time"]:
-                    up_p = self.market_data.get("up_price", 0.5)
-                    reach = adv["shield_reach"] / 100.0
-                    if abs(up_p - 0.50) <= reach:
-                        self.log_msg(f"🛡️ WHALE SHIELD: Market too tight ({up_p*100:.1f}¢). Emergency Exit.", level="MONEY")
+                s_time_limit = adv.get("shield_time", 45) # e.g. 45s into window (T-15s)
+                
+                if (time.time() - self.market_data["start_ts"]) >= s_time_limit:
+                    up_p = self.market_data.get("up_bid", 0.5)
+                    reach = adv.get("shield_reach", 5) / 100.0
+                    if abs(up_p - 0.50) < reach:
+                        self.log_msg(f"🛡️ WHALE SHIELD ({sc_key}): Market too tight ({up_p*100:.1f}¢). Emergency Exit.", level="MONEY")
                         await self.trigger_sell_all("UP")
                         await self.trigger_sell_all("DOWN")
                         self.last_second_exit_triggered = True
@@ -471,8 +881,7 @@ class TradeEngineMixin:
                 shares = sum((info["cost"]/info.get("entry", 0.5)) for info in self.window_bets.values() if info["side"] == side and not info.get("closed"))
                 if shares > 0:
                     revenue = shares * cbid
-                    # "If we were live we would sell X shares of winning side at 99c right now..."
-                    self.log_msg(f"[bold magenta]SIM INFO: Live would sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (Value: ${revenue:.2f})[/]")
+                    self.log_msg(f"[bold magenta]SIM: Sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (${revenue:.2f})[/]")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
 
             # LIVE: Skip if position has clearly lost (bid < 10¢ with no triggered SL).
@@ -485,7 +894,16 @@ class TradeEngineMixin:
             # For LIVE: User requested strict resting limit order at $0.99
             lp = 0.99 if is_live else 0.0
             
-            
+            # CANCEL ALL RESTING TRANCHE LIMIT ORDERS FOR THIS SIDE BEFORE MARKET SELL
+            if is_live:
+                try: use_tranche = self.query_one("#cb_tranche").value
+                except: use_tranche = False
+                if use_tranche:
+                    for info in self.window_bets.values():
+                        if info.get("side") == side and info.get("limit_order_id") and not info.get("closed"):
+                            self.trade_executor.live.cancel_limit_order(info["limit_order_id"])
+                            self.log_msg(f"[dim]Cancelled resting Limit Order {info['limit_order_id'][-6:]} for End-of-Window Dump[/]")
+
             # Execute synchronously in a background thread to prevent UI lockup 
             ok, msg, _ = await asyncio.to_thread(self.trade_executor.execute_sell, is_live, side, tid, lp, cbid, "Last Second Exit")
             if ok:
@@ -508,13 +926,20 @@ class TradeEngineMixin:
     async def update_timer(self):
         # Update session runtime regardless of market data status
         run = int(time.time() - self.app_start_time)
-        self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d}")
+        win_count = getattr(self, "session_windows_settled", 0)
+        self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d} | Win: #{win_count}")
 
         if not self.market_data["start_ts"]: return
         
         rem = max(0, TradingConfig.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
         self.time_rem_str = f"{rem//60:02d}:{rem%60:02d}"
         self.query_one("#lbl_timer_big").update(self.time_rem_str)
+        
+        # Update window start time in human-readable format
+        from datetime import datetime
+        start_dt = datetime.fromtimestamp(self.market_data["start_ts"])
+        self.query_one("#lbl_window_start").update(start_dt.strftime("%H:%M:%S"))
+        
         if rem <= 1 and not self.last_second_exit_triggered:
             self.last_second_exit_triggered = True
             await self._run_last_second_exit(self.query_one("#cb_live").value)
@@ -538,31 +963,34 @@ class TradeEngineMixin:
                     up_ask  = d.get("up_ask",  0)
                     dn_ask  = d.get("down_ask", 0)
                     if up_bid > 0 or dn_bid > 0:
-                        self.call_from_thread(
-                            self.log_msg,
-                            f"NEXT WINDOW ({next_slug}): "
-                            f"UP bid=[dim]{up_bid*100:.1f}¢[/] ask=[bold green]{up_ask*100:.1f}¢[/]  "
-                            f"DN bid=[dim]{dn_bid*100:.1f}¢[/] ask=[bold red]{dn_ask*100:.1f}¢[/]"
-                        )
+                        fmt_msg = (
+                            f"NEXT WIN: "
+                            f"UP {up_bid*100:.1f}/{up_ask*100:.1f}¢ | "
+                            f"DN {dn_bid*100:.1f}/{dn_ask*100:.1f}¢"
+                        ).replace(".0/", "/").replace(".0¢", "¢")
+                        self.safe_call(self.log_msg, fmt_msg)
                     else:
-                        self.call_from_thread(self.log_msg, f"[dim]🔭 Next window not yet available ({next_slug})[/]")
+                        self.safe_call(self.log_msg, f"[dim]🔭 Next window not yet available ({next_slug})[/]")
                 except Exception as e:
-                    self.call_from_thread(self.log_msg, f"[dim]🔭 Next window fetch failed: {e}[/]")
+                    self.safe_call(self.log_msg, f"[dim]🔭 Next window fetch failed: {e}[/]")
             threading.Thread(target=_fetch_next, daemon=True).start()
         # ---------------------------
 
         # --- PRE-BUY NEXT WINDOW (rem <= 15, MOM Pre-Buy or Hybrid mode) ---
         if (rem <= 15 and not self.pre_buy_triggered
-                and self.mom_buy_mode in ["PRE", "HYBRID"]
+                and self.mom_buy_mode in ["PRE", "HYBRID", "ADV"]
                 and self.market_data["start_ts"] > 0
                 and self.query_one("#cb_mom").value):
             self.pre_buy_triggered = True
             next_ts   = self.market_data["start_ts"] + TradingConfig.WINDOW_SECONDS
             next_slug = f"btc-updown-5m-{next_ts}"
             is_live   = self.query_one("#cb_live").value
-            try: bet_size = float(self.query_one("#inp_amount").value)
-            except: bet_size = 1.0
-            trend = self.market_data_manager.trend_4h  # "UP" / "DOWN" / "NEUTRAL"
+            try: ui_amt = float(self.query_one("#inp_amount").value)
+            except: ui_amt = 1.0
+            is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
+            trend = self.market_data_manager.trend_1h  # "UP" / "DOWN" / "NEUTRAL"
+
+            self.log_msg(f"[dim]🚀 PRE-BUY initiated at T-{rem:.0f}s (mode={self.mom_buy_mode}) — fetching next window...[/]")
 
             def _do_prebuy():
                 try:
@@ -572,13 +1000,18 @@ class TradeEngineMixin:
                     if up_ask <= 0 and dn_ask <= 0:
                         self.call_from_thread(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
                         return
+                    
+                    # Bet Sizing Logic explicitly for Pre-Buy
+                    if is_pct:
+                        pre_bs = self.risk_manager.window_start_bankroll * (ui_amt / 100.0)
+                    else:
+                        pre_bs = ui_amt
 
-                    # Calculate BTC Velocity and RSI for enhanced decision making
+                    # Calculate BTC Velocity and RSI
                     btc_open = self.market_data.get("btc_open", 0)
                     btc_pre_60s = self.mom_analytics.get("btc_pre_60s")
                     velocity = (btc_open - btc_pre_60s) if btc_open and btc_pre_60s else 0
                     
-                    # Calculate 1m RSI
                     rsi_1m = 50.0
                     try:
                         closes, _, _, _ = self.market_data_manager.fetch_candles_60m()
@@ -588,144 +1021,167 @@ class TradeEngineMixin:
                     except:
                         pass
 
-                    # Capture exact 15s pre-window gap and BTC price for analytics
+                    # Build Context for Scanners
+                    context = {
+                        "elapsed": 285, # Hardcoded T-15s for pre-buys
+                        "up_bid": self.market_data.get("up_bid", 0),
+                        "down_bid": self.market_data.get("down_bid", 0),
+                        "up_ask": up_ask,
+                        "down_ask": dn_ask,
+                        "atr_5m": getattr(self.market_data_manager, "atr_5m", None) or self.market_data.get("atr_5m", 0),
+                        "trend_1h": self.market_data_manager.trend_1h,
+                        "odds_score": round((self.market_data.get("up_bid", 0) - self.market_data.get("down_bid", 0)) * 100, 1),
+                        "rsi_1m": rsi_1m,
+                        "velocity": velocity,
+                        "window_analytics": self.mom_analytics
+                    }
+                    
+                    # Log Context
                     price_diff = up_ask - dn_ask
+                    _atr = context["atr_5m"]
+                    _atr_floor = self.scanners.get("Momentum") and self.scanners["Momentum"].adv_settings.get("atr_floor", 25.0) or 25.0
                     if self.mom_analytics["pre_15s_gap"] is None:
                         self.mom_analytics["pre_15s_gap"] = price_diff
                         self.mom_analytics["btc_pre_15s"] = self.market_data.get("btc_price", 0)
-                    
-                    # Debug: Log price difference calculation
-                    self.call_from_thread(self.log_msg, f"[dim]DEBUG PRE-BUY: UP ask={up_ask*100:.1f}¢, DN ask={dn_ask*100:.1f}¢, diff={price_diff*100:.1f}¢, abs={abs(price_diff)*100:.1f}¢[/]")
-                    
-                    # Enhanced Decision Logic with Priority System:
-                    # Priority 1: Velocity Reversion (Significantly negative velocity -> UP bet for mean reversion)
-                    # Priority 2: RSI Trend (High RSI > 70 -> UP bet for trend continuation)
-                    # Priority 3: Price Gap (Follow lead or reverse based on gap size)
-                    
-                    decision_reason = None
-                    side = None
-                    price = None
-                    
-                    if self.mom_buy_mode == "ADV":
-                        atr = getattr(self.main_app.market_data_manager, "atr_5m", 0)
-                        adv = self.main_app.mom_adv_settings
-                        if atr >= adv["atr_high"] and adv["auto_stn_chaos"]:
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY chaos skip (ATR:{atr:.1f}) -> Forcing STN[/]")
-                            return
-                    
-                    # Priority 1: Velocity Reversion Check
-                    if velocity <= -300:  # Increased threshold for more reliable signals
-                        side = "UP"
-                        price = up_ask
-                        decision_reason = f"Velocity Reversion (BTC moved {velocity:.0f} down in 60s)"
-                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity reversion -> {side} ({velocity:.0f} move)[/]")
-                    
-                    # Priority 2: RSI Momentum Check (only if velocity didn't trigger)
-                    elif side is None and rsi_1m > 70:
-                        # Add trend context check with 1h trend strength levels
-                        trend_1h = self.market_data_manager.trend_1h
-                        
-                        if trend_1h in ["S-DOWN", "M-DOWN", "W-DOWN"]:
-                            # Skip RSI momentum signals during downtrends (insufficient data)
-                            decision_reason = f"RSI Momentum skipped (RSI: {rsi_1m:.1f} > 70 but 1h trend is {trend_1h})"
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum skipped (RSI: {rsi_1m:.1f}) - {trend_1h} detected[/]")
-                            # Don't set side/price, let it fall through to price gap logic
-                        else:
-                            # Allow RSI momentum in uptrends or sideways markets
-                            side = "UP"
-                            price = up_ask
-                            decision_reason = f"RSI Momentum (RSI: {rsi_1m:.1f} > 70, 1h Trend: {trend_1h})"
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY RSI momentum -> {side} (RSI: {rsi_1m:.1f}, 1h Trend: {trend_1h})[/]")
-                    
-                    # Priority 3: Price Gap Logic (enhanced based on log analysis)
-                    elif side is None:
-                        # Enhanced gap logic: Consider market context before following lead
-                        cur_up = self.market_data.get("up_price", 0.5)
-                        cur_dn = self.market_data.get("down_price", 0.5)
-                        winner = "UP" if cur_up >= cur_dn else "DOWN"
-                        
-                        # If strong velocity signal exists, prioritize it over gap following
-                        if velocity <= -300:
-                            # Strong negative velocity overrides gap following
-                            side = "UP"
-                            price = up_ask
-                            decision_reason = f"Velocity Override (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})"
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY velocity override -> {side} (gap:{abs(price_diff)*100:.1f}¢, vel:{velocity:.0f})[/]")
-                        elif abs(price_diff) >= 0.03:  # Large gap (3¢+) - follow lead
-                            side, price = ("UP", up_ask) if up_ask > dn_ask else ("DOWN", dn_ask)
-                            if self.mom_buy_mode == "HYBRID":
-                                decision_reason = f"Hybrid Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY hybrid lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                            else:
-                                decision_reason = f"Follow Lead ({abs(price_diff)*100:.1f}¢ gap)"
-                                self.call_from_thread(self.log_msg, f"[dim]PRE-BUY follow lead ({abs(price_diff)*100:.1f}¢ gap) -> {side}[/]")
-                        else:
-                            # Small gaps (0¢-2¢) - make decision based on other factors
-                            atr = getattr(self.market_data_manager, "atr_5m", 0)
-                            trend_1h = self.market_data_manager.trend_1h
-                            
-                            # Decision logic for small gaps based on market factors
-                            if trend_1h in ["S-DOWN", "M-DOWN"] and velocity < -100:
-                                # Strong/Medium downtrend with some negative velocity -> UP (mean reversion)
-                                side = "UP"
-                                price = up_ask
-                                decision_reason = f"Small Gap Mean Reversion (gap:{abs(price_diff)*100:.1f}¢, 1h trend:{trend_1h}, vel:{velocity:.0f})"
-                            elif trend_1h in ["S-UP", "M-UP"] and rsi_1m < 60:
-                                # Strong/Medium uptrend with low RSI -> UP (trend continuation)
-                                side = "UP"
-                                price = up_ask
-                                decision_reason = f"Small Gap Trend Follow (gap:{abs(price_diff)*100:.1f}¢, 1h trend:{trend_1h}, rsi:{rsi_1m:.1f})"
-                            elif atr > 100:
-                                # High volatility ATR -> follow current winner
-                                side = winner
-                                price = up_ask if side == "UP" else dn_ask
-                                decision_reason = f"Small Gap Volatility Follow (gap:{abs(price_diff)*100:.1f}¢, atr:{atr:.1f})"
-                            else:
-                                # Default: reversal for small gaps
-                                side = "DOWN" if winner == "UP" else "UP"
-                                price = up_ask if side == "UP" else dn_ask
-                                decision_reason = f"Small Gap Reversal (gap:{abs(price_diff)*100:.1f}¢, winner:{winner})"
-                            
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY small gap decision -> {side} ({decision_reason})[/]")
-                            
-                            # Reversal: Identify who is winning CURRENTLY (proxy for "just won")
-                            # and pick the opposite for the next window.
-                            cur_up = self.market_data.get("up_price", 0.5)
-                            cur_dn = self.market_data.get("down_price", 0.5)
-                            winner = "UP" if cur_up >= cur_dn else "DOWN"
-                            side = "DOWN" if winner == "UP" else "UP"
-                            price = up_ask if side == "UP" else dn_ask
-                            decision_reason = f"Reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner})"
-                            self.call_from_thread(self.log_msg, f"[dim]PRE-BUY reversal (gap:{abs(price_diff)*100:.1f}¢ | Winner:{winner}) -> {side}[/]")
-                    
-                    # ADV mode special handling for small gaps
-                    if self.mom_buy_mode == "ADV" and side is None:
-                        self.call_from_thread(self.log_msg, f"[dim]PRE-BUY adv skip (gap:{abs(price_diff)*100:.1f}¢) -> Deferring[/]")
+                    self.safe_call(self.log_msg, f"[dim]DEBUG PRE-BUY: UP ask={up_ask*100:.1f}¢, DN ask={dn_ask*100:.1f}¢, diff={price_diff*100:.1f}¢, abs={abs(price_diff)*100:.1f}¢, ATR={_atr:.1f} (floor={_atr_floor:.1f})[/]")
+
+                    # In suspended (mid-round lockout) mode: show prices but skip all scanner/execution logic
+                    if self.mid_window_lockout:
                         return
 
-                    # Execute the trade if we have a decision
-                    if side and price:
-                        token_id = d.get("up_id" if side == "UP" else "down_id")
-                        ok, msg = self.trade_executor.execute_buy(
-                            is_live, side, bet_size, price, token_id,
-                            context={}, reason=f"PreBuy_{decision_reason}"
-                        )
-                        if ok:
-                            pending = {"side": side, "entry": price, "cost": bet_size, "algorithm": "BullFlag"}
-                            self.session_total_trades += 1 # Pre-Buy Trade
-                            def _commit(p=pending, s=side, pr=price, m=msg, bs=bet_size):
-                                self.pre_buy_pending = p
-                                self.risk_manager.register_bet(bs)
-                                self.log_msg(
-                                    f"PRE-BUY NEXT {s} @ {pr*100:.1f}¢[dim] — "
-                                    f"${bs:.2f} committed. {decision_reason}. Holding for next window ({next_slug})[/]"
+                    any_pre_buy_fired = False
+                    
+                    manual_side = getattr(self, "manual_pre_buy_queue", None)
+                    if manual_side:
+                        self.manual_pre_buy_queue = None
+                        class _ManualScan:
+                            def get_signal(self, ctx): return f"PRE_BUY_{manual_side}|Manual Admin Override"
+                        scanner_items = [("Manual", _ManualScan())]
+                    else:
+                        scanner_items = self.scanners.items()
+                        
+                    for algo_id, scanner in scanner_items:
+                        if algo_id != "Manual":
+                            # Only run scanners that are enabled in the UI
+                            try:
+                                # Special handling for Momentum since it has different checkbox structure
+                                if algo_id.lower() == "momentum":
+                                    checkbox_id = "#cb_mom"
+                                else:
+                                    checkbox_id = f"#cb_{algo_id.lower()}"
+                                    
+                                checkbox_value = self.query_one(checkbox_id).value
+                                if not checkbox_value:
+                                    continue
+                            except Exception as e:
+                                # If checkbox not found, skip this scanner
+                                continue
+
+                        # Inject current runtime settings into scanner before calling
+                        if hasattr(scanner, "buy_mode"):
+                            scanner.buy_mode = self.mom_buy_mode
+                        if hasattr(scanner, "adv_settings"):
+                            scanner.adv_settings = self.mom_adv_settings
+
+                        # Clear any stale BET_ signal so the pre-buy block isn't bypassed
+                        # (in PRE mode mid-window BET_ signals are blocked from executing
+                        # but still stored on the scanner — they'd short-circuit get_signal)
+                        if hasattr(scanner, "triggered_signal") and scanner.triggered_signal:
+                            if "BET_" in str(scanner.triggered_signal):
+                                scanner.triggered_signal = None
+                                if hasattr(scanner, "pre_buy_triggered"):
+                                    scanner.pre_buy_triggered = False
+
+                        signal = scanner.get_signal(context)
+                        if getattr(scanner, "last_skip_reason", None):
+                            self.safe_call(self.log_msg, f"[dim]{algo_id} PRE-BUY skipped: {scanner.last_skip_reason}[/]")
+                            scanner.last_skip_reason = None # Clear
+
+                        if signal.startswith("PRE_BUY_"):
+                            any_pre_buy_fired = True
+                            # Parsed format: PRE_BUY_UP|Reason
+                            parts = signal.split("|")
+                            action = parts[0]
+                            reason = parts[1] if len(parts) > 1 else "Scanner Signal"
+                            
+                            side = "UP" if "UP" in action else "DOWN"
+                            price = up_ask if side == "UP" else dn_ask
+                            
+                            token_id = d.get("up_id" if side == "UP" else "down_id")
+                            
+                            # Use variables cached from outside the thread
+                            if is_pct:
+                                pre_bs = self.risk_manager.window_start_bankroll * (ui_amt / 100.0)
+                            else:
+                                pre_bs = ui_amt
+                                
+                            weight = self.scanner_weights.get(algo_id[:3].upper(), 1.0)
+                            pre_bs = pre_bs * weight
+                            
+                            # Apply Confidence Tiers
+                            t4 = self.market_data_manager.trend_1h
+                            trend_bad = (t4 != 'NEUTRAL' and side not in t4)
+                            if trend_bad:
+                                pre_bs = 1.00 # Drop to minimum bet on low confidence
+                            if pre_bs > self.risk_manager.risk_bankroll: pre_bs = self.risk_manager.risk_bankroll
+                            if pre_bs < 1.00: pre_bs = 1.00
+
+                            self.safe_call(self.log_msg, f"[dim]{algo_id} PRE-BUY Trigger: {side} ({reason})[/]")
+
+                            try:
+                                ok, msg, act_shares, act_price = self.trade_executor.execute_buy(
+                                    is_live, side, pre_bs, price, token_id,
+                                    context={}, reason=f"{algo_id}_PreBuy_{reason}"
                                 )
-                                self.update_balance_ui()
-                            self.call_from_thread(_commit)
-                        else:
-                            self.call_from_thread(self.log_msg, f"[bold red]🚀 PRE-BUY FAILED:[/] {msg}")
+                                if ok:
+                                    self.session_total_trades += 1
+                                    self.risk_manager.register_bet(pre_bs)
+                                    # SET IMMEDIATELY to avoid race condition with window start promotion
+                                    self.pre_buy_pending = {"side": side, "entry": act_price, "cost": pre_bs, "shares": act_shares, "algorithm": algo_id, "slug": next_slug, "reason": reason}
+                                    self.safe_call(self.log_msg, f"[bold green]🚀 PRE-BUY EXECUTED:[/] {side} @ {act_price*100:.1f}¢ | ${pre_bs:.2f} committed. {reason}. Holding for next window ({next_slug})[/]")
+                                    self.safe_call(self.update_balance_ui)
+                                else:
+                                    self.safe_call(self.log_msg, f"[bold red]🚀 PRE-BUY FAILED:[/] {msg}")
+                            except Exception as e:
+                                import traceback
+                                err_info = traceback.format_exc()
+                                self.safe_call(self.log_msg, f"[bold red]🚀 PRE-BUY THREAD CRASHED:[/] {e}\n{err_info}", level="ERROR")
+                    
+                    if not any_pre_buy_fired:
+                        self.safe_call(self.log_msg, f"[dim]🚀 PRE-BUY: No scanner fired a signal (mode={self.mom_buy_mode})[/]")
+
+                    # Always print detailed PBN analysis if generated during this run, regardless of execution
+                    for scanner_name in ["Momentum", "MM2"]:
+                        if scanner_name in self.scanners and hasattr(self.scanners[scanner_name], 'pbn_analysis') and self.scanners[scanner_name].pbn_analysis:
+                            analysis = self.scanners[scanner_name].pbn_analysis
+                            self.safe_call(self.log_msg, f"[DEBUG] Found {scanner_name} PBN analysis with {len(analysis.get('factors', []))} factors")
+                            
+                            # Use safe dictionary fallbacks
+                            d_decision = analysis.get('decision') or 'SKIP'
+                            d_conf = analysis.get('confidence') or 'NONE'
+                            d_score = analysis.get('net_score', 0)
+                            d_up = analysis.get('up_score', 0)
+                            d_dn = analysis.get('down_score', 0)
+                            d_reason = analysis.get('reason', 'None')
+                            d_factors = analysis.get('factors', [])
+
+                            self.safe_call(self.log_msg, f"[bold cyan]🧠 PBN MULTI-FACTOR ANALYSIS:[/]")
+                            self.safe_call(self.log_msg, f"[dim]  Decision: {d_decision} | Confidence: {d_conf} | Score: {d_score:+d}[/]")
+                            self.safe_call(self.log_msg, f"[dim]  UP Score: {d_up} | DOWN Score: {d_dn}[/]")
+                            if d_factors:
+                                self.safe_call(self.log_msg, f"[dim]  Factors:[/]")
+                                for factor in d_factors:
+                                    self.safe_call(self.log_msg, f"[dim]    • {factor}[/]")
+                            self.safe_call(self.log_msg, f"[dim]  Final Reason: {d_reason}[/]")
+                            self.safe_call(self.log_msg, f"")
+                            
+                            # Clear it so it doesn't print on subsequent aborted runs
+                            self.scanners[scanner_name].pbn_analysis = None
+                    
                 except Exception as e:
-                    self.call_from_thread(self.log_msg, f"[dim]🚀 PRE-BUY error: {e}[/]")
+                    import traceback
+                    tb = traceback.format_exc()
+                    self.safe_call(self.log_msg, f"[bold red]🚀 PRE-BUY THREAD CRASH:[/]\n{tb}", level="ERROR")
 
             threading.Thread(target=_do_prebuy, daemon=True).start()
         # ----------------------------------------------------------
@@ -735,7 +1191,7 @@ class TradeEngineMixin:
             self.window_settled = True
             self.trigger_settlement()
 
-    def _check_bankroll_exhaustion(self):
+    def _check_bankroll_exhaustion(self, net_pnl=0):
         """After each settlement, freeze the bot if it can no longer afford another bet."""
         from .ui_modals import BankrollExhaustedModal
         if self.halted: return
@@ -747,7 +1203,7 @@ class TradeEngineMixin:
 
         # Only freeze if a bet was actually placed this window (we lost) AND
         # the bankroll can no longer cover the minimum bet size.
-        had_bet = bool(self.window_bets)
+        had_bet = bool(self.window_bets) and net_pnl < 0
         cannot_afford = br < max(min_bet, hard_floor)
 
         if had_bet and cannot_afford:
@@ -786,16 +1242,43 @@ class TradeEngineMixin:
         
         if up_bid >= 0.90:
             winner = "UP"
-            reason = "UP side won decisively"
+            reason = "decisive"
         elif dn_bid >= 0.90:
             winner = "DOWN"
-            reason = "DOWN side won decisively"
+            reason = "decisive"
         else:
             winner = "UP" if btc_p >= btc_o else "DOWN"
             reason = f"BTC Move (${btc_p:,.2f} vs Open ${btc_o:,.2f})"
 
-        self.log_msg(f"SETTLED: [bold white]{winner}[/] | [dim]{reason}[/]", level="MONEY")
-        payout, net_pnl = self.sim_broker.settle_window(winner)
+        self.log_msg(f"SETTLED: [bold white]{winner}[/] ({reason})", level="MONEY")
+        
+        # 2. Performance Reporting (v5.9.5 Unified Fix)
+        # Calculate performance from local trackers to ensure Accuracy/Revenue is 100% correct in both SIM/LIVE.
+        current_slug = f"btc-updown-5m-{self.market_data.get('start_ts', 0)}"
+        
+        # Only count bets that belong to THIS window (matches slug)
+        window_invested = sum(info.get("cost", 0) for info in self.window_bets.values() if info.get("slug") == current_slug or not info.get("slug"))
+        
+        # settlement_pay = revenue from shares that lasted until the final second (1$ per winning share)
+        settlement_pay = sum((info.get("cost", 0)/info.get("entry", 0.5)) for info in self.window_bets.values() if not info.get("closed") and info.get("side") == winner and (info.get("slug") == current_slug or not info.get("slug")))
+        
+        total_window_revenue = settlement_pay + self.window_realized_revenue
+        net_pnl = total_window_revenue - window_invested
+        
+        # Payout for broker balance / risk refilling (shares at $1.00)
+        payout = settlement_pay
+        # Note: self.sim_broker.settle_window handles redundant local SimBroker math 
+        self.sim_broker.settle_window(winner) 
+        
+        # REFILL RISK BANKROLL! (v5.9.6 Fix)
+        self.risk_manager.register_settlement(payout, self.window_realized_revenue, grow=self.grow_riskbankroll)
+        self.update_balance_ui()
+        
+        # Log to console for visibility
+        color = "green" if net_pnl >= 0 else "red"
+        is_live = self.query_one("#cb_live").value
+        main_bal = self.live_broker.balance if is_live else self.sim_broker.balance
+        self.log_msg(f"PnL: [bold {color}]{'+' if net_pnl >= 0 else ''}${net_pnl:.2f}[/] | Bal: ${main_bal:.2f} | Revenue: [bold gold3]${total_window_revenue:.2f}[/]", level="MONEY")
         
         # BullFlag Research Logging - Log trades with settings
         for info in self.window_bets.values():
@@ -823,7 +1306,7 @@ class TradeEngineMixin:
         is_live = self.query_one("#cb_live").value
         # Accuracy: Count settlement winners
         for info in self.window_bets.values():
-            if not info.get("closed") and info.get("side") == winner:
+            if not info.get("closed") and info.get("side") == winner and (info.get("slug") == current_slug or not info.get("slug")):
                 self.session_win_count += 1
         
         self.session_windows_settled += 1
@@ -840,23 +1323,12 @@ class TradeEngineMixin:
         self._add_risk_revenue(payout)
 
         # --- BANKROLL EXHAUSTION CHECK ---
-        self._check_bankroll_exhaustion()
+        self._check_bankroll_exhaustion(net_pnl=net_pnl)
         if self.halted: return
 
-        # --- LIVE SETTLEMENT REFILL ---
-        if is_live:
-            live_win_payout = 0.0
-            for info in self.window_bets.values():
-                if info.get("closed"): continue
-                if info["side"] != winner: continue
-                entry = info.get("entry", 0)
-                cost  = info.get("cost", 0)
-                if entry > 0 and cost > 0:
-                    shares = cost / entry
-                    live_win_payout += shares * 1.00  # Settles at $1.00/share
-            if live_win_payout > 0:
-                self.log_msg(f"LIVE Settlement Refill: +${live_win_payout:.2f} (winning shares x $1.00)", level="MONEY")
-                self._add_risk_revenue(live_win_payout)
+        # 5. [REMOVED] Bankroll Refill Logic
+        # Bankrolls now organically shrink during standard sessions. Refills
+        # should only happen when a trade wins and explicitly returns funds via _add_risk_revenue.
 
         self.risk_manager.reset_window(); self.last_second_exit_triggered = False
         self.update_balance_ui(); self.window_bets.clear()
@@ -931,13 +1403,14 @@ class TradeEngineMixin:
         self.risk_manager.risk_bankroll += amount
         self.window_realized_revenue += amount  # track for settlement log
 
-        # 2. In LIVE mode: allow target_bankroll to grow with wins so the bankroll
-        #    compounds. Without this, every win was silently clamped back to the
-        #    initial target set at session start.
-        #    In SIM mode: keep the hard clamp so the sim can't exceed its theoretical cap.
-        if is_live:
+        # 2. Allow compounding if grow_riskbankroll is True.
+        # Otherwise, clamp risk_bankroll back down to the target ceiling.
+        if getattr(self, "grow_riskbankroll", False):
             if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
+                old_target = self.risk_manager.target_bankroll
                 self.risk_manager.target_bankroll = self.risk_manager.risk_bankroll
+                if is_live:
+                    self.log_msg(f"[bold green]Compounding:[/] Bankroll Target Ceiling rose from {old_target:.2f} -> {self.risk_manager.target_bankroll:.2f}")
         else:
             if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
                 self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
@@ -970,16 +1443,15 @@ class TradeEngineMixin:
         ctx = {
             'signal_price': self.market_data.get('btc_price', 0),
             'rsi': self.market_data.get('rsi', 0),
-            'trend': self.market_data_manager.trend_4h,
+            'trend': self.market_data_manager.trend_1h,
             'risk_bal': self.risk_manager.risk_bankroll
         }
         
-        ok, msg = self.trade_executor.execute_buy(is_l, side, val, pr or 0.5, tid, context=ctx, reason="Manual")
+        ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, side, val, pr or 0.5, tid, context=ctx, reason="Manual")
         if ok:
             self.session_total_trades += 1 # Manual Buy
             self.log_msg(f"[bold {'red' if is_l else 'green'}]{msg}[/]")
-            if self.risk_initialized: self.risk_manager.register_bet(val)
-            self.window_bets[f"Manual_{time.time()}"] = {"side":side,"entry":pr or 0.5,"cost":val}
+            self._handle_successful_buy("Manual", side, val, act_shares, act_price, is_l)
         else:
             self.log_msg(f"[bold red]MANUAL BUY FAILED:[/] {msg}")
             
@@ -990,8 +1462,18 @@ class TradeEngineMixin:
         tid = self.market_data["up_id" if side=="UP" else "down_id"]
         # Use simple ternary for bid to avoid confusion
         cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
-        lp = cbid if not is_l else max(0.02, cbid-0.05)
+        lp = cbid if not is_l else max(0.02, cbid-0.02)
         
+        # Cancel resting limit orders
+        if is_l:
+            try: use_tranche = self.query_one("#cb_tranche").value
+            except: use_tranche = False
+            if use_tranche:
+                for info in self.window_bets.values():
+                    if info.get("side") == side and info.get("limit_order_id") and not info.get("closed"):
+                        self.trade_executor.live.cancel_limit_order(info["limit_order_id"])
+                        self.log_msg(f"[dim]Cancelled resting Limit Order {info['limit_order_id'][-6:]} for Manual Dump[/]")
+
         # Debug shares in sim mode
         if not is_l:
             s_shares = self.sim_broker.shares.get(side, 0.0)
@@ -1015,3 +1497,77 @@ class TradeEngineMixin:
             self.log_msg(f"[bold red]MANUAL SELL FAILED:[/] {msg}")
             
         self.update_balance_ui(); self.update_sell_buttons()
+
+    def generate_window_briefing(self):
+        """Generates a 3-line start-of-window macroscopic analysis and directional guess."""
+        try:
+            md = self.market_data
+            
+            # Trend and RSI
+            trend_1h = md.get("trend_1h", "NEUTRAL")
+            rsi_1m = md.get("rsi_1m", getattr(self.market_data_manager, "rsi_1m", 50))
+            
+            if trend_1h in ["S-UP", "M-UP", "W-UP"]:
+                trend_str = f"[bold green]BULLISH[/] ({trend_1h})"
+            elif trend_1h in ["S-DOWN", "M-DOWN", "W-DOWN"]:
+                trend_str = f"[bold red]BEARISH[/] ({trend_1h})"
+            else:
+                trend_str = f"[bold yellow]NEUTRAL[/] ({trend_1h})"
+                
+            if rsi_1m > 70:
+                rsi_str = f"[bold red]Overbought ({rsi_1m:.0f})[/]"
+            elif rsi_1m < 30:
+                rsi_str = f"[bold green]Oversold ({rsi_1m:.0f})[/]"
+            else:
+                rsi_str = f"[dim]Neutral ({rsi_1m:.0f})[/]"
+                
+            # Context
+            atr = md.get("atr_5m", 0)
+            if atr > 40: vol_str = f"[bold red]HIGH[/] (ATR={atr:.0f})"
+            elif atr < 20: vol_str = f"[bold green]LOW[/] (ATR={atr:.0f})"
+            else: vol_str = f"[bold yellow]MODERATE[/] (ATR={atr:.0f})"
+            
+            btc_vel = getattr(self.market_data_manager, "btc_velocity", 0)
+            if btc_vel > 20: btc_str = f"Spiking [bold green]UP (+${btc_vel:.0f})[/]"
+            elif btc_vel < -20: btc_str = f"Dropping [bold red]DN (${btc_vel:.0f})[/]"
+            else: btc_str = f"Stable (${btc_vel:.0f})"
+            
+            # Market
+            odds = md.get("odds_score", 0)
+            if odds > 5: odds_str = f"[bold green]favors UP (+{odds:.1f}¢)[/]"
+            elif odds < -5: odds_str = f"[bold red]favors DOWN ({odds:.1f}¢)[/]"
+            else: odds_str = f"balanced ({odds:.1f}¢)"
+            
+            up_ask = md.get("up_ask", 0)
+            dn_ask = md.get("down_ask", 0)
+            imb = (up_ask - dn_ask) * 100
+            
+            if imb > 2: imb_str = f"[bold red]UP premium (+{imb:.1f}¢)[/]"
+            elif imb < -2: imb_str = f"[bold green]DN premium ({imb:.1f}¢)[/]"
+            else: imb_str = f"balanced spread ({imb:.1f}¢)"
+            
+            # Guess scoring
+            up_score, dn_score = 0, 0
+            if "UP" in trend_1h: up_score += 1
+            if "DOWN" in trend_1h: dn_score += 1
+            if rsi_1m < 30: up_score += 1
+            if rsi_1m > 70: dn_score += 1
+            if odds > 5: up_score += 1
+            if odds < -5: dn_score += 1
+            if imb < -2: up_score += 1
+            if imb > 2: dn_score += 1
+            
+            net = up_score - dn_score
+            md["net_guess_score"] = net
+            if net >= 2: guess = "[bold green]UP[/]"
+            elif net <= -2: guess = "[bold red]DOWN[/]"
+            else: guess = "[bold yellow]NEUTRAL / CHOP[/]"
+
+            self.log_msg("\n[bold purple]📊 WINDOW BRIEFING (T-05:00)[/]")
+            self.log_msg(f"[bold purple]1. Trend:[/] 1H is {trend_str}, 1m RSI is {rsi_str}.")
+            self.log_msg(f"[bold purple]2. Context:[/] BTC is {btc_str}, Volatility is {vol_str}.")
+            self.log_msg(f"[bold purple]3. Market:[/] Odds {odds_str}, Ask is {imb_str}.")
+            self.log_msg(f"[bold purple]🔮 MY GUESS:[/] {guess}")
+            self.log_msg("[bold purple]────────────────────────────────────[/]\n")
+        except Exception as e:
+            self.log_msg(f"[dim]Briefing Error: {e}[/]")

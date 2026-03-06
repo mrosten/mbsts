@@ -1,0 +1,49 @@
+# Polymarket Sniper V5 — Session Log
+# Generated: 2026-03-02 04:09:20
+# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.
+#
+# SNAPSHOT FIELDS:
+#   Timestamp      — Wall-clock time of snapshot
+#   SimBal         — Simulated wallet balance (USD)
+#   LiveBal        — Live Polymarket wallet balance (USD)
+#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)
+#   TimeRem        — Time remaining in current 5-min window (MM:SS)
+#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback
+#   BTC_Open       — BTC price at window open (Kraken REST)
+#   BTC_Diff       — BTC_Price minus BTC_Open (USD)
+#   BTC_Range      — Intra-window high-low price range (USD)
+#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)
+#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)
+#   Trend_1H       — 1-hour trend direction (same scale)
+#   RSI_1m         — 14-period RSI on 1-minute Binance candles
+#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)
+#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)
+#   Sig_Cobra      — Cobra scanner signal this tick
+#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick
+#   Sig_Flag       — BullFlag scanner signal this tick
+#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)
+#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL
+#   Active_Scanners— Count of scanners firing a BET signal this tick
+#   UP_Price       — Polymarket UP option midpoint price
+#   DN_Price       — Polymarket DOWN option midpoint price
+#   UP_Bid         — Polymarket UP option best bid
+#   DN_Bid         — Polymarket DOWN option best bid
+#   Shares_UP      — Current UP shares held
+#   Shares_DN      — Current DOWN shares held
+#
+# TRADE_EVENT FIELDS (interleaved rows):
+#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note
+Timestamp,SimBal,LiveBal,RiskBankroll,TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,Master_Score,Master_Status,Active_Scanners,UP_Price,DN_Price,UP_Bid,DN_Bid,Shares_UP,Shares_DN
+2026-03-02 04:09:22,100.00,94.74,100.00,00:38,0.00,0.00,0.00,0.00,0,NEUTRAL,NEUTRAL,50.0,0.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.500,0.500,0.500,0.500,0.00,0.00
+2026-03-02 04:09:38,100.00,94.74,100.00,00:22,66199.80,66550.00,-350.20,373.01,-99.9,S-DOWN,S-UP,30.8,144.04,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.001,1.000,0.001,1.000,0.00,0.00
+2026-03-02 04:09:54,100.00,94.74,100.00,00:06,66196.90,66550.00,-353.10,373.01,-99.2,S-DOWN,S-UP,28.5,144.04,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.008,0.996,0.008,1.000,0.00,0.00
+TRADE_EVENT,2026-03-02 04:09:59,SETTLE,DOWN,0.00,1.00000,1.00000,0.00000,0.00,0.00,N/A,0.00,100.00,Win: DOWN | PnL: 0.00
+2026-03-02 04:10:10,100.00,94.74,100.00,04:50,66170.90,66179.90,-9.00,9.00,-11.0,S-DOWN,S-UP,27.1,139.87,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.445,0.555,0.450,0.560,0.00,0.00
+TRADE_EVENT,2026-03-02 04:10:17,BUY,DOWN,1.00,0.56000,66153.40000,-66152.84000,1.79,27.11,S-DOWN,100.00,99.00,Pending: BET_DOWN_MOM|Leader @ 10s: DOWN 55.0¢
+2026-03-02 04:10:26,99.00,94.74,99.00,04:34,66055.30,66179.90,-124.60,124.60,-38.0,S-DOWN,S-UP,24.2,157.13,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6605905.0c > Max 80.0c,-1,BUY_DN,1,0.310,0.690,0.320,0.700,0.00,1.79
+2026-03-02 04:10:42,99.00,94.74,99.00,04:18,66066.10,66179.90,-113.80,124.60,-47.0,S-DOWN,S-UP,24.4,158.97,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6606470.0c > Max 80.0c,-1,BUY_DN,1,0.265,0.735,0.270,0.740,0.00,1.79
+2026-03-02 04:10:57,99.00,94.74,99.00,04:03,66079.50,66179.90,-100.40,124.60,-66.0,S-DOWN,S-UP,23.9,159.79,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6604801.0c > Max 80.0c,-1,BUY_DN,1,0.170,0.830,0.190,0.850,0.00,1.79
+2026-03-02 04:11:13,99.00,94.74,99.00,03:47,65903.70,66179.90,-276.20,276.20,-79.0,S-DOWN,S-UP,21.4,117.35,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6592381.0c > Max 80.0c,-1,BUY_DN,1,0.105,0.895,0.110,0.900,0.00,1.79
+2026-03-02 04:11:29,99.00,94.74,99.00,03:31,65946.50,66179.90,-233.40,276.20,-75.0,S-DOWN,S-UP,25.0,121.37,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6596631.0c > Max 80.0c,-1,BUY_DN,1,0.125,0.880,0.130,0.880,0.00,1.79
+2026-03-02 04:11:44,99.00,94.74,99.00,03:16,65986.40,66179.90,-193.50,276.20,-71.0,S-DOWN,S-UP,28.8,131.13,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6601510.0c > Max 80.0c,-1,BUY_DN,1,0.145,0.855,0.150,0.860,0.00,1.79
+2026-03-02 04:12:00,99.00,94.74,99.00,03:00,65992.40,66179.90,-187.50,276.20,-79.0,S-DOWN,S-UP,27.5,131.13,OFF,OFF,WAIT_COIL_DATA,SKIP|Price 6599815.0c > Max 80.0c,-1,BUY_DN,1,0.105,0.895,0.110,0.900,0.00,1.79

@@ -14,7 +14,8 @@ class TradingConfig:
     # Risk Management
     DEFAULT_RISK_PCT: float = 0.12
     STRONG_RISK_PCT: float = 0.20
-    MIN_BET: float = 5.50
+    MIN_BET: float = 1.00
+    MIN_LIMIT_ORDER_SIZE: float = 5.50
     MAX_BET_SESSION_CAP: float = 100.0
     LIVE_RISK_DIVISOR: int = 8  # 1/8th of balance for Live Mode
     

@@ -45,7 +45,8 @@ class MarketDataManager:
             "sling_signal": "OFF", "cobra_signal": "OFF", "flag_signal": "OFF",
             "master_score": 0, "master_status": "NEUTRAL", "active_scanners": 0,
             "trend_4h": "NEUTRAL", "trend_1h": "NEUTRAL",
-            "rsi_1m": 50.0, "atr_5m": 0.0, "odds_score": 0, "btc_dyn_rng": 0
+            "rsi_1m": 50.0, "atr_5m": 0.0, "odds_score": 0, "btc_dyn_rng": 0,
+            "vol_up": 0, "vol_dn": 0
         }
         self.chainlink_contract = None
         self.price_history = []
@@ -273,12 +274,14 @@ class MarketDataManager:
         up_ask, down_ask = 0.51, 0.51
         try:
             m = requests.get(f"https://gamma-api.polymarket.com/markets/slug/{slug}", timeout=2).json()
-            ids = json.loads(m["clobTokenIds"]); outs = json.loads(m["outcomes"])
+            ids = m["clobTokenIds"] if isinstance(m["clobTokenIds"], list) else json.loads(m["clobTokenIds"])
+            outs = m["outcomes"] if isinstance(m["outcomes"], list) else json.loads(m["outcomes"])
+            # self.log(f"[dim]Outcomes: {outs} | IDs: {[i[:6] for i in ids]}[/]")
             
             # Robust outcome check
             idx_up, idx_down = None, None
             for i, o in enumerate(outs):
-                o_low = o.lower()
+                o_low = str(o).lower()
                 if any(x in o_low for x in ["up", "yes", "above", "higher", "top"]):
                     idx_up = i
                 elif any(x in o_low for x in ["down", "no", "below", "lower", "bottom"]):
@@ -307,9 +310,44 @@ class MarketDataManager:
                 down_ask = f_da.result()
                 up_bid = f_ub.result()
                 down_bid = f_db.result()
+
+            # Volume at Open: BTC liquidity near the 5-min window open price (throttled 5s)
+            curr_t = time.time()
+            if curr_t - getattr(self, "last_vol_update", 0) > 5:
+                try:
+                    b_depth = requests.get(
+                        "https://api.binance.com/api/v3/depth",
+                        params={"symbol": "BTCUSDT", "limit": 1000},
+                        timeout=1.5
+                    ).json()
+
+                    open_p = self.market_data.get("btc_open", 0)
+
+                    if open_p > 0:
+                        # V-UP: bids AT or ABOVE open → buyers holding price green
+                        self.market_data["vol_up"] = sum(
+                            float(b[1]) for b in b_depth.get("bids", [])
+                            if float(b[0]) >= open_p
+                        )
+                        # V-DN: asks AT or BELOW open → sellers keeping price red
+                        self.market_data["vol_dn"] = sum(
+                            float(a[1]) for a in b_depth.get("asks", [])
+                            if float(a[0]) <= open_p
+                        )
+                    else:
+                        # Fallback: no open price yet, show whole book totals
+                        self.market_data["vol_up"] = sum(float(b[1]) for b in b_depth.get("bids", []))
+                        self.market_data["vol_dn"] = sum(float(a[1]) for a in b_depth.get("asks", []))
+
+                    self.last_vol_update = curr_t
+                except Exception as e:
+                    self.log(f"[yellow]Binance Vol Error: {e}[/]")
+
+            vol_up = self.market_data.get("vol_up", 0)
+            vol_dn = self.market_data.get("vol_dn", 0)
             
-        except Exception:
-            pass
+        except Exception as e:
+            self.log(f"[red]Polymarket Fetch Error ({slug}): {e}[/]")
         
         # Best Estimate of 'Current Price' is Midpoint or Bid/Ask
         def _best(b, a):
@@ -324,5 +362,7 @@ class MarketDataManager:
             "up_ask": up_ask,
             "down_ask": down_ask,
             "up_id": up_id, 
-            "down_id": down_id
+            "down_id": down_id,
+            "vol_up": vol_up,
+            "vol_dn": vol_dn
         }

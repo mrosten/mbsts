@@ -43,6 +43,7 @@ class SimBroker:
                     f"#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)\n"
                     f"#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)\n"
                     f"#   Sig_Cobra      — Cobra scanner signal this tick\n"
+                    f"#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick\n"
                     f"#   Sig_Flag       — BullFlag scanner signal this tick\n"
                     f"#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)\n"
                     f"#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL\n"
@@ -61,7 +62,7 @@ class SimBroker:
                     "Timestamp,SimBal,LiveBal,RiskBankroll,"
                     "TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,"
                     "Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,"
-                    "Sig_Slingshot,Sig_Cobra,Sig_Flag,"
+                    "Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,"
                     "Master_Score,Master_Status,Active_Scanners,"
                     "UP_Price,DN_Price,UP_Bid,DN_Bid,"
                     "Shares_UP,Shares_DN"
@@ -98,15 +99,16 @@ class SimBroker:
             f"{time_rem_str},{md['btc_price']:.2f},{md['btc_open']:.2f},{diff:.2f},{md.get('btc_dyn_rng',0):.2f},"
             f"{md.get('odds_score',0)},{md.get('trend_4h','NEUTRAL')},{md.get('trend_1h','NEUTRAL')},"
             f"{md.get('rsi_1m',50):.1f},{md.get('atr_5m',0):.2f},"
-            f"{md.get('sling_signal','OFF')},{md.get('cobra_signal','OFF')},{md.get('flag_signal','OFF')},"
+            f"{md.get('sling_signal','OFF')},{md.get('cobra_signal','OFF')},{md.get('coiled_cobra_signal','OFF')},{md.get('flag_signal','OFF')},"
             f"{md.get('master_score',0)},{md.get('master_status','NEUTRAL')},{md.get('active_scanners',0)},"
             f"{md['up_price']:.3f},{md['down_price']:.3f},{md['up_bid']:.3f},{md['down_bid']:.3f},"
             f"{self.shares['UP']:.2f},{self.shares['DOWN']:.2f}"
         )
         self.write_to_log(line)
 
-    def buy(self, side, usd_amount, price, context=None, reason="Manual"):
-        if usd_amount > self.balance: return False, "Insufficient Funds"
+    def buy(self, side, usd_amount, price, context=None, reason="Manual", is_pre_buy=False):
+        if price <= 0 or price >= 1: return False, "Invalid price", 0.0, 0.0
+        if usd_amount > self.balance: return False, "Insufficient Funds", 0.0, 0.0
         shares = usd_amount / price
         self.balance -= usd_amount
         
@@ -118,17 +120,22 @@ class SimBroker:
             self.shares[side] += shares
 
         self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
-        return True, f"Bought {shares:.2f} {side} @ {price*100:.1f}¢ | Cost: ${usd_amount:.2f} ({reason})"
+        return True, f"Bought {shares:.2f} {side} @ {price*100:.1f}¢ | ${usd_amount:.2f}", shares, price
 
-    def sell(self, side, price, reason="Manual"):
-        shares = self.shares[side]
+    def sell(self, side, price, reason="Manual", size=None):
+        shares = self.shares[side] if size is None else size
         if shares <= 0: return False, "No shares", 0.0
         revenue = shares * price
         self.balance += revenue
         self.revenue_this_window += revenue
-        self.shares[side] = 0.0
+        
+        if size is None:
+            self.shares[side] = 0.0
+        else:
+            self.shares[side] -= size
+            
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
-        return True, f"Sold {shares:.2f} {side} for ${revenue:.2f} ({reason})", revenue
+        return True, f"Sold {shares:.2f} {side} @ {price*100:.1f}¢ (${revenue:.2f})", revenue
     def settle_window(self, winning_side):
         winning_shares = self.shares[winning_side]
         payout = winning_shares * 1.00
@@ -212,22 +219,45 @@ class LiveBroker:
                 ctx['main_bal'] = main_bal
 
                 self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
-                return True, f"✅ LIVE BUY {side} | Fill: {actual_price*100:.1f}¢ | Cost: ${actual_cost_usd:.2f} | Size: {size:.2f}"
+                return True, f"Bought {size:.2f} {side} (LIVE) @ {actual_price*100:.1f}¢ | ${actual_cost_usd:.2f}", size, actual_price
             else:
                 err = r.get('errorMsg') or str(r)
                 self.sim_broker.write_to_log(f"LIVE_BUY_FAIL: {err}")
-                return False, f"Live Fail: {err}"
+                return False, f"Live Fail: {err}", 0.0, 0.0
         except Exception as e:
-            return False, f"Err: {e}"
+            return False, f"Err: {e}", 0.0, 0.0
 
-    def sell(self, side, token_id, limit_price=0.02, best_bid=None, reason="Manual"):
+    def place_limit_sell(self, side, token_id, size, limit_price):
+        if not self.client or not token_id: return False, "Client Error"
+        try:
+            o_args = OrderArgs(price=limit_price, size=size, side="SELL", token_id=token_id)
+            r = self.client.post_order(self.client.create_order(o_args))
+            if r.get("success") or r.get("orderID"):
+                return True, r.get("orderID")
+            return False, r.get('errorMsg') or str(r)
+        except Exception as e:
+            return False, str(e)
+            
+    def cancel_limit_order(self, order_id):
+        if not self.client or not order_id: return False, "No Client/Order ID"
+        try:
+            r = self.client.cancel_order(order_id)
+            if r and (str(r).lower() == "canceled" or (isinstance(r, dict) and r.get("success"))):
+                return True, "Canceled"
+            # It might also return a list of canceled orders, etc.
+            return True, "Cancel sent"
+        except Exception as e:
+            return False, str(e)
+
+    def sell(self, side, token_id, limit_price=0.02, best_bid=None, reason="Manual", size=None):
         if not self.client or not token_id: return False, "Client/Token Error", 0.0
         try:
-            b = self.client.get_balance_allowance(BalanceAllowanceParams(asset_type="CONDITIONAL", token_id=token_id))
-            shares = float(b.get("balance", 0)) / 10**6
-            if shares <= 0.001: return False, "No Live Pos", 0.0
-            
-            size = math.floor(shares * 100) / 100
+            if size is None:
+                b = self.client.get_balance_allowance(BalanceAllowanceParams(asset_type="CONDITIONAL", token_id=token_id))
+                shares = float(b.get("balance", 0)) / 10**6
+                if shares <= 0.001: return False, "No Live Pos", 0.0
+                size = math.floor(shares * 100) / 100
+                
             if size <= 0: return False, "Size too small", 0.0
 
             val_log = f"Selling {size} @ Limit ${limit_price}"
@@ -241,7 +271,7 @@ class LiveBroker:
                 if best_bid and best_bid > limit_price: eff_price = best_bid
                 
                 proceeds = size * eff_price
-                msg = f"✅ LIVE SOLD {side}: {size:.2f} Shares @ ${eff_price:.2f} (Total: ${proceeds:.2f})"
+                msg = f"Sold {size:.2f} {side} (LIVE) @ {eff_price*100:.1f}¢ (${proceeds:.2f})"
                 self.sim_broker.write_to_log(f"TRADE_EVENT,{datetime.now()},LIVE_SELL,{side},Shares:{size},Price:{eff_price},Total:{proceeds},{reason}")
                 self.update_balance()
                 return True, msg, proceeds
@@ -259,17 +289,15 @@ class TradeExecutor:
         self.risk = risk_manager
         
     def execute_buy(self, is_live, side, amount, price, token_id=None, context=None, reason=""):
-        if amount <= 0: return False, "Zero amount"
+        if amount <= 0: return False, "Zero amount", 0.0, 0.0
         if is_live:
-            if not token_id: return False, "No Token ID"
-            success, msg = self.live.buy(side, amount, price, token_id, context=context, reason=reason)
-            return success, msg
+            if not token_id: return False, "No Token ID", 0.0, 0.0
+            return self.live.buy(side, amount, price, token_id, context=context, reason=reason)
         else:
-            success, msg = self.sim.buy(side, amount, price, context=context, reason=reason)
-            return success, msg
+            return self.sim.buy(side, amount, price, context=context, reason=reason)
 
-    def execute_sell(self, is_live, side, token_id, limit_price, best_bid, reason=""):
+    def execute_sell(self, is_live, side, token_id, limit_price, best_bid, reason="", size=None):
         if is_live:
-             return self.live.sell(side, token_id, limit_price=limit_price, best_bid=best_bid, reason=reason)
+             return self.live.sell(side, token_id, limit_price=limit_price, best_bid=best_bid, reason=reason, size=size)
         else:
-             return self.sim.sell(side, limit_price, reason=reason)
+             return self.sim.sell(side, limit_price, reason=reason, size=size)
