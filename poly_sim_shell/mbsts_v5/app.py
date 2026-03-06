@@ -621,11 +621,11 @@ class SniperApp(TradeEngineMixin, App):
                 self.save_settings()
             elif cmd == "grow_riskbankroll=false":
                 self.grow_riskbankroll = False
-                self.log_msg("[bold red]Admin Command:[/] Bankroll Compounding DISABLED (Hard Cap Active).")
+                self.log_msg("SETTING: Bankroll Compounding | Status: OFF (Hard Cap Active)", level="SYS")
                 self.save_settings()
             elif cmd == "freeze=true":
                 self.halted = True
-                self.log_msg("[bold red]Admin Command:[/] MANUAL FREEZE ACTIVATED.")
+                self.log_msg("SYSTEM: Manual Freeze | Status: ACTIVATED", level="SYS")
                 self.push_screen(ManualFreezeModal(self))
             elif cmd == "fetchpre":
                 self.log_msg("[bold cyan]Admin Command:[/] Fetching Next Window Prices...")
@@ -728,7 +728,7 @@ class SniperApp(TradeEngineMixin, App):
                 try:
                     new_bal = float(event.input.value)
                     self.sim_broker.balance = new_bal
-                    self.log_msg(f"[bold gold3]Admin:[/] SIM Balance manually set to ${new_bal:.2f}")
+                    self.log_msg(f"SETTING: Sim Balance | Value: ${new_bal:.2f} | Source: MANUAL", level="SYS")
                     self.update_balance_ui()
                 except ValueError: pass
             return
@@ -763,7 +763,7 @@ class SniperApp(TradeEngineMixin, App):
                         self.risk_manager.risk_bankroll = max_allowed
                         self.risk_manager.target_bankroll = max_allowed
                     else:
-                        self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]${new_br:.2f}[/]")
+                        self.log_msg(f"SETTING: {name} | Value: ${new_br:.2f} | Status: UPDATED", level="SYS")
                         self.risk_manager.risk_bankroll = new_br
                         self.risk_manager.target_bankroll = new_br
                 except ValueError:
@@ -777,25 +777,24 @@ class SniperApp(TradeEngineMixin, App):
                 elif event.input.id == "inp_sl":
                     try:
                         self.committed_sl = float(val) / 100
-                        self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}%[/] (committed)")
+                        self.log_msg(f"SETTING: {name} | Value: {val}% | Status: COMMITTED", level="SYS")
                     except ValueError: pass
-                elif event.input.id == "inp_skeptic_odds":
                     try:
                         self.global_skeptic_odds = float(val)
-                        self.log_msg(f"[dim]Admin:[/] Set Odds Skepticism to [bold cyan]{val}c[/]")
+                        self.log_msg(f"SETTING: Odds Skepticism | Value: {val}c", level="SYS")
                     except ValueError: pass
                 elif event.input.id == "inp_skeptic_guess":
                     try:
                         self.global_skeptic_guess = float(val)
-                        self.log_msg(f"[dim]Admin:[/] Set Guess Skepticism to [bold cyan]{val}c[/]")
+                        self.log_msg(f"SETTING: Guess Skepticism | Value: {val}c", level="SYS")
                     except ValueError: pass
                 elif event.input.id == "inp_penalty_pct":
                     try:
                         self.penalty_percentage = float(val) / 100.0
-                        self.log_msg(f"[dim]Admin:[/] Set Bet Penalty to [bold cyan]{val}%[/]")
+                        self.log_msg(f"SETTING: Bet Penalty | Value: {val}%", level="SYS")
                     except ValueError: pass
                 else:
-                    self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}[/]")
+                    self.log_msg(f"SETTING: {name} | Value: {val}", level="SYS")
 
         # Auto-persist any setting that was just changed
         if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct"}:
@@ -984,8 +983,8 @@ class SniperApp(TradeEngineMixin, App):
         elif cid == "cb_bounce": name = "Bounce Entry Mode"
         
         if name:
-            state = "ENABLED" if event.value else "DISABLED"
-            self.log_msg(f"{state} {name}", level="ADMIN")
+            state = "ON" if event.value else "OFF"
+            self.log_msg(f"SETTING: {name} | Status: {state}", level="SYS")
 
     def log_msg(self, msg, level="INFO"):
         """
@@ -1003,8 +1002,20 @@ class SniperApp(TradeEngineMixin, App):
 
         # Color/Category Mapping
         lv = level.upper()
-        level_map = {"ADMIN": "ADM", "SCAN": "SCN", "TRADE": "TRD", "MONEY": "MON", "ERROR": "ERR", "INFO": "INF"}
-        short_lv = level_map.get(lv, lv[:3])
+        level_map = {
+            "ADMIN": "SYS", 
+            "SCAN": "SCAN", 
+            "TRADE": "EXEC", 
+            "MONEY": "RSLT", 
+            "ERROR": "ERR", 
+            "INFO": "INF",
+            "MARKET": "MARKET",
+            "VOLAT": "VOLAT",
+            "BIAS": "BIAS",
+            "STATS": "STATS",
+            "SYS": "SYS"
+        }
+        short_lv = level_map.get(lv, lv[:6])
         tag = f"[{short_lv}]"
         prefix = f"{ttg_str}{tag} "
 
@@ -1020,12 +1031,16 @@ class SniperApp(TradeEngineMixin, App):
 
         if is_profit:         display_msg = f"[bold green]{prefix}{msg}[/]"
         elif is_loss:         display_msg = f"[bold red]{prefix}{msg}[/]"
-        elif lv == "ADMIN":   display_msg = f"[bold skyblue]{prefix}{msg}[/]"
-        elif lv == "SCAN":    display_msg = f"[dim white]{prefix}{msg}[/]"
-        elif lv == "TRADE":   display_msg = f"[bold green]{prefix}{msg}[/]"
-        elif lv == "MONEY":   display_msg = f"[bold gold3]{prefix}{msg}[/]"
-        elif lv == "ERROR":   display_msg = f"[bold white on red] !!! {short_lv}: {msg} !!! [/]"
-        else:                display_msg = f"{prefix}{msg}" # Default INFO style
+        elif short_lv == "SYS":     display_msg = f"[bold skyblue]{prefix}{msg}[/]"
+        elif short_lv == "SCAN":    display_msg = f"[dim white]{prefix}{msg}[/]"
+        elif short_lv == "EXEC":    display_msg = f"[bold green]{prefix}{msg}[/]"
+        elif short_lv == "RSLT":    display_msg = f"[bold gold3]{prefix}{msg}[/]"
+        elif short_lv == "ERR":     display_msg = f"[bold white on red] !!! {short_lv}: {msg} !!! [/]"
+        elif short_lv == "MARKET":  display_msg = f"[bold cyan]{prefix}{msg}[/]"
+        elif short_lv == "VOLAT":   display_msg = f"[bold magenta]{prefix}{msg}[/]"
+        elif short_lv == "BIAS":    display_msg = f"[bold yellow]{prefix}{msg}[/]"
+        elif short_lv == "STATS":   display_msg = f"[bold white]{prefix}{msg}[/]"
+        else:                       display_msg = f"{prefix}{msg}" # Default INFO style
 
         self.query_one(RichLog).write(display_msg)
         

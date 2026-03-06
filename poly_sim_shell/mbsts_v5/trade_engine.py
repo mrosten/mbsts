@@ -158,7 +158,7 @@ class TradeEngineMixin:
                     main_bal = self.live_broker.balance if is_live else self.sim_broker.balance
                     self.risk_manager.risk_bankroll = main_bal
                     self.risk_manager.target_bankroll = main_bal
-                    self.log_msg(f"[bold gold3]Bankroll Auto-Synced:[/] ${main_bal:.2f} (Full Wallet Mode)", level="ADMIN")
+                    self.log_msg(f"SYNC: Wallet ${main_bal:.2f} [Mode: FULL]", level="SYS")
                 # ------------------------------------
 
                 self.window_settled = False # reset latch for new window
@@ -177,7 +177,8 @@ class TradeEngineMixin:
                     self.window_bets[key] = self.pre_buy_pending
                     # Note: Shares are promoted by sim_broker.promote_prebuy() above.
                     self.pre_buy_pending = None
-                    self.log_msg(f"[bold cyan]🚀 PRE-BUY {sd} transferred to new window — now under TP/SL monitoring{reason_str}[/]")
+                    action = "LONG" if sd == "UP" else "SHORT"
+                    self.log_msg(f"MONITORING: [{action}] Active | Status: TP/SL Engaged {reason_str}", level="SYS")
 
                 self.skipped_logs.clear() # reset the spam preventer
                 self.pending_bets.clear()  # discard any stale pending bets from last window
@@ -544,15 +545,14 @@ class TradeEngineMixin:
                             if "Price" in filter_reason and "Max" in filter_reason:
                                 # Max Price Block (Log once)
                                 if f"SKIP_MAX_{name}" not in self.skipped_logs:
-                                    self.log_msg(f"SKIP {name} | {filter_reason}", level="SCAN")
+                                    self.log_msg(f"SKIPPED: [{name.upper()}] | Reason: {filter_reason}", level="SCAN")
                                     self.skipped_logs.add(f"SKIP_MAX_{name}")
                             elif name not in self.pending_bets:
                                 # Price too low / Skepticism Block (Queue it)
                                 self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
                                 try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
                                 except: pass
-                                prefix = name[:3].upper()
-                                self.log_msg(f"QUEUED {name} {sd} | {filter_reason} [{prefix}]", level="SCAN")
+                                self.log_msg(f"PENDING: [{name.upper()}] | Direction: {sd} | {filter_reason}", level="SCAN")
                             continue
 
 
@@ -899,7 +899,9 @@ class TradeEngineMixin:
                 shares = sum((info["cost"]/info.get("entry", 0.5)) for info in self.window_bets.values() if info["side"] == side and not info.get("closed"))
                 if shares > 0:
                     revenue = shares * cbid
-                    self.log_msg(f"[bold magenta]SIM: Sell {shares:.2f} {side} @ {cbid*100:.1f}¢ (${revenue:.2f})[/]")
+                    action = "CLOSE LONG" if side == "UP" else "CLOSE SHORT"
+                    msg = f"{action} | Size: {shares:.2f} | Exit: {cbid*100:.1f}¢ | Revenue: ${revenue:.2f} | Logic: [Final Exit Simulation]"
+                    self.log_msg(msg, level="RSLT")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
 
             # LIVE: Skip if position has clearly lost (bid < 10¢ with no triggered SL).
@@ -1268,7 +1270,7 @@ class TradeEngineMixin:
             winner = "UP" if btc_p >= btc_o else "DOWN"
             reason = f"BTC Move (${btc_p:,.2f} vs Open ${btc_o:,.2f})"
 
-        self.log_msg(f"SETTLED: [bold white]{winner}[/] ({reason})", level="MONEY")
+        self.log_msg(f"SETTLEMENT: {winner} ({reason.capitalize()})", level="RSLT")
         
         # 2. Performance Reporting (v5.9.5 Unified Fix)
         # Calculate performance from local trackers to ensure Accuracy/Revenue is 100% correct in both SIM/LIVE.
@@ -1296,7 +1298,10 @@ class TradeEngineMixin:
         color = "green" if net_pnl >= 0 else "red"
         is_live = self.query_one("#cb_live").value
         main_bal = self.live_broker.balance if is_live else self.sim_broker.balance
-        self.log_msg(f"PnL: [bold {color}]{'+' if net_pnl >= 0 else ''}${net_pnl:.2f}[/] | Bal: ${main_bal:.2f} | Revenue: [bold gold3]${total_window_revenue:.2f}[/]", level="MONEY")
+        # Accuracy Calculation for Log
+        acc_val = (self.session_win_count / self.session_total_trades * 100) if self.session_total_trades > 0 else 0
+        
+        self.log_msg(f"PnL: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Equity: ${main_bal:.2f} | Acc: {acc_val:.1f}%", level="STATS")
         
         # BullFlag Research Logging - Log trades with settings
         for info in self.window_bets.values():
@@ -1581,11 +1586,9 @@ class TradeEngineMixin:
             elif net <= -2: guess = "[bold red]DOWN[/]"
             else: guess = "[bold yellow]NEUTRAL / CHOP[/]"
 
-            self.log_msg("\n[bold purple]📊 WINDOW BRIEFING (T-05:00)[/]")
-            self.log_msg(f"[bold purple]1. Trend:[/] 1H is {trend_str}, 1m RSI is {rsi_str}.")
-            self.log_msg(f"[bold purple]2. Context:[/] BTC is {btc_str}, Volatility is {vol_str}.")
-            self.log_msg(f"[bold purple]3. Market:[/] Odds {odds_str}, Ask is {imb_str}.")
-            self.log_msg(f"[bold purple]🔮 MY GUESS:[/] {guess}")
-            self.log_msg("[bold purple]────────────────────────────────────[/]\n")
+            self.log_msg(f"TREND: 1H {trend_1h} | RSI: {rsi_1m:.0f}", level="MARKET")
+            self.log_msg(f"BTC: {btc_str} | VOLAT: {vol_str}", level="VOLAT")
+            self.log_msg(f"ODDS: {odds_str} | IMB: {imb_str}", level="MARKET")
+            self.log_msg(f"OUTLOOK: {guess} (Score: {net:+d})", level="BIAS")
         except Exception as e:
             self.log_msg(f"[dim]Briefing Error: {e}[/]")
