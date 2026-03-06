@@ -518,6 +518,13 @@ class SniperApp(TradeEngineMixin, App):
             classes="input_group"
         )
         yield Container(
+            Label("Bet Penalty:", classes="lbl_sm"),
+            Input(placeholder="Bet Penalty %", value=f"{getattr(self, 'penalty_percentage', 0.10)*100:.0f}", id="inp_penalty_pct"),
+            Label("", classes="lbl_sm"),  # Spacer
+            Label("", classes="lbl_sm"),  # Spacer
+            classes="input_group"
+        )
+        yield Container(
             Button("BUY UP", id="btn_buy_up", classes="btn_buy_up"), 
             Button("BUY DN", id="btn_buy_down", classes="btn_buy_down"),
             Button("pbu", id="btn_pre_up", classes="btn_pre", tooltip="Manually queue a Pre-Buy UP for next window"),
@@ -782,11 +789,16 @@ class SniperApp(TradeEngineMixin, App):
                         self.global_skeptic_guess = float(val)
                         self.log_msg(f"[dim]Admin:[/] Set Guess Skepticism to [bold cyan]{val}c[/]")
                     except ValueError: pass
+                elif event.input.id == "inp_penalty_pct":
+                    try:
+                        self.penalty_percentage = float(val) / 100.0
+                        self.log_msg(f"[dim]Admin:[/] Set Bet Penalty to [bold cyan]{val}%[/]")
+                    except ValueError: pass
                 else:
                     self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}[/]")
 
         # Auto-persist any setting that was just changed
-        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess"}:
+        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct"}:
             self.save_settings()
 
     async def on_mount(self) -> None:
@@ -824,7 +836,7 @@ class SniperApp(TradeEngineMixin, App):
                 with open(self.settings_file, "r") as f:
                     s = json.load(f)
                 # UI inputs
-                for fid in ["inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess"]:
+                for fid in ["inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct"]:
                     if fid in s:
                         try: 
                             self.query_one(f"#{fid}").value = str(s[fid])
@@ -834,6 +846,7 @@ class SniperApp(TradeEngineMixin, App):
                 # Assign to variables for engine access
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
                 self.global_skeptic_guess = float(s.get("inp_skeptic_guess", 0.03))
+                self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
                 # Restore committed TP/SL from saved values
                 try: self.committed_tp = float(s.get("inp_tp", 95)) / 100
                 except: pass
@@ -1069,6 +1082,7 @@ class SniperApp(TradeEngineMixin, App):
                 "inp_max_price": _v("#inp_max_price", "0.80"),
                 "inp_skeptic_odds": _v("#inp_skeptic_odds", "0.05"),
                 "inp_skeptic_guess": _v("#inp_skeptic_guess", "0.03"),
+                "inp_penalty_pct": _v("#inp_penalty_pct", "10"),
                 "cb_tp_active":  _cb("#cb_tp_active", False),
                 "cb_hdo":        _cb("#cb_hdo", False),
                 "cb_one_trade":  _cb("#cb_one_trade", False),

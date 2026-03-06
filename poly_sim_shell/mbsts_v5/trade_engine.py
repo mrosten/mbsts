@@ -55,8 +55,7 @@ class TradeEngineMixin:
              self.log_msg(f"[yellow]Tranche too small (${cost:.2f} < $5.50) for limit order. Using global monitor.[/yellow]", level="SCAN")
              
         self.risk_manager.register_bet(cost)
-        slug = f"btc-updown-5m-{self.market_data.get('start_ts', 0)}"
-        self.window_bets[ticket_id] = {"side":side,"entry":act_price,"cost":cost,"algorithm":name, "shares":act_shares, "limit_order_id":limit_order_id, "target_tp":target_tp, "target_sl":target_sl, "slug":slug}
+        self.window_bets[ticket_id] = {"side":side,"entry":act_price,"cost":cost,"algorithm":name, "shares":act_shares, "limit_order_id":limit_order_id, "target_tp":target_tp, "target_sl":target_sl, "slug":slug, "is_live":is_live}
         if name in self.portfolios:
             self.portfolios[name].record_trade(ticket_id, side, act_price, cost, act_shares, target_tp=target_tp, target_sl=target_sl, contract_price=act_price)
             if limit_order_id:
@@ -65,7 +64,9 @@ class TradeEngineMixin:
     def apply_global_skeptic_filter(self, side, price, name="Scanner"):
         """
         Calculates the effective minimum entry price based on global skepticism premiums.
-        Returns (True, None) if price is acceptable, else (False, reason_string).
+        Returns (True, None, 0.0) if price is acceptable with no penalty,
+               (True, None, penalty_pct) if price is acceptable with penalty,
+               (False, reason_string, 0.0) if price is blocked.
         """
         try:
             base_min = float(self.query_one("#inp_min_price").value)
@@ -76,10 +77,11 @@ class TradeEngineMixin:
         # 1. Check Max Price first (Hard Bound, no penalties apply)
         # Moshe-90 is explicitly exempt in the main loop call, but we handle it here for safety
         if price > max_pr and "Moshe" not in name:
-            return False, f"Price {price*100:.1f}c > Max {max_pr*100:.1f}c"
+            return False, f"Price {price*100:.1f}c > Max {max_pr*100:.1f}c", 0.0
 
         effective_min = base_min
         penalties = []
+        total_penalty_pct = 0.0
 
         # 2. Odds Conflict Penalty
         # Odds favors UP if > 5.0, favors DOWN if < -5.0
@@ -92,6 +94,7 @@ class TradeEngineMixin:
         if (side == "UP" and odds < -5.0) or (side == "DOWN" and odds > 5.0):
             effective_min += odds_skeptic
             penalties.append(f"Odds Conflict (+{odds_skeptic*100:.0f}c)")
+            total_penalty_pct += getattr(self, "penalty_percentage", 0.10)
 
         # 3. Guess Conflict Penalty
         # Net Guess Score >= 2 is UP, <= -2 is DOWN, others are Neutral/Chop
@@ -106,14 +109,15 @@ class TradeEngineMixin:
         if guess_side == "NEUTRAL" or guess_side != side:
             effective_min += guess_skeptic
             penalties.append(f"Guess Conflict (+{guess_skeptic*100:.0f}c)")
+            total_penalty_pct += getattr(self, "penalty_percentage", 0.10)
 
         if price < effective_min:
             reason = f"{price*100:.1f}c < {effective_min*100:.1f}c"
             if penalties:
                 reason += f" ({', '.join(penalties)})"
-            return False, reason
+            return False, reason, 0.0
 
-        return True, None
+        return True, None, total_penalty_pct
 
     async def fetch_market_loop(self):
         if self.halted: return  # Bot frozen — bankroll exhausted
@@ -327,8 +331,12 @@ class TradeEngineMixin:
                     res = info["res"]
                     pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                     
-                    ok_filter, filter_reason = self.apply_global_skeptic_filter(sd, pr, name=name)
+                    ok_filter, filter_reason, skepticism_penalty = self.apply_global_skeptic_filter(sd, pr, name=name)
                     if ok_filter:
+                        # Apply skepticism penalty if triggered
+                        if skepticism_penalty > 0:
+                            bs *= (1.0 - skepticism_penalty)
+                            self.log_msg(f"[dim]Skepticism Penalty Applied: {skepticism_penalty*100:.0f}% reduction on {name} bet[/]", level="ADMIN")
                         # Execution criteria met! But first, check we have enough bankroll.
                         if self.risk_manager.risk_bankroll < bs:
                             # Not enough risk bankroll - skip without logging spam
@@ -530,7 +538,7 @@ class TradeEngineMixin:
                             self.log_msg(f"MOSHE 0.86 Override | Payout Opt: 0.99", level="ADMIN")
 
                         # 8. Global Skepticism & Price Bounds
-                        ok_filter, filter_reason = self.apply_global_skeptic_filter(sd, pr, name=name)
+                        ok_filter, filter_reason, skepticism_penalty = self.apply_global_skeptic_filter(sd, pr, name=name)
                         
                         if not ok_filter:
                             if "Price" in filter_reason and "Max" in filter_reason:
@@ -590,6 +598,12 @@ class TradeEngineMixin:
                                 }
                                 self.log_msg(f"BOUNCE {name} {sd} | Parked. Waiting for retest of {pr*100:.1f}¢ (now {live_ask*100:.1f}¢)", level="SCAN")
                             else:
+                                # Apply skepticism penalty if triggered
+                                if skepticism_penalty > 0:
+                                    original_bs = bs
+                                    bs *= (1.0 - skepticism_penalty)
+                                    self.log_msg(f"[dim]Skepticism Penalty Applied: {skepticism_penalty*100:.0f}% reduction on {name} bet (${original_bs:.2f} -> ${bs:.2f})[/]", level="ADMIN")
+                                
                                 ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_1h}, reason=res)
                                 if ok:
                                     self._handle_successful_buy(name, sd, bs, act_shares, act_price, is_l)
@@ -837,27 +851,31 @@ class TradeEngineMixin:
 
     async def _run_last_second_exit(self, ui_is_live):
         # We find all uniquely opened trades by their side and whether they were actually LIVE or SIM
-        open_bets = set()
+        # We group by (side, is_live) to avoid triple-logging when multiple algorithms are active on the same side.
+        open_bets_grouped = set()
         for info in self.window_bets.values():
             if not info.get("closed"):
-                open_bets.add((info["side"], info.get("is_live", False), info.get("algorithm")))
+                open_bets_grouped.add((info["side"], info.get("is_live", False)))
         
         # Fallback for SIM mode manual/legacy shares not in tracked bets
-        if not open_bets and not ui_is_live:
-            if self.sim_broker.shares["UP"] > 0: open_bets.add(("UP", False, "Manual"))
-            if self.sim_broker.shares["DOWN"] > 0: open_bets.add(("DOWN", False, "Manual"))
+        if not open_bets_grouped and not ui_is_live:
+            if self.sim_broker.shares["UP"] > 0: open_bets_grouped.add(("UP", False))
+            if self.sim_broker.shares["DOWN"] > 0: open_bets_grouped.add(("DOWN", False))
         
-        for side, is_live, algo_id in open_bets:
+        for side, is_live in open_bets_grouped:
             # 1. Emergency Whale Shield
-            # Check which scanner is active and use its specific adv_settings
-            sc_key = None
-            if algo_id == "Momentum": sc_key = "Momentum"
-            elif algo_id == "MM2": sc_key = "MM2"
+            # Whale Shield is typically a global guard for Momentum/MM2 strategies.
+            # We check if any active Momentum/MM2 positions exist on this side.
+            mom_mm2_active = any(
+                info.get("algorithm") in ["Momentum", "MM2"] and info["side"] == side and not info.get("closed")
+                for info in self.window_bets.values()
+            )
             
-            scanner = self.scanners.get(sc_key) if sc_key else None
-            
-            if scanner and self.mom_buy_mode == "ADV":
-                adv = getattr(scanner, "adv_settings", {})
+            if mom_mm2_active and self.mom_buy_mode == "ADV":
+                # Use Momentum scanner settings for the shield check
+                scanner = self.scanners.get("Momentum") or self.scanners.get("MM2")
+                if scanner:
+                    adv = getattr(scanner, "adv_settings", {})
                 rem = TradingConfig.WINDOW_SECONDS - (time.time() - self.market_data["start_ts"])
                 s_time_limit = adv.get("shield_time", 45) # e.g. 45s into window (T-15s)
                 
