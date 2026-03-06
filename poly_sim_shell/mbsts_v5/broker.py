@@ -119,8 +119,8 @@ class SimBroker:
             self.invested_this_window += usd_amount
             self.shares[side] += shares
 
-        action = "OPEN LONG" if side == "UP" else "OPEN SHORT"
-        msg = f"{action} | Size: {shares:.2f} | Entry: {price*100:.1f}¢ | Cost: ${usd_amount:.2f} | Logic: [{reason}]"
+        action = "BUY UP" if side == "UP" else "BUY DOWN"
+        msg = f"{action} | Sz: {shares:.2f} | Ent: {price*100:.1f}c | ${usd_amount:.2f} | [{reason}]"
         self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
         return True, msg, shares, price
 
@@ -136,8 +136,8 @@ class SimBroker:
         else:
             self.shares[side] -= size
             
-        action = "CLOSE LONG" if side == "UP" else "CLOSE SHORT"
-        msg = f"{action} | Size: {shares:.2f} | Exit: {price*100:.1f}¢ | Revenue: ${revenue:.2f} | Logic: [{reason}]"
+        action = "SELL UP" if side == "UP" else "SELL DOWN"
+        msg = f"{action} | Sz: {shares:.2f} | Ext: {price*100:.1f}c | ${revenue:.2f} | [{reason}]"
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, msg, revenue
     def settle_window(self, winning_side):
@@ -222,8 +222,8 @@ class LiveBroker:
                 ctx = context or {}
                 ctx['main_bal'] = main_bal
 
-                action = "OPEN LONG" if side == "UP" else "OPEN SHORT"
-                msg = f"{action} | Size: {size:.2f} | Entry: {actual_price*100:.1f}¢ | Cost: ${actual_cost_usd:.2f} | Logic: [{reason}]"
+                action = "BUY UP" if side == "UP" else "BUY DOWN"
+                msg = f"{action} | Sz: {size:.2f} | Ent: {actual_price*100:.1f}c | ${actual_cost_usd:.2f} | [{reason}]"
                 self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
                 return True, msg, size, actual_price
             else:
@@ -277,8 +277,8 @@ class LiveBroker:
                 if best_bid and best_bid > limit_price: eff_price = best_bid
                 
                 proceeds = size * eff_price
-                action = "CLOSE LONG" if side == "UP" else "CLOSE SHORT"
-                msg = f"{action} | Size: {size:.2f} | Exit: {eff_price*100:.1f}¢ | Revenue: ${proceeds:.2f} | Logic: [{reason}]"
+                action = "SELL UP" if side == "UP" else "SELL DOWN"
+                msg = f"{action} | Sz: {size:.2f} | Ext: {eff_price*100:.1f}c | ${proceeds:.2f} | [{reason}]"
                 self.sim_broker.write_to_log(f"TRADE_EVENT,{datetime.now()},LIVE_SELL,{side},Shares:{size},Price:{eff_price},Total:{proceeds},{reason}")
                 self.update_balance()
                 return True, msg, proceeds

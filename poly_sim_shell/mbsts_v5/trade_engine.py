@@ -338,7 +338,7 @@ class TradeEngineMixin:
                         # Apply skepticism penalty if triggered
                         if skepticism_penalty > 0:
                             bs *= (1.0 - skepticism_penalty)
-                            self.log_msg(f"[dim]Skepticism Penalty Applied: {skepticism_penalty*100:.0f}% reduction on {name} bet[/]", level="ADMIN")
+                            self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name}", level="SYS")
                         # Execution criteria met! But first, check we have enough bankroll.
                         if self.risk_manager.risk_bankroll < bs:
                             # Not enough risk bankroll - skip without logging spam
@@ -553,7 +553,7 @@ class TradeEngineMixin:
                                 self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
                                 try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
                                 except: pass
-                                self.log_msg(f"PENDING: [{name.upper()}] | Direction: {sd} | {filter_reason}", level="SCAN")
+                                self.log_msg(f"PENDING: [{name.upper()}] | Dir: {sd} | {filter_reason}", level="SCAN")
                             continue
 
 
@@ -603,7 +603,7 @@ class TradeEngineMixin:
                                 if skepticism_penalty > 0:
                                     original_bs = bs
                                     bs *= (1.0 - skepticism_penalty)
-                                    self.log_msg(f"[dim]Skepticism Penalty Applied: {skepticism_penalty*100:.0f}% reduction on {name} bet (${original_bs:.2f} -> ${bs:.2f})[/]", level="ADMIN")
+                                    self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name} (${original_bs:.2f} -> ${bs:.2f})", level="SYS")
                                 
                                 ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context={'rsi':rsi,'trend':self.market_data_manager.trend_1h}, reason=res)
                                 if ok:
@@ -900,8 +900,8 @@ class TradeEngineMixin:
                 shares = sum((info["cost"]/info.get("entry", 0.5)) for info in self.window_bets.values() if info["side"] == side and not info.get("closed"))
                 if shares > 0:
                     revenue = shares * cbid
-                    action = "CLOSE LONG" if side == "UP" else "CLOSE SHORT"
-                    msg = f"{action} | Size: {shares:.2f} | Exit: {cbid*100:.1f}¢ | Revenue: ${revenue:.2f} | Logic: [Final Exit Simulation]"
+                    action = "SELL UP" if side == "UP" else "SELL DOWN"
+                    msg = f"{action} | Sz: {shares:.2f} | Ext: {cbid*100:.1f}c | ${revenue:.2f} | [SIM Exit]"
                     self.log_msg(msg, level="RSLT")
                 continue # Skip actual execution for Sim, let it expire/settle at $1.00
 
@@ -1302,7 +1302,7 @@ class TradeEngineMixin:
         # Accuracy Calculation for Log
         acc_val = (self.session_win_count / self.session_total_trades * 100) if self.session_total_trades > 0 else 0
         
-        self.log_msg(f"PnL: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Equity: ${main_bal:.2f} | Acc: {acc_val:.1f}%", level="STATS")
+        self.log_msg(f"PnL: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Eq: ${main_bal:.2f} | Acc: {acc_val:.1f}%", level="STATS")
         
         # BullFlag Research Logging - Log trades with settings
         for info in self.window_bets.values():
