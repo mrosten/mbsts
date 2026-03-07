@@ -57,6 +57,7 @@ class TradeEngineMixin:
         self.risk_manager.register_bet(cost)
         slug = self.market_data.get("slug", "N/A")
         self.window_bets[ticket_id] = {"side":side,"entry":act_price,"cost":cost,"algorithm":name, "shares":act_shares, "limit_order_id":limit_order_id, "target_tp":target_tp, "target_sl":target_sl, "slug":slug, "is_live":is_live}
+        self.last_execution_time = time.time()
         if name in self.portfolios:
             self.portfolios[name].record_trade(ticket_id, side, act_price, cost, act_shares, target_tp=target_tp, target_sl=target_sl, contract_price=act_price)
             if limit_order_id:
@@ -324,10 +325,17 @@ class TradeEngineMixin:
                                 else:
                                     self.log_msg(f"[bold red]BOUNCE FAIL {_bname}[/]: {_msg}")
                             del self.bounce_pending[_bname]
-            # --------------------------------------
-                        # --- Check Pending Bets First ---
+            # --- Execution Safeguards (v5.9.7) ---
+            has_active_pos = any(not info.get("closed") for info in self.window_bets.values())
+            is_cooling = (time.time() - self.last_sl_event_time < 45)
+            
             if not self.mid_window_lockout and not is_initial_lockout:
-                for name, info in list(self.pending_bets.items()):
+                if has_active_pos:
+                    pass # Already in a trade, don't process pending scanner bets
+                elif is_cooling:
+                    pass # In post-SL cooling period
+                else:
+                    for name, info in list(self.pending_bets.items()):
                     sd = info["side"]
                     bs = info["bs"]
                     res = info["res"]
@@ -747,13 +755,21 @@ class TradeEngineMixin:
                         self.log_msg(f"{reason} | [bold green]WIN[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
                     else:
                         self.log_msg(f"{reason} | [bold red]LOSS[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
+                        if "SL HIT" in reason:
+                            self.last_sl_event_time = time.time()
                     
                     # --- SL+ RECOVERY LOGIC ---
                     # Guard: never chain recovery on a recovery bet to prevent infinite loops
                     is_recovery_bet = bid.startswith("SL+_Recovery")
                     if reason.startswith("SL HIT") and self.sl_plus_mode and realized_loss > 0 and not is_recovery_bet:
-                        opp_side = "DOWN" if side == "UP" else "UP"
-                        opp_p = self.market_data["up_ask" if opp_side == "UP" else "down_ask"]
+                        # Anti-Whipsaw: Disable recovery in High Volatility + Chop Bias
+                        atr = getattr(self.market_data_manager, "atr_5m", 0)
+                        bias = self.market_data.get("bias_guess", "NEUTRAL")
+                        if atr > 40 and (bias == "CHOP" or bias == "NEUTRAL"):
+                            self.log_msg(f"[dim]RECOVERY SKIPPED: High Vol Chop (ATR={atr:.1f} | Bias={bias})[/]", level="SYS")
+                        else:
+                            opp_side = "DOWN" if side == "UP" else "UP"
+                            opp_p = self.market_data["up_ask" if opp_side == "UP" else "down_ask"]
                         if 0.05 < opp_p < 0.90:
                             # Recovery = original cost, capped only as absolute safety floor (must have at least $1 left after)
                             rec_cost = info["cost"]
@@ -765,6 +781,7 @@ class TradeEngineMixin:
                                 self.log_msg(f"[bold cyan]SL+ RECOVERY:[/][dim] Loss ${realized_loss:.2f} -> Buying ${rec_cost:.2f} {opp_side} @ {opp_p*100:.1f}¢[/]")
                                 ok_rec, msg_rec, rec_shares, rec_price = await asyncio.to_thread(self.trade_executor.execute_buy, is_l, opp_side, rec_cost, opp_p, self.market_data["up_id" if opp_side=="UP" else "down_id"], context={}, reason="SL+_Recovery")
                                 if ok_rec:
+                                    self.pending_bets.clear() # Mutual Exclusion: Clear scanner bets when recovery fires
                                     self._handle_successful_buy("Recovery", opp_side, rec_cost, rec_shares, rec_price, is_l)
                                     self.log_msg(f"[bold green]RECOVERY EXECUTED:[/] {msg_rec}")
                                     self.update_balance_ui() # Refresh bankroll display

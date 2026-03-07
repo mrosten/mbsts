@@ -299,6 +299,8 @@ class SniperApp(TradeEngineMixin, App):
         self.blink_state = False
         self.skipped_logs = set()
         self.session_date_logged = False
+        self.last_sl_event_time = 0
+        self.last_execution_time = 0
         
         # Adjustable global settings
         self.csv_log_freq = 15
