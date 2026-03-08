@@ -6,7 +6,7 @@ import csv
 from datetime import datetime, timezone
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static
+from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static, Collapsible
 from textual import work, on, events
 
 from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
@@ -134,6 +134,29 @@ class SniperApp(TradeEngineMixin, App):
         padding: 1;
         margin: 1 2;
         height: auto;
+    }
+    
+    Collapsible {
+        background: $surface;
+        border: none;
+        margin: 0;
+        padding: 0;
+    }
+    Collapsible > Contents {
+        padding: 0;
+        background: #1a1a1a;
+        border-bottom: solid #333333;
+    }
+    Collapsible > .collapsible--header {
+        background: #111111;
+        color: #00ffff;
+        text-style: bold;
+        height: 1;
+        border: none;
+    }
+    Collapsible > .collapsible--header:hover {
+        background: #222222;
+        color: #ffa500;
     }
     """
 
@@ -500,47 +523,49 @@ class SniperApp(TradeEngineMixin, App):
             ),
             classes="row_main"
         )
-        yield Container(
-            Label("Bet:", classes="lbl_sm"),
-            Input(placeholder="Bet $", value="1.00", id="inp_amount"),
-            RadioSet(
-                RadioButton("Fixed $", id="rb_fixed", value=True),
-                RadioButton("% Bank", id="rb_pct"),
-                id="rs_bet_mode"
-            ),
-            Label("Bankroll:", classes="lbl_sm"),
-            Input(placeholder="Risk Bankroll", id="inp_risk_alloc"),
-            Label("TP %:", classes="lbl_sm"),
-            Input(placeholder="TP %", value="95", id="inp_tp"),
-            Label("SL %:", classes="lbl_sm"),
-            Input(placeholder="SL %", value="40", id="inp_sl"),
-            classes="input_group"
-        )
-        yield Container(
-            Label("Sim Bal:", classes="lbl_sm"),
-            Input(placeholder="Sim Bal", value=f"{self.sim_broker.balance:.2f}", id="inp_sim_bal"),
-            Label("Min Diff:", classes="lbl_sm"),
-            Input(placeholder="Min Diff $", value="0", id="inp_min_diff"),
-            Label("Min Price:", classes="lbl_sm"),
-            Input(placeholder="Min Price", value="0.55", id="inp_min_price"),
-            Label("Max Price:", classes="lbl_sm"),
-            Input(placeholder="Max Price", value="0.80", id="inp_max_price"),
-            classes="input_group"
-        )
-        yield Container(
-            Label("Skeptic Odds:", classes="lbl_sm"),
-            Input(placeholder="Odds Penalty", value=f"{self.global_skeptic_odds:.2f}", id="inp_skeptic_odds"),
-            Label("Skeptic Guess:", classes="lbl_sm"),
-            Input(placeholder="Guess Penalty", value=f"{self.global_skeptic_guess:.2f}", id="inp_skeptic_guess"),
-            classes="input_group"
-        )
-        yield Container(
-            Label("Bet Penalty:", classes="lbl_sm"),
-            Input(placeholder="Bet Penalty %", value=f"{getattr(self, 'penalty_percentage', 0.10)*100:.0f}", id="inp_penalty_pct"),
-            Label("", classes="lbl_sm"),  # Spacer
-            Label("", classes="lbl_sm"),  # Spacer
-            classes="input_group"
-        )
+        with Collapsible(title="TRADING CONFIGURATION & RISK", id="settings_collapsible"):
+            yield Container(
+                Label("Bet:", classes="lbl_sm"),
+                Input(placeholder="Bet $", value="1.00", id="inp_amount"),
+                RadioSet(
+                    RadioButton("Fixed $", id="rb_fixed", value=True),
+                    RadioButton("% Bank", id="rb_pct"),
+                    id="rs_bet_mode"
+                ),
+                Label("Bankroll:", classes="lbl_sm"),
+                Input(placeholder="Risk Bankroll", id="inp_risk_alloc"),
+                Label("TP %:", classes="lbl_sm"),
+                Input(placeholder="TP %", value="95", id="inp_tp"),
+                Label("SL %:", classes="lbl_sm"),
+                Input(placeholder="SL %", value="40", id="inp_sl"),
+                classes="input_group"
+            )
+            yield Container(
+                Label("Sim Bal:", classes="lbl_sm"),
+                Input(placeholder="Sim Bal", value=f"{self.sim_broker.balance:.2f}", id="inp_sim_bal"),
+                Label("Min Diff:", classes="lbl_sm"),
+                Input(placeholder="Min Diff $", value="0", id="inp_min_diff"),
+                Label("Min Price:", classes="lbl_sm"),
+                Input(placeholder="Min Price", value="0.55", id="inp_min_price"),
+                Label("Max Price:", classes="lbl_sm"),
+                Input(placeholder="Max Price", value="0.80", id="inp_max_price"),
+                classes="input_group"
+            )
+            yield Container(
+                Label("Skeptic Odds:", classes="lbl_sm"),
+                Input(placeholder="Odds Penalty", value=f"{self.global_skeptic_odds:.2f}", id="inp_skeptic_odds"),
+                Label("Skeptic Guess:", classes="lbl_sm"),
+                Input(placeholder="Guess Penalty", value=f"{self.global_skeptic_guess:.2f}", id="inp_skeptic_guess"),
+                classes="input_group"
+            )
+            yield Container(
+                Label("Bet Penalty:", classes="lbl_sm"),
+                Input(placeholder="Bet Penalty %", value=f"{getattr(self, 'penalty_percentage', 0.10)*100:.0f}", id="inp_penalty_pct"),
+                Label("", classes="lbl_sm"),  # Spacer
+                Label("", classes="lbl_sm"),  # Spacer
+                classes="input_group"
+            )
+
         yield Container(
             Button("BUY UP", id="btn_buy_up", classes="btn_buy_up"), 
             Button("BUY DN", id="btn_buy_down", classes="btn_buy_down"),
