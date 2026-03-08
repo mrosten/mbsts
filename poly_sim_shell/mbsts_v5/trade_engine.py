@@ -325,20 +325,40 @@ class TradeEngineMixin:
                                 else:
                                     self.log_msg(f"[bold red]BOUNCE FAIL {_bname}[/]: {_msg}")
                             del self.bounce_pending[_bname]
-            # --- Execution Safeguards (v5.9.7) ---
-            has_active_pos = any(not info.get("closed") for info in self.window_bets.values())
+            # --- Execution Safeguards (v5.9.9) ---
             is_cooling = (time.time() - self.last_sl_event_time < 45)
+            safety_mode = getattr(self, "exec_safety_mode", "global_lock")
             
             if not self.mid_window_lockout and not is_initial_lockout:
-                if has_active_pos:
-                    pass # Already in a trade, don't process pending scanner bets
-                elif is_cooling:
+                if is_cooling:
                     pass # In post-SL cooling period
                 else:
+                    active_bets = [info for info in self.window_bets.values() if not info.get("closed")]
                     for name, info in list(self.pending_bets.items()):
-                    sd = info["side"]
-                    bs = info["bs"]
-                    res = info["res"]
+                        sd = info["side"]
+                        bs = info["bs"]
+                        
+                        # Decide if this bet is blocked by our safety mode
+                        is_blocked = False
+                        if safety_mode == "global_lock":
+                            if len(active_bets) > 0: is_blocked = True
+                        elif safety_mode == "side_lock":
+                            if any(ab["side"] == sd for ab in active_bets): is_blocked = True
+                        elif safety_mode == "risk_cap":
+                            current_cost = sum(ab["cost"] for ab in active_bets)
+                            if current_cost + bs >= self.total_risk_cap: is_blocked = True
+                        elif safety_mode == "dynamic":
+                            atr = getattr(self.market_data_manager, "atr_5m", 0)
+                            bias = self.market_data.get("bias_guess", "NEUTRAL")
+                            if atr > 40 or bias == "CHOP":
+                                if len(active_bets) > 0: is_blocked = True # Tighten to Global Lock
+                            else:
+                                if any(ab["side"] == sd for ab in active_bets): is_blocked = True # Side Lock
+                        
+                        if is_blocked:
+                            continue # Skip this bet, safety policy engaged
+
+                        res = info["res"]
                     pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                     
                     ok_filter, filter_reason, skepticism_penalty = self.apply_global_skeptic_filter(sd, pr, name=name)

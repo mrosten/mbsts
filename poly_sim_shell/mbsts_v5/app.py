@@ -301,6 +301,8 @@ class SniperApp(TradeEngineMixin, App):
         self.session_date_logged = False
         self.last_sl_event_time = 0
         self.last_execution_time = 0
+        self.exec_safety_mode = "global_lock"
+        self.total_risk_cap = 30.0
         
         # Adjustable global settings
         self.csv_log_freq = 15
@@ -409,6 +411,8 @@ class SniperApp(TradeEngineMixin, App):
                         # Will be applied during on_mount
                         self.saved_algo_enabled = saved["algo_enabled"]
                     self.auto_sync_risk = saved.get("auto_sync_risk", False)
+                    self.exec_safety_mode = saved.get("exec_safety_mode", "global_lock")
+                    self.total_risk_cap = float(saved.get("total_risk_cap", 30.0))
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()

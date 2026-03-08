@@ -28,6 +28,18 @@ class GlobalSettingsModal(ModalScreen):
             with Horizontal(id="modal_sync_risk"):
                 yield Label("Full Wallet Sync:", id="lbl_sync_risk")
                 yield Checkbox(id="cb_sync_risk")
+            with Horizontal(id="modal_exec_safety"):
+                yield Label("Safety Mode:", id="lbl_exec_safety")
+                yield Select([
+                    ("Global Lock", "global_lock"),
+                    ("Side Lock", "side_lock"),
+                    ("Unrestricted", "unrestricted"),
+                    ("Risk Cap", "risk_cap"),
+                    ("Dynamic", "dynamic")
+                ], id="sel_exec_safety", value="global_lock")
+            with Horizontal(id="modal_risk_cap"):
+                yield Label("Total Risk Cap ($):", id="lbl_risk_cap")
+                yield Input(placeholder="30.00", id="inp_risk_cap")
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
 
@@ -64,6 +76,20 @@ class GlobalSettingsModal(ModalScreen):
         
         if self.main_app:
             self.query_one("#cb_sync_risk").value = getattr(self.main_app, "auto_sync_risk", False)
+            self.query_one("#sel_exec_safety").value = getattr(self.main_app, "exec_safety_mode", "global_lock")
+            self.query_one("#inp_risk_cap").value = str(getattr(self.main_app, "total_risk_cap", 30.0))
+
+        # Size and style for the new rows
+        for row_id in ["#modal_exec_safety", "#modal_risk_cap"]:
+            row = self.query_one(row_id)
+            row.styles.height = 3
+            row.styles.align = ("center", "middle")
+            row.styles.margin = (0, 0, 1, 0)
+        
+        self.query_one("#lbl_exec_safety").styles.margin = (1, 1, 0, 0)
+        self.query_one("#sel_exec_safety").styles.width = 20
+        self.query_one("#lbl_risk_cap").styles.margin = (1, 1, 0, 0)
+        self.query_one("#inp_risk_cap").styles.width = 10
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -82,6 +108,8 @@ class GlobalSettingsModal(ModalScreen):
                     self.main_app.csv_log_freq = freq
                 
                 self.main_app.auto_sync_risk = self.query_one("#cb_sync_risk").value
+                self.main_app.exec_safety_mode = self.query_one("#sel_exec_safety").value
+                self.main_app.total_risk_cap = float(self.query_one("#inp_risk_cap").value)
                 self.main_app.save_settings()
             except Exception:
                 pass
