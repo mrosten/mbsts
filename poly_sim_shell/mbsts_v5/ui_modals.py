@@ -40,6 +40,8 @@ class GlobalSettingsModal(ModalScreen):
             with Horizontal(id="modal_risk_cap"):
                 yield Label("Total Risk Cap ($):", id="lbl_risk_cap")
                 yield Input(placeholder="30.00", id="inp_risk_cap")
+            with Horizontal(id="modal_trend_eff"):
+                yield Button("TREND EFFICIENCY", id="btn_trend_eff", variant="warning")
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
 
@@ -91,6 +93,12 @@ class GlobalSettingsModal(ModalScreen):
         self.query_one("#lbl_risk_cap").styles.margin = (1, 1, 0, 0)
         self.query_one("#inp_risk_cap").styles.width = 10
 
+        row_eff = self.query_one("#modal_trend_eff")
+        row_eff.styles.height = 3
+        row_eff.styles.align = ("center", "middle")
+        row_eff.styles.margin = (0, 0, 1, 0)
+        self.query_one("#btn_trend_eff").styles.width = 25
+
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
         footer.styles.align = ("center", "middle")
@@ -98,6 +106,11 @@ class GlobalSettingsModal(ModalScreen):
 
     def action_dismiss(self):
         self.close_modal()
+
+    @on(Button.Pressed, "#btn_trend_eff")
+    def open_trend_eff(self):
+        if self.main_app:
+            self.main_app.push_screen(TrendEfficiencyModal(self.main_app))
 
     @on(Button.Pressed, "#btn_modal_close")
     def close_modal(self):
@@ -3573,4 +3586,110 @@ class BRISettingsModal(ModalScreen):
         except Exception as e:
             if self.main_app: self.main_app.log_msg(f"Error saving BRIEF: {e}", level="ERROR")
             
+        self.dismiss()
+
+class TrendEfficiencyModal(ModalScreen):
+    """Dashboard to configure efficiency settings per market trend."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    
+    def __init__(self, main_app):
+        super().__init__()
+        self.main_app = main_app
+        self.trends = ["M-UP", "S-UP", "W-UP", "NEUTRAL", "W-DOWN", "S-DOWN", "M-DOWN"]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #ffaa00]Trend Efficiency Dashboard[/]", id="modal_title")
+            yield Static("Optimize risk and safety per trend regime.", id="modal_subtitle")
+            
+            with Vertical(id="efficiency_grid"):
+                # Header
+                with Horizontal(classes="eff_header_row"):
+                    yield Label("Trend", classes="eff_col_trend")
+                    yield Label("Mult", classes="eff_col_mult")
+                    yield Label("Safety Mode", classes="eff_col_lock")
+                    yield Label("CoolX", classes="eff_col_cool")
+                
+                for t in self.trends:
+                    with Horizontal(id=f"row_{t}", classes="eff_data_row"):
+                        yield Label(t, classes="eff_col_trend")
+                        yield Input(id=f"mult_{t}", placeholder="1.0")
+                        yield Select([
+                            ("Global", "global_lock"),
+                            ("Side", "side_lock"),
+                            ("Cap", "risk_cap"),
+                            ("Unrest", "unrestricted")
+                        ], id=f"lock_{t}", value="side_lock")
+                        yield Input(id=f"cool_{t}", placeholder="1.0")
+
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE & CLOSE", id="btn_eff_save", variant="primary")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        c = self.query_one("#modal_container")
+        c.styles.background = "#1a1a1a"
+        c.styles.border = ("thick", "#ffaa00")
+        c.styles.padding = (1, 2)
+        c.styles.width = 75
+        c.styles.height = "auto"
+        c.styles.max_height = "90vh"
+        c.styles.align = ("center", "middle")
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.width = "100%"
+        self.query_one("#modal_subtitle").styles.text_align = "center"
+        self.query_one("#modal_subtitle").styles.width = "100%"
+        self.query_one("#modal_subtitle").styles.color = "#666666"
+        self.query_one("#modal_subtitle").styles.margin = (0, 0, 1, 0)
+
+        grid = self.query_one("#efficiency_grid")
+        grid.styles.border = ("ascii", "#333333")
+        grid.styles.height = "auto"
+
+        for row in self.query(".eff_header_row, .eff_data_row"):
+            row.styles.height = 3
+            row.styles.align = ("center", "middle")
+
+        for lbl in self.query(".eff_col_trend"):
+            lbl.styles.width = 12
+            lbl.styles.text_style = "bold"
+            lbl.styles.color = "cyan"
+
+        for inp in self.query("Input"):
+            inp.styles.width = 8
+            inp.styles.margin = (0, 1)
+
+        for sel in self.query("Select"):
+            sel.styles.width = 16
+            sel.styles.margin = (0, 1)
+
+        # Load values
+        if self.main_app:
+            for t in self.trends:
+                cfg = self.main_app.trend_efficiency.get(t, {"mult": 1.0, "lock": "side_lock", "cool": 1.0})
+                self.query_one(f"#mult_{t}").value = str(cfg["mult"])
+                self.query_one(f"#lock_{t}").value = cfg["lock"]
+                self.query_one(f"#cool_{t}").value = str(cfg["cool"])
+
+        footer = self.query_one("#modal_footer")
+        footer.styles.align = ("center", "middle")
+        footer.styles.width = "100%"
+        footer.styles.margin = (1, 0, 0, 0)
+
+    @on(Button.Pressed, "#btn_eff_save")
+    def save_and_close(self):
+        if self.main_app:
+            new_cfg = {}
+            for t in self.trends:
+                try:
+                    m = float(self.query_one(f"#mult_{t}").value)
+                    l = self.query_one(f"#lock_{t}").value
+                    c = float(self.query_one(f"#cool_{t}").value)
+                    new_cfg[t] = {"mult": m, "lock": l, "cool": c}
+                except:
+                    pass
+            self.main_app.trend_efficiency.update(new_cfg)
+            self.main_app.save_settings()
+            self.main_app.log_msg("⚙️ Trend Efficiency Updated", level="ADMIN")
         self.dismiss()

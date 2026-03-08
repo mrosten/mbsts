@@ -303,6 +303,15 @@ class SniperApp(TradeEngineMixin, App):
         self.last_execution_time = 0
         self.exec_safety_mode = "global_lock"
         self.total_risk_cap = 30.0
+        self.trend_efficiency = {
+            "M-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
+            "S-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
+            "W-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
+            "NEUTRAL": {"mult": 0.5, "lock": "global_lock", "cool": 2.0},
+            "W-DOWN":  {"mult": 0.7, "lock": "global_lock", "cool": 1.5},
+            "S-DOWN":  {"mult": 1.1, "lock": "side_lock", "cool": 1.0},
+            "M-DOWN":  {"mult": 1.2, "lock": "risk_cap", "cool": 1.0},
+        }
         
         # Adjustable global settings
         self.csv_log_freq = 15
@@ -413,6 +422,8 @@ class SniperApp(TradeEngineMixin, App):
                     self.auto_sync_risk = saved.get("auto_sync_risk", False)
                     self.exec_safety_mode = saved.get("exec_safety_mode", "global_lock")
                     self.total_risk_cap = float(saved.get("total_risk_cap", 30.0))
+                    if "trend_efficiency" in saved:
+                        self.trend_efficiency.update(saved["trend_efficiency"])
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
@@ -1139,7 +1150,10 @@ class SniperApp(TradeEngineMixin, App):
                 "bri_settings": self.bri_settings,
                 "mom_adv_settings": self.mom_adv_settings,
                 "mm2_adv_settings": self.mm2_adv_settings,
-                "auto_sync_risk": self.auto_sync_risk
+                "auto_sync_risk": self.auto_sync_risk,
+                "exec_safety_mode": self.exec_safety_mode,
+                "total_risk_cap": self.total_risk_cap,
+                "trend_efficiency": self.trend_efficiency
             }
             
             # Save HDO threshold from scanner object

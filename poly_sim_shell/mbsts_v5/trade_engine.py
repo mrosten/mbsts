@@ -325,9 +325,14 @@ class TradeEngineMixin:
                                 else:
                                     self.log_msg(f"[bold red]BOUNCE FAIL {_bname}[/]: {_msg}")
                             del self.bounce_pending[_bname]
-            # --- Execution Safeguards (v5.9.9) ---
-            is_cooling = (time.time() - self.last_sl_event_time < 45)
-            safety_mode = getattr(self, "exec_safety_mode", "global_lock")
+            # --- Trend Efficiency (v5.9.10) ---
+            cur_trend = self.market_data_manager.trend_1h
+            t_cfg = self.trend_efficiency.get(cur_trend, {"mult": 1.0, "lock": "side_lock", "cool": 1.0})
+
+            # --- Execution Safeguards ---
+            cool_dur = 45 * t_cfg.get("cool", 1.0)
+            is_cooling = (time.time() - self.last_sl_event_time < cool_dur)
+            safety_mode = t_cfg.get("lock", getattr(self, "exec_safety_mode", "global_lock"))
             
             if not self.mid_window_lockout and not is_initial_lockout:
                 if is_cooling:
@@ -336,7 +341,7 @@ class TradeEngineMixin:
                     active_bets = [info for info in self.window_bets.values() if not info.get("closed")]
                     for name, info in list(self.pending_bets.items()):
                         sd = info["side"]
-                        bs = info["bs"]
+                        bs = info["bs"] * t_cfg.get("mult", 1.0)
                         
                         # Decide if this bet is blocked by our safety mode
                         is_blocked = False
@@ -357,6 +362,9 @@ class TradeEngineMixin:
                         
                         if is_blocked:
                             continue # Skip this bet, safety policy engaged
+                        
+                        if t_cfg.get("mult", 1.0) != 1.0:
+                             self.log_msg(f"Trend {cur_trend}: Applying {t_cfg['mult']}x Mult -> ${bs:.2f}", level="SYS")
 
                         res = info["res"]
                     pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
