@@ -367,38 +367,38 @@ class TradeEngineMixin:
                              self.log_msg(f"Trend {cur_trend}: Applying {t_cfg['mult']}x Mult -> ${bs:.2f}", level="SYS")
 
                         res = info["res"]
-                    pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
-                    
-                    ok_filter, filter_reason, skepticism_penalty = self.apply_global_skeptic_filter(sd, pr, name=name)
-                    if ok_filter:
-                        # Apply skepticism penalty if triggered
-                        if skepticism_penalty > 0:
-                            bs *= (1.0 - skepticism_penalty)
-                            self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name}", level="SYS")
-                        # Execution criteria met! But first, check we have enough bankroll.
-                        if self.risk_manager.risk_bankroll < bs:
-                            # Not enough risk bankroll - skip without logging spam
-                            continue
-                        is_l = self.query_one("#cb_live").value
-                        ctx = {'signal_price': d["cur"], 'rsi': rsi, 'trend': self.market_data_manager.trend_1h, 'risk_bal': self.risk_manager.risk_bankroll}
+                        pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
                         
-                        ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=f"Pending: {res}")
-                        if ok:
-                            self._handle_successful_buy(name, sd, bs, act_shares, act_price, is_l)
-                            self.session_total_trades += 1 # Pending Execution Count
+                        ok_filter, filter_reason, skepticism_penalty = self.apply_global_skeptic_filter(sd, pr, name=name)
+                        if ok_filter:
+                            # Apply skepticism penalty if triggered
+                            if skepticism_penalty > 0:
+                                bs *= (1.0 - skepticism_penalty)
+                                self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name}", level="SYS")
+                            # Execution criteria met! But first, check we have enough bankroll.
+                            if self.risk_manager.risk_bankroll < bs:
+                                # Not enough risk bankroll - skip without logging spam
+                                continue
+                            is_l = self.query_one("#cb_live").value
+                            ctx = {'signal_price': d["cur"], 'rsi': rsi, 'trend': self.market_data_manager.trend_1h, 'risk_bal': self.risk_manager.risk_bankroll}
                             
-                            short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
-                            prefix = name[:3].upper()
-                            self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})")
-                        else:
-                            self.log_msg(f"[bold red]FAIL {name}[/]: {msg}")
-                            
-                        # Cleanup pending state regardless of result
-                        del self.pending_bets[name]
-                        try:
-                            lbl = self.query_one(f"#lbl_{name[:3].lower()}")
-                            lbl.remove_class("blinking")
-                        except: pass
+                            ok, msg, act_shares, act_price = self.trade_executor.execute_buy(is_l, sd, bs, pr, d["poly"]["up_id" if sd=="UP" else "down_id"], context=ctx, reason=f"Pending: {res}")
+                            if ok:
+                                self._handle_successful_buy(name, sd, bs, act_shares, act_price, is_l)
+                                self.session_total_trades += 1 # Pending Execution Count
+                                
+                                short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
+                                prefix = name[:3].upper()
+                                self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})")
+                            else:
+                                self.log_msg(f"[bold red]FAIL {name}[/]: {msg}")
+                                
+                            # Cleanup pending state regardless of result
+                            del self.pending_bets[name]
+                            try:
+                                lbl = self.query_one(f"#lbl_{name[:3].lower()}")
+                                lbl.remove_class("blinking")
+                            except: pass
             # --------------------------------
             # Build unified context for all scanners
             context = {
