@@ -6,9 +6,8 @@ import csv
 from datetime import datetime, timezone
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static, Collapsible
+from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static
 from textual import work, on, events
-from rich.text import Text
 
 from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
 from .market import MarketDataManager, calculate_rsi, calculate_bb, calculate_atr
@@ -37,105 +36,7 @@ from .ui_modals import (
 from .trade_engine import TradeEngineMixin
 
 
-class PulseLeanChart(Static):
-    """
-    High-resolution market leaning chart using Braille characters.
-    Tracks UP price (0-100) as a single line.
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.history = []
-        self.max_points = 100  # Will adjust to width on render
-
-    def push_value(self, value):
-        # Value is 0.0 - 1.0 (UP Price)
-        self.history.append(value)
-        # Keep enough points to fill common terminal widths
-        if len(self.history) > 400:
-            self.history.pop(0)
-        self.refresh()
-
-    def reset(self):
-        self.history = []
-        self.refresh()
-
-    def render(self):
-        if not self.history:
-            return Text("Lean Chart: Syncing...", style="dim yellow")
-        
-        w = self.size.width
-        h = self.size.height
-        if w <= 0 or h <= 0: return ""
-        
-        pixel_w = w * 2
-        pixel_h = h * 4
-        
-        grid = [[(0, 0) for _ in range(w)] for _ in range(h)]
-        dot_bit_map = [[0, 3], [1, 4], [2, 5], [6, 7]]
-
-        # 1. Plot Dotted Center Line (50c)
-        mid_py = pixel_h // 2
-        mid_cy, mid_dr = mid_py // 4, mid_py % 4
-        for x in range(pixel_w):
-            if x % 4 == 0:
-                cx, dc = x // 2, x % 2
-                c_bits, p_bits = grid[mid_cy][cx]
-                grid[mid_cy][cx] = (c_bits | (1 << dot_bit_map[mid_dr][dc]), p_bits)
-
-        # 2. Plot Price History (Continuous Line)
-        points = self.history[-pixel_w:]
-        offset_x = pixel_w - len(points)
-        
-        prev_px, prev_py = None, None
-        for i, val in enumerate(points):
-            px = i + offset_x
-            py = int((1.0 - val) * (pixel_h - 1))
-            py = max(0, min(py, pixel_h - 1))
-            
-            if prev_px is not None:
-                # Bresenham-ish simple line between points
-                dx = px - prev_px
-                dy = py - prev_py
-                steps = max(abs(dx), abs(dy))
-                for s in range(steps + 1):
-                    # Interpolate
-                    interp_x = prev_px + int(s * dx / steps) if steps > 0 else px
-                    interp_y = prev_py + int(s * dy / steps) if steps > 0 else py
-                    
-                    cy, dr = interp_y // 4, interp_y % 4
-                    cx, dc = interp_x // 2, interp_x % 2
-                    if 0 <= cy < h and 0 <= cx < w:
-                        c_bits, p_bits = grid[cy][cx]
-                        grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
-            else:
-                # Single dot for the first point
-                cy, dr = py // 4, py % 4
-                cx, dc = px // 2, px % 2
-                if 0 <= cy < h and 0 <= cx < w:
-                    c_bits, p_bits = grid[cy][cx]
-                    grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
-            
-            prev_px, prev_py = px, py
-            
-        # 3. Build Rich Text output
-        output = Text()
-        for y in range(h):
-            for x in range(w):
-                c_bits, p_bits = grid[y][x]
-                if p_bits > 0:
-                    char = chr(0x2800 + (c_bits | p_bits))
-                    output.append(char, style="bold #ffff00")
-                elif c_bits > 0:
-                    char = chr(0x2800 + c_bits)
-                    output.append(char, style="#444444")
-                else:
-                    output.append(" ")
-            if y < h - 1:
-                output.append("\n")
-                
-        return output
-
-class PulseApp(TradeEngineMixin, App):
+class SniperApp(TradeEngineMixin, App):
     CSS = """
     Screen { align: center top; layers: base; }
     #top_bar { dock: top; height: 1; background: $panel; color: $text; content-align: center middle; }
@@ -175,15 +76,13 @@ class PulseApp(TradeEngineMixin, App):
     #inp_sl { color: #ff0000; }
     #inp_min_diff { color: #00ffff; }
 
-    #execution_area { height: 11; margin: 0 1; layout: horizontal; align: center middle; }
+    #button_row { height: 1; align: center middle; layout: horizontal; padding: 0; margin-top: 1; margin-bottom: 1; }
     Button { height: 1; min-width: 12; margin: 0 1; border: none; }
-    #btn_container { width: 30; height: 9; layout: grid; grid-size: 2; align: center middle; margin-top: 1; }
-    #pulse_lean_chart { width: 40; height: 9; border: ascii #333; background: #000; margin-left: 4; margin-top: 1; }
     .btn_buy_up { background: #006600; color: #ffffff; }
     .btn_buy_down { background: #660000; color: #ffffff; }
     .btn_sell_up { background: #b38600; color: #ffffff; }
     .btn_sell_down { background: #b34b00; color: #ffffff; }
-    .btn_pre { min-width: 5; padding: 0; margin: 0 1; background: #000033; color: #00ffff; height: 1; }
+    .btn_pre { min-width: 5; padding: 0; margin: 0 1; background: #000033; color: #00ffff; }
 
     #lbl_vol_up { color: #00ff00; margin-right: 1; }
     #lbl_vol_dn { color: #ff0000; }
@@ -191,7 +90,6 @@ class PulseApp(TradeEngineMixin, App):
 
     #checkbox_container { height: auto; border-bottom: double $primary; margin-bottom: 1; }
     .algo_row { align: center middle; height: 1; layout: horizontal; padding: 0; margin: 0; }
-    #prebuy_row { margin-top: 1; }
     .algo_row Button { height: 1; min-width: 8; margin: 0 1; }
     .algo_item { width: 1fr; height: 1; layout: horizontal; align: left middle; padding-left: 2; }
     .algo_item Checkbox { width: auto; margin: 0; padding: 0; border: none; }
@@ -220,12 +118,12 @@ class PulseApp(TradeEngineMixin, App):
     
     #cb_live { color: #ff0000; text-style: bold; }
     
-    #rs_bet_mode { layout: horizontal; background: transparent; border: none; height: 1; width: auto; margin-left: 1; }
-    #rs_bet_mode RadioButton { width: auto; padding: 0; margin: 0 1; height: 1; color: #aaaaaa; }
+    #rs_bet_mode { layout: horizontal; background: transparent; border: none; height: 1; min-width: 20; margin-left: 1; }
+    #rs_bet_mode RadioButton { padding: 0 1; margin: 0; height: 1; color: #aaaaaa; }
     #rs_bet_mode RadioButton:hover { color: #ffffff; }
     #rs_bet_mode RadioButton.-on { color: #00ff00; text-style: bold; }
-    #rs_bet_mode RadioButton > .toggle--button { background: #333333; color: transparent; width: 1; }
-    #rs_bet_mode RadioButton.-on > .toggle--button { background: #00ff00; color: #000000; width: 1; }
+    #rs_bet_mode RadioButton > .toggle--button { background: #333333; color: transparent; }
+    #rs_bet_mode RadioButton.-on > .toggle--button { background: #00ff00; color: #000000; }
 
     RichLog { height: 1fr; min-height: 5; background: #111111; color: #eeeeee; }
     
@@ -237,87 +135,6 @@ class PulseApp(TradeEngineMixin, App):
         margin: 1 2;
         height: auto;
     }
-    
-    Collapsible {
-        background: transparent;
-        border: none;
-        margin: 0;
-        padding: 0;
-    }
-    Collapsible > Contents {
-        padding: 0 1;
-        background: #161616;
-        border-bottom: solid #222222;
-    }
-    Collapsible > .collapsible--header {
-        background: #0d0d0d;
-        color: #00ffff;
-        text-style: bold;
-        height: 1;
-        border-left: solid #ffaa00;
-    }
-    Collapsible > .collapsible--header:hover {
-        background: #1a1a1a;
-        color: #ffa500;
-    }
-    .input_group { 
-        height: auto; 
-        align: left middle; 
-        layout: vertical; 
-        padding-bottom: 1;
-        margin-bottom: 0; 
-        background: transparent;
-    }
-    .input_row {
-        height: auto;
-        layout: horizontal;
-        align: left middle;
-        margin-bottom: 0;
-    }
-    .input_title {
-        color: #ffaa00;
-        text-style: bold;
-        margin-top: 1;
-        margin-bottom: 0;
-        width: 100%;
-        text-align: left;
-        opacity: 0.8;
-        border-bottom: solid #333333;
-    }
-    .lbl_sm {
-        width: 13;
-        content-align: left middle;
-        color: #999999;
-    }
-    Input {
-        width: 12;
-        height: 1;
-        border: none;
-        background: #333333;
-        color: #ffffff;
-        padding: 0 1;
-        text-align: center;
-    }
-    Input:focus {
-        background: #444444;
-        color: #00ffff;
-        text-style: bold;
-    }
-
-    #scanner_container { height: auto; margin-bottom: 1; border-top: solid #333333; padding-top: 1; }
-    .scanner_col { width: 1fr; height: auto; padding: 0 1; }
-    .scanner_header { 
-        background: #111111; 
-        color: #00ffff; 
-        text-style: bold; 
-        width: 100%; 
-        padding: 0 1; 
-        margin-bottom: 1; 
-        border-bottom: solid #00ffff;
-        content-align: center middle;
-    }
-    .algo_item { width: 100%; height: 1; layout: horizontal; align: left middle; margin-bottom: 0; }
-    .algo_item Label { width: 1fr; }
     """
 
     @on(Checkbox.Changed)
@@ -344,8 +161,7 @@ class PulseApp(TradeEngineMixin, App):
                 pass
             
             # Auto-persist algorithm toggle
-            if not getattr(self, "is_initializing", False):
-                self.save_settings()
+            self.save_settings()
 
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
@@ -402,14 +218,12 @@ class PulseApp(TradeEngineMixin, App):
     def __init__(self, sim_broker, live_broker, start_live_mode=False):
         super().__init__()
         self.is_initializing = True
-        self.config = TradingConfig() # Instantiate for dynamic frequency support
         self.sim_broker = sim_broker
         self.live_broker = live_broker
         self.start_live_mode = start_live_mode
         self.market_data_manager = MarketDataManager(logger_func=lambda m: self.call_from_thread(self.log_msg, m))
-        self.risk_manager = RiskManager(self.config)
+        self.risk_manager = RiskManager()
         self.trade_executor = TradeExecutor(sim_broker, live_broker, self.risk_manager)
-        self.trade_executor.config = self.config # Pass config to executor
         self.market_data = self.market_data_manager.market_data 
         self.risk_initialized = False 
         self.last_second_exit_triggered = False
@@ -439,38 +253,38 @@ class PulseApp(TradeEngineMixin, App):
         base_log_name = os.path.basename(self.sim_broker.log_file).replace(".csv", "_console.txt")
         self.console_log_file = os.path.join(log_dir, base_log_name)
         with open(self.console_log_file, "w", encoding="utf-8") as f:
-            f.write("=== POLYMARKET VORTEX PULSE V5 CONSOLE LOG ===\n")
+            f.write("=== POLYMARKET SNIPER V5 CONSOLE LOG ===\n")
         
         self.scanners = {
-            "NPattern": NPatternScanner(self.config),
-            "Fakeout": FakeoutScanner(self.config),
-            "Momentum": MomentumScanner(self.config),
-            "MM2": Momentum2Scanner(self.config),
-            "RSI": RsiScanner(self.config),
-            "TrapCandle": TrapCandleScanner(self.config),
-            "MidGame": MidGameScanner(self.config),
-            "LateReversal": LateReversalScanner(self.config),
-            "BullFlag": StaircaseBreakoutScanner(self.config),
-            "CoiledCobra": CoiledCobraScanner(self.config),
-            "PostPump": PostPumpScanner(self.config),
-            "StepClimber": StepClimberScanner(self.config),
-            "Slingshot": SlingshotScanner(self.config),
-            "MinOne": MinOneScanner(self.config),
-            "Liquidity": LiquidityVacuumScanner(self.config),
-            "Cobra": CobraScanner(self.config),
-            "Mesa": MesaCollapseScanner(self.config),
-            "MeanReversion": MeanReversionScanner(self.config),
-            "GrindSnap": GrindSnapScanner(self.config),
-            "VolCheck": VolCheckScanner(self.config),
-            "Moshe": MosheSpecializedScanner(self.config),
-            "ZScore": ZScoreBreakoutScanner(self.config),
-            "Nitro": NitroScanner(self.config),
-            "VolSnap": VolSnapScanner(self.config),
-            "HDO": HdoScanner(self.config),
-            "Briefing": BriefingScanner(self.config)
+            "NPattern": NPatternScanner(),
+            "Fakeout": FakeoutScanner(),
+            "Momentum": MomentumScanner(),
+            "MM2": Momentum2Scanner(),
+            "RSI": RsiScanner(),
+            "TrapCandle": TrapCandleScanner(),
+            "MidGame": MidGameScanner(),
+            "LateReversal": LateReversalScanner(),
+            "BullFlag": StaircaseBreakoutScanner(),
+            "CoiledCobra": CoiledCobraScanner(),
+            "PostPump": PostPumpScanner(),
+            "StepClimber": StepClimberScanner(),
+            "Slingshot": SlingshotScanner(),
+            "MinOne": MinOneScanner(),
+            "Liquidity": LiquidityVacuumScanner(),
+            "Cobra": CobraScanner(),
+            "Mesa": MesaCollapseScanner(),
+            "MeanReversion": MeanReversionScanner(),
+            "GrindSnap": GrindSnapScanner(),
+            "VolCheck": VolCheckScanner(),
+            "Moshe": MosheSpecializedScanner(),
+            "ZScore": ZScoreBreakoutScanner(),
+            "Nitro": NitroScanner(),
+            "VolSnap": VolSnapScanner(),
+            "HDO": HdoScanner(),
+            "Briefing": BriefingScanner()
         }
         
-        self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
+        self.portfolios = {name: AlgorithmPortfolio(name, 100.0) for name in self.scanners}
         self.window_bets = {} 
         self.pending_bets = {}
         self.last_second_exit_triggered = False 
@@ -481,24 +295,10 @@ class PulseApp(TradeEngineMixin, App):
         self.session_win_count = 0 
         self.session_total_trades = 0
         self.session_windows_settled = 0
-        self.session_pnl = 0.0
         self.time_rem_str = "00:00"
         self.blink_state = False
         self.skipped_logs = set()
         self.session_date_logged = False
-        self.last_sl_event_time = 0
-        self.last_execution_time = 0
-        self.exec_safety_mode = "global_lock"
-        self.total_risk_cap = 30.0
-        self.trend_efficiency = {
-            "M-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
-            "S-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
-            "W-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
-            "NEUTRAL": {"mult": 0.5, "lock": "global_lock", "cool": 2.0},
-            "W-DOWN":  {"mult": 0.7, "lock": "global_lock", "cool": 1.5},
-            "S-DOWN":  {"mult": 1.1, "lock": "side_lock", "cool": 1.0},
-            "M-DOWN":  {"mult": 1.2, "lock": "risk_cap", "cool": 1.0},
-        }
         
         # Adjustable global settings
         self.csv_log_freq = 15
@@ -542,21 +342,12 @@ class PulseApp(TradeEngineMixin, App):
         self.gri_settings = {"grind_duration": 100, "snap_duration": 20, "min_slope_pct": 0.1, "reversal_ratio": 0.60}
         self.bri_settings = {"rsi_low": 30, "rsi_high": 70, "odds_thresh": 5.0, "imb_thresh": 2.0, "signal_thresh": 2}
         
-        self.conviction_scaling = {
-            "enabled": False,
-            "high_thresh": 10.0,
-            "extreme_thresh": 20.0,
-            "mult_strong": 1.25,
-            "mult_decisive": 1.50,
-            "penalty": 0.50
-        }
-        
         # Global Skepticism Premium Settings
         self.global_skeptic_odds = 0.05
         self.global_skeptic_guess = 0.03
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.settings_file = os.path.join(script_dir, "pulse_settings.json")
+        self.settings_file = os.path.join(script_dir, "v5_settings.json")
         
         # Base 1.0 weight with 1.67x (20% / 12%) modifier for historically "Strong" scanners
         self.scanner_weights = {k: 1.0 for k in ALGO_INFO.keys()}
@@ -616,16 +407,6 @@ class PulseApp(TradeEngineMixin, App):
                         # Will be applied during on_mount
                         self.saved_algo_enabled = saved["algo_enabled"]
                     self.auto_sync_risk = saved.get("auto_sync_risk", False)
-                    self.exec_safety_mode = saved.get("exec_safety_mode", "global_lock")
-                    self.total_risk_cap = float(saved.get("total_risk_cap", 30.0))
-                    self.shield_time = int(saved.get("shield_time", 45))
-                    self.shield_reach = int(saved.get("shield_reach", 5))
-                    if "trend_efficiency" in saved:
-                        self.trend_efficiency.update(saved["trend_efficiency"])
-                    if "conviction_scaling" in saved:
-                        self.conviction_scaling.update(saved["conviction_scaling"])
-                    if "market_freq" in saved:
-                        self.config.MARKET_FREQ = int(saved["market_freq"])
         except Exception: pass
 
         self.mom_analytics = self._reset_mom_analytics()
@@ -668,7 +449,7 @@ class PulseApp(TradeEngineMixin, App):
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"{self.config.MARKET_FREQ}-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
+            Label(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
             Label("00:00", id="lbl_timer_big", classes="timer_text"),
@@ -702,117 +483,106 @@ class PulseApp(TradeEngineMixin, App):
             ),
             classes="row_main"
         )
-        with Collapsible(title="TRADING CONFIGURATION & RISK", id="settings_collapsible"):
-            with Vertical(classes="input_group"):
-                yield Label("BANKROLL & POSITIONING", classes="input_title")
-                with Horizontal(classes="input_row"):
-                    yield Label("Bet Size:", classes="lbl_sm")
-                    yield Input(placeholder="Bet $", value="1.00", id="inp_amount")
-                    yield RadioSet(
-                        RadioButton("Fixed $", id="rb_fixed", value=True),
-                        RadioButton("% Bank", id="rb_pct"),
-                        id="rs_bet_mode"
-                    )
-                with Horizontal(classes="input_row"):
-                    yield Label("Risk Cap:", classes="lbl_sm")
-                    yield Input(placeholder="Allocated", id="inp_risk_alloc")
-                    yield Label("TP %:", classes="lbl_sm")
-                    yield Input(placeholder="TP %", value="95", id="inp_tp")
-                    yield Label("SL %:", classes="lbl_sm")
-                    yield Input(placeholder="SL %", value="40", id="inp_sl")
-            
-            with Vertical(classes="input_group"):
-                yield Label("PRICING FILTERS & SIMULATION", classes="input_title")
-                with Horizontal(classes="input_row"):
-                    yield Label("Sim Wallet:", classes="lbl_sm")
-                    yield Input(placeholder="Sim Bal", value=f"{self.sim_broker.balance:.2f}", id="inp_sim_bal")
-                    yield Label("Min Diff:", classes="lbl_sm")
-                    yield Input(placeholder="Diff $", value="0", id="inp_min_diff")
-                with Horizontal(classes="input_row"):
-                    yield Label("Price Min:", classes="lbl_sm")
-                    yield Input(placeholder="Min", value="0.55", id="inp_min_price")
-                    yield Label("Price Max:", classes="lbl_sm")
-                    yield Input(placeholder="Max", value="0.80", id="inp_max_price")
-            
-            with Vertical(classes="input_group"):
-                yield Label("SKEPTICISM & PENALTIES", classes="input_title")
-                with Horizontal(classes="input_row"):
-                    yield Label("Odds Skip:", classes="lbl_sm")
-                    yield Input(placeholder="Odds", value=f"{self.global_skeptic_odds:.2f}", id="inp_skeptic_odds")
-                    yield Label("Guess Skip:", classes="lbl_sm")
-                    yield Input(placeholder="Guess", value=f"{self.global_skeptic_guess:.2f}", id="inp_skeptic_guess")
-                with Horizontal(classes="input_row"):
-                    yield Label("Pen %:", classes="lbl_sm")
-                    yield Input(placeholder="Pen%", value=f"{getattr(self, 'penalty_percentage', 0.20)*100:.0f}", id="inp_penalty_pct")
-                    yield Label("Whale Secs:", classes="lbl_sm")
-                    yield Input(placeholder="Secs", value=f"{getattr(self, 'shield_time', 45)}", id="inp_shield_time")
-                    yield Label("Whale Cents:", classes="lbl_sm")
-                    yield Input(placeholder="Cents", value=f"{getattr(self, 'shield_reach', 5)}", id="inp_shield_reach")
-
-        yield Horizontal(
-            Container(
-                Button("BUY UP", id="btn_buy_up", classes="btn_buy_up"), 
-                Button("SELL UP", id="btn_sell_up", classes="btn_sell_up"), 
-                Button("BUY DN", id="btn_buy_down", classes="btn_buy_down"),
-                Button("SELL DN", id="btn_sell_down", classes="btn_sell_down"),
-                Button("pbu", id="btn_pre_up", classes="btn_pre", tooltip="Manually queue a Pre-Buy UP for next window"),
-                Button("pbd", id="btn_pre_down", classes="btn_pre", tooltip="Manually queue a Pre-Buy DOWN for next window"),
-                id="btn_container"
+        yield Container(
+            Label("Bet:", classes="lbl_sm"),
+            Input(placeholder="Bet $", value="1.00", id="inp_amount"),
+            RadioSet(
+                RadioButton("Fixed $", id="rb_fixed", value=True),
+                RadioButton("% Bank", id="rb_pct"),
+                id="rs_bet_mode"
             ),
-            PulseLeanChart(id="pulse_lean_chart"),
-            id="execution_area"
+            Label("Bankroll:", classes="lbl_sm"),
+            Input(placeholder="Risk Bankroll", id="inp_risk_alloc"),
+            Label("TP %:", classes="lbl_sm"),
+            Input(placeholder="TP %", value="95", id="inp_tp"),
+            Label("SL %:", classes="lbl_sm"),
+            Input(placeholder="SL %", value="40", id="inp_sl"),
+            classes="input_group"
         )
-        with Collapsible(title="AVAILABLE SCANNERS & FILTERS", id="scanner_collapsible"):
-            yield Horizontal(
-                Label("Scanners:", classes="lbl_sm"),
-                Button("ALL", id="btn_algo_all"),
-                Button("NONE", id="btn_algo_none"),
-                classes="algo_row"
-            )
-            with Horizontal(id="scanner_container"):
-                with Vertical(classes="scanner_col"):
-                    yield Label("CORE / FREQ", classes="scanner_header")
-                    yield Horizontal(Checkbox(value=True, id="cb_mom"), Label("MOM", id="lbl_mom"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_mm2"), Label("MM2", id="lbl_mm2"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_nit"), Label("NIT", id="lbl_nit"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_cco"), Label("CCO", id="lbl_cco"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_bri"), Label("BRI", id="lbl_bri"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_hdo"), Label("HDO", id="lbl_hdo"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_mos"), Label("MOS", id="lbl_mos"), classes="algo_item")
-
-                with Vertical(classes="scanner_col"):
-                    yield Label("TREND / SURGE", classes="scanner_header")
-                    yield Horizontal(Checkbox(value=False, id="cb_sta"), Label("STA", id="lbl_sta"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_lat"), Label("LAT", id="lbl_lat"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_ste"), Label("STE", id="lbl_ste"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_gri"), Label("GRI ⚙", id="lbl_gri", classes="cfg_lbl"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_npa"), Label("NPA", id="lbl_npa"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_fak"), Label("FAK", id="lbl_fak"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_zsc"), Label("ZSC", id="lbl_zsc"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_vsn"), Label("VSN", id="lbl_vsn"), classes="algo_item")
-
-                with Vertical(classes="scanner_col"):
-                    yield Label("REVERSAL / OSC", classes="scanner_header")
-                    yield Horizontal(Checkbox(value=False, id="cb_mea"), Label("MEA", id="lbl_mea"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_rsi"), Label("RSI", id="lbl_rsi"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_tra"), Label("TRA", id="lbl_tra"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_mes"), Label("MES", id="lbl_mes"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_pos"), Label("POS", id="lbl_pos"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_cob"), Label("COB", id="lbl_cob"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_sli"), Label("SLI", id="lbl_sli"), classes="algo_item")
-
-                with Vertical(classes="scanner_col"):
-                    yield Label("DYNAMICS / MISC", classes="scanner_header")
-                    yield Horizontal(Checkbox(value=False, id="cb_vol"), Label("VOL", id="lbl_vol"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_liq"), Label("LIQ", id="lbl_liq"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_mid"), Label("MID ~", id="lbl_mid", classes="deprecated_lbl"), classes="algo_item")
-                    yield Horizontal(Checkbox(value=False, id="cb_min"), Label("MIN ~", id="lbl_min", classes="deprecated_lbl"), classes="algo_item")
+        yield Container(
+            Label("Sim Bal:", classes="lbl_sm"),
+            Input(placeholder="Sim Bal", value=f"{self.sim_broker.balance:.2f}", id="inp_sim_bal"),
+            Label("Min Diff:", classes="lbl_sm"),
+            Input(placeholder="Min Diff $", value="0", id="inp_min_diff"),
+            Label("Min Price:", classes="lbl_sm"),
+            Input(placeholder="Min Price", value="0.55", id="inp_min_price"),
+            Label("Max Price:", classes="lbl_sm"),
+            Input(placeholder="Max Price", value="0.80", id="inp_max_price"),
+            classes="input_group"
+        )
+        yield Container(
+            Label("Skeptic Odds:", classes="lbl_sm"),
+            Input(placeholder="Odds Penalty", value=f"{self.global_skeptic_odds:.2f}", id="inp_skeptic_odds"),
+            Label("Skeptic Guess:", classes="lbl_sm"),
+            Input(placeholder="Guess Penalty", value=f"{self.global_skeptic_guess:.2f}", id="inp_skeptic_guess"),
+            classes="input_group"
+        )
+        yield Container(
+            Label("Bet Penalty:", classes="lbl_sm"),
+            Input(placeholder="Bet Penalty %", value=f"{getattr(self, 'penalty_percentage', 0.10)*100:.0f}", id="inp_penalty_pct"),
+            Label("", classes="lbl_sm"),  # Spacer
+            Label("", classes="lbl_sm"),  # Spacer
+            classes="input_group"
+        )
+        yield Container(
+            Button("BUY UP", id="btn_buy_up", classes="btn_buy_up"), 
+            Button("BUY DN", id="btn_buy_down", classes="btn_buy_down"),
+            Button("pbu", id="btn_pre_up", classes="btn_pre", tooltip="Manually queue a Pre-Buy UP for next window"),
+            Button("pbd", id="btn_pre_down", classes="btn_pre", tooltip="Manually queue a Pre-Buy DOWN for next window"),
+            Button("SELL UP", id="btn_sell_up", classes="btn_sell_up"), 
+            Button("SELL DN", id="btn_sell_down", classes="btn_sell_down"),
+            id="button_row"
+        )
+        yield Horizontal(
+            Label("Scanners:", classes="lbl_sm"),
+            Button("ALL", id="btn_algo_all"),
+            Button("NONE", id="btn_algo_none"),
+            classes="algo_row"
+        )
+        yield Horizontal(
+            Horizontal(Checkbox(value=False, id="cb_cob"), Label("COB", id="lbl_cob"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_fak"), Label("FAK", id="lbl_fak"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_gri"), Label("GRI ⚙", id="lbl_gri", classes="cfg_lbl"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_lat"), Label("LAT", id="lbl_lat"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_liq"), Label("LIQ", id="lbl_liq"), classes="algo_item"),
+            classes="algo_row"
+        )
+        yield Horizontal(
+            Horizontal(Checkbox(value=False, id="cb_mea"), Label("MEA", id="lbl_mea"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_mes"), Label("MES", id="lbl_mes"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_mid"), Label("MID ~", id="lbl_mid", classes="deprecated_lbl"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_min"), Label("MIN ~", id="lbl_min", classes="deprecated_lbl"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_mos"), Label("MOS", id="lbl_mos"), classes="algo_item"),
+            classes="algo_row"
+        )
+        yield Horizontal(
+            Horizontal(Checkbox(value=False, id="cb_npa"), Label("NPA", id="lbl_npa"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_pos"), Label("POS", id="lbl_pos"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_rsi"), Label("RSI", id="lbl_rsi"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_sli"), Label("SLI", id="lbl_sli"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_sta"), Label("STA", id="lbl_sta"), classes="algo_item"),
+            classes="algo_row"
+        )
+        yield Horizontal(
+            Horizontal(Checkbox(value=False, id="cb_ste"), Label("STE", id="lbl_ste"), classes="algo_item"),
+            Horizontal(Checkbox(value=True, id="cb_mom"), Label("MOM", id="lbl_mom"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_tra"), Label("TRA", id="lbl_tra"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_vol"), Label("VOL", id="lbl_vol"), classes="algo_item"),
+             Horizontal(Checkbox(value=False, id="cb_mm2"), Label("MM2", id="lbl_mm2"), classes="algo_item"),
+             Horizontal(Checkbox(value=False, id="cb_zsc"), Label("ZSC", id="lbl_zsc"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_cco"), Label("CCO", id="lbl_cco"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_nit"), Label("NIT", id="lbl_nit"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_vsn"), Label("VSN", id="lbl_vsn"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_hdo"), Label("HDO", id="lbl_hdo"), classes="algo_item"),
+            Horizontal(Checkbox(value=False, id="cb_bri"), Label("BRI", id="lbl_bri"), classes="algo_item"),
+            classes="algo_row"
+        )
         yield Horizontal(
             Checkbox("TP/SL", value=True, id="cb_tp_active"),
             Checkbox("Tranche Exits", value=False, id="cb_tranche", tooltip="Track Take Profits by individual sequence bets."),
             Checkbox("Strong Only", value=False, id="cb_strong"),
             Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
-            Checkbox("Whale Protect", value=False, id="cb_whale", tooltip="Emergency Exit: Sell all if price is tight near window end."),
+            Checkbox("Whale Protect", value=False, id="cb_whale"),
             Checkbox("Bounce Entry", value=False, id="cb_bounce", tooltip="Wait for price to dip below entry level then recover before executing."),
             id="settings_row",
             classes="live_row"
@@ -851,18 +621,18 @@ class PulseApp(TradeEngineMixin, App):
                 self.save_settings()
             elif cmd == "grow_riskbankroll=false":
                 self.grow_riskbankroll = False
-                self.log_msg("SETTING: Bankroll Compounding | Status: OFF (Hard Cap Active)", level="SYS")
+                self.log_msg("[bold red]Admin Command:[/] Bankroll Compounding DISABLED (Hard Cap Active).")
                 self.save_settings()
             elif cmd == "freeze=true":
                 self.halted = True
-                self.log_msg("SYSTEM: Manual Freeze | Status: ACTIVATED", level="SYS")
+                self.log_msg("[bold red]Admin Command:[/] MANUAL FREEZE ACTIVATED.")
                 self.push_screen(ManualFreezeModal(self))
             elif cmd == "fetchpre":
                 self.log_msg("[bold cyan]Admin Command:[/] Fetching Next Window Prices...")
                 def _do_fetch_pre():
                     try:
-                        next_ts = self.market_data["start_ts"] + self.config.WINDOW_SECONDS
-                        next_slug = f"btc-updown-{self.config.MARKET_FREQ}m-{next_ts}"
+                        next_ts = self.market_data["start_ts"] + TradingConfig.WINDOW_SECONDS
+                        next_slug = f"btc-updown-5m-{next_ts}"
                         d = self.market_data_manager.fetch_polymarket(next_slug)
                         up_ask = d.get("up_ask", 0)
                         dn_ask = d.get("down_ask", 0)
@@ -958,7 +728,7 @@ class PulseApp(TradeEngineMixin, App):
                 try:
                     new_bal = float(event.input.value)
                     self.sim_broker.balance = new_bal
-                    self.log_msg(f"SETTING: Sim Balance | Value: ${new_bal:.2f} | Source: MANUAL", level="SYS")
+                    self.log_msg(f"[bold gold3]Admin:[/] SIM Balance manually set to ${new_bal:.2f}")
                     self.update_balance_ui()
                 except ValueError: pass
             return
@@ -969,8 +739,6 @@ class PulseApp(TradeEngineMixin, App):
             "inp_risk_alloc": "Risk Bankroll",
             "inp_tp": "Take Profit %",
             "inp_sl": "Stop Loss %",
-            "inp_shield_time": "Whale Secs",
-            "inp_shield_reach": "Whale Cents",
             "inp_min_diff": "Min BTC Diff",
             "inp_min_price": "Min Option Price",
             "inp_max_price": "Max Option Price"
@@ -995,7 +763,7 @@ class PulseApp(TradeEngineMixin, App):
                         self.risk_manager.risk_bankroll = max_allowed
                         self.risk_manager.target_bankroll = max_allowed
                     else:
-                        self.log_msg(f"SETTING: {name} | Value: ${new_br:.2f} | Status: UPDATED", level="SYS")
+                        self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]${new_br:.2f}[/]")
                         self.risk_manager.risk_bankroll = new_br
                         self.risk_manager.target_bankroll = new_br
                 except ValueError:
@@ -1009,41 +777,41 @@ class PulseApp(TradeEngineMixin, App):
                 elif event.input.id == "inp_sl":
                     try:
                         self.committed_sl = float(val) / 100
-                        self.log_msg(f"SETTING: {name} | Value: {val}% | Status: COMMITTED", level="SYS")
+                        self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}%[/] (committed)")
                     except ValueError: pass
+                elif event.input.id == "inp_skeptic_odds":
                     try:
                         self.global_skeptic_odds = float(val)
-                        self.log_msg(f"SETTING: Odds Skepticism | Value: {val}c", level="SYS")
+                        self.log_msg(f"[dim]Admin:[/] Set Odds Skepticism to [bold cyan]{val}c[/]")
                     except ValueError: pass
                 elif event.input.id == "inp_skeptic_guess":
                     try:
                         self.global_skeptic_guess = float(val)
-                        self.log_msg(f"SETTING: Guess Skepticism | Value: {val}c", level="SYS")
+                        self.log_msg(f"[dim]Admin:[/] Set Guess Skepticism to [bold cyan]{val}c[/]")
                     except ValueError: pass
                 elif event.input.id == "inp_penalty_pct":
                     try:
                         self.penalty_percentage = float(val) / 100.0
-                        self.log_msg(f"SETTING: Bet Penalty | Value: {val}%", level="SYS")
+                        self.log_msg(f"[dim]Admin:[/] Set Bet Penalty to [bold cyan]{val}%[/]")
                     except ValueError: pass
                 else:
-                    self.log_msg(f"SETTING: {name} | Value: {val}", level="SYS")
+                    self.log_msg(f"[dim]Admin:[/] Set {name} to [bold cyan]{val}[/]")
 
         # Auto-persist any setting that was just changed
-        if not getattr(self, "is_initializing", False):
-            if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach"}:
-                self.save_settings()
+        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct"}:
+            self.save_settings()
 
     async def on_mount(self) -> None:
         self.app_active = True
         self.init_web3()
-        # self.log_msg(f"[bold cyan]=== RUNNING POLYMARKET SNIPER v5.9.5 (CCO Expert) ===[/]", level="ADMIN")
+        self.log_msg(f"[bold cyan]=== RUNNING POLYMARKET SNIPER v5.9.5 (CCO Expert) ===[/]", level="ADMIN")
         # Log the output files being produced
         b_log = os.path.basename(self.sim_broker.log_file)
         c_log = os.path.basename(self.console_log_file)
         m_log = os.path.basename(self.mom_adv_log_file)
-        # self.log_msg(f"[dim]Output Files: {b_log}, {c_log}, {m_log}[/]", level="ADMIN")
+        self.log_msg(f"[dim]Output Files: {b_log}, {c_log}, {m_log}[/]", level="ADMIN")
         
-        # self.log_msg(f"Simulation Started. Bal: ${self.sim_broker.balance}")
+        self.log_msg(f"Simulation Started. Bal: ${self.sim_broker.balance}")
         def_risk = self.sim_broker.balance
         self.query_one("#inp_risk_alloc").value = f"{def_risk:.2f}"
         
@@ -1068,42 +836,22 @@ class PulseApp(TradeEngineMixin, App):
                 with open(self.settings_file, "r") as f:
                     s = json.load(f)
                 # UI inputs
-                sync_map_ui = {
-                    "inp_amount": "inp_amount", "inp_tp": "inp_tp", "inp_sl": "inp_sl",
-                    "inp_min_diff": "inp_min_diff", "inp_min_price": "inp_min_price",
-                    "inp_max_price": "inp_max_price", "inp_skeptic_odds": "inp_skeptic_odds",
-                    "inp_skeptic_guess": "inp_skeptic_guess", "inp_penalty_pct": "inp_penalty_pct",
-                    "inp_sim_bal": "inp_sim_bal"
-                }
-                for fid, json_key in sync_map_ui.items():
-                    if json_key in s:
+                for fid in ["inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct"]:
+                    if fid in s:
                         try: 
-                            val = str(s[json_key])
-                            self.query_one(f"#{fid}").value = val
+                            self.query_one(f"#{fid}").value = str(s[fid])
                         except Exception as e:
                             self.log_msg(f"[dim]Could not load {fid}: {e}[/]")
                 
-                # Extended UI Fields (Whale Shield / Risk Cap)
-                if "shield_time" in s:
-                    self.query_one("#inp_shield_time").value = str(s["shield_time"])
-                if "shield_reach" in s:
-                    self.query_one("#inp_shield_reach").value = str(s["shield_reach"])
-                if "total_risk_cap" in s:
-                    self.query_one("#inp_risk_alloc").value = str(s["total_risk_cap"])
-
                 # Assign to variables for engine access
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
                 self.global_skeptic_guess = float(s.get("inp_skeptic_guess", 0.03))
                 self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
-                self.total_risk_cap = float(s.get("total_risk_cap", 30.0))
-                self.exec_safety_mode = s.get("exec_safety_mode", "global_lock")
-
                 # Restore committed TP/SL from saved values
                 try: self.committed_tp = float(s.get("inp_tp", 95)) / 100
                 except: pass
                 try: self.committed_sl = float(s.get("inp_sl", 40)) / 100
                 except: pass
-                
                 # Checkboxes
                 try: self.query_one("#cb_tp_active").value = bool(s.get("cb_tp_active", False))
                 except: pass
@@ -1111,13 +859,13 @@ class PulseApp(TradeEngineMixin, App):
                 except: pass
                 try: self.query_one("#cb_one_trade").value = bool(s.get("cb_one_trade", False))
                 except: pass
-                
                 # Flags
                 self.sl_plus_mode = bool(s.get("sl_plus_mode", True))
                 self.grow_riskbankroll = bool(s.get("grow_riskbankroll", False))
                 self.mom_buy_mode = s.get("mom_buy_mode", "STD")  # "STD" or "PRE"
                 self.bounce_mode = bool(s.get("bounce_mode", False))
                 self.bounce_dip_cents = float(s.get("bounce_dip_cents", 0.5))
+                self.penalty_percentage = float(s.get("penalty_percentage", 0.10)) # Default 10%
                 try: self.query_one("#cb_bounce").value = self.bounce_mode
                 except: pass
 
@@ -1158,8 +906,6 @@ class PulseApp(TradeEngineMixin, App):
                 # Restore MOM Adv Settings
                 if "mom_adv_settings" in s:
                     self.mom_adv_settings.update(s["mom_adv_settings"])
-                if "mm2_adv_settings" in s:
-                    self.mm2_adv_settings.update(s["mm2_adv_settings"])
 
                 # Restore bet mode
                 if s.get("bet_mode") == "pct":
@@ -1169,7 +915,7 @@ class PulseApp(TradeEngineMixin, App):
                     try: self.query_one("#rb_fixed").value = True
                     except: pass
 
-                # self.log_msg("[dim]Settings restored from disk.[/]")
+                self.log_msg("[dim]Settings restored from disk.[/]")
         except Exception as e:
             self.log_msg(f"[yellow]Could not restore settings: {e}[/]")
         # -----------------------------------
@@ -1238,8 +984,8 @@ class PulseApp(TradeEngineMixin, App):
         elif cid == "cb_bounce": name = "Bounce Entry Mode"
         
         if name:
-            state = "ON" if event.value else "OFF"
-            self.log_msg(f"SETTING: {name} | Status: {state}", level="SYS")
+            state = "ENABLED" if event.value else "DISABLED"
+            self.log_msg(f"{state} {name}", level="ADMIN")
 
     def log_msg(self, msg, level="INFO"):
         """
@@ -1252,25 +998,13 @@ class PulseApp(TradeEngineMixin, App):
         # Calculate TTG Prefix [MM:SS]
         ttg_str = ""
         if self.market_data.get("start_ts", 0) > 0:
-            rem = max(0, self.config.WINDOW_SECONDS - int(now_ts - self.market_data["start_ts"]))
+            rem = max(0, TradingConfig.WINDOW_SECONDS - int(now_ts - self.market_data["start_ts"]))
             ttg_str = f"[{rem//60:02d}:{rem%60:02d}]"
 
         # Color/Category Mapping
         lv = level.upper()
-        level_map = {
-            "ADMIN": "SYS", 
-            "SCAN": "SCAN", 
-            "TRADE": "EXEC", 
-            "MONEY": "RSLT", 
-            "ERROR": "ERR", 
-            "INFO": "INF",
-            "MARKET": "MARKET",
-            "VOLAT": "VOLAT",
-            "BIAS": "BIAS",
-            "STATS": "STATS",
-            "SYS": "SYS"
-        }
-        short_lv = level_map.get(lv, lv[:6])
+        level_map = {"ADMIN": "ADM", "SCAN": "SCN", "TRADE": "TRD", "MONEY": "MON", "ERROR": "ERR", "INFO": "INF"}
+        short_lv = level_map.get(lv, lv[:3])
         tag = f"[{short_lv}]"
         prefix = f"{ttg_str}{tag} "
 
@@ -1282,20 +1016,16 @@ class PulseApp(TradeEngineMixin, App):
         if not getattr(self, "session_date_logged", False):
             self.session_date_logged = True
             date_str = datetime.fromtimestamp(now_ts).strftime('%Y-%m-%d')
-            # self.query_one(RichLog).write(f"[bold white]=== SESSION START: {date_str} ===[/]")
+            self.query_one(RichLog).write(f"[bold white]=== SESSION START: {date_str} ===[/]")
 
         if is_profit:         display_msg = f"[bold green]{prefix}{msg}[/]"
         elif is_loss:         display_msg = f"[bold red]{prefix}{msg}[/]"
-        elif short_lv == "SYS":     display_msg = f"[bold skyblue]{prefix}{msg}[/]"
-        elif short_lv == "SCAN":    display_msg = f"[dim white]{prefix}{msg}[/]"
-        elif short_lv == "EXEC":    display_msg = f"[bold green]{prefix}{msg}[/]"
-        elif short_lv == "RSLT":    display_msg = f"[bold gold3]{prefix}{msg}[/]"
-        elif short_lv == "ERR":     display_msg = f"[bold white on red] !!! {short_lv}: {msg} !!! [/]"
-        elif short_lv == "MARKET":  display_msg = f"[bold cyan]{prefix}{msg}[/]"
-        elif short_lv == "VOLAT":   display_msg = f"[bold magenta]{prefix}{msg}[/]"
-        elif short_lv == "BIAS":    display_msg = f"[bold yellow]{prefix}{msg}[/]"
-        elif short_lv == "STATS":   display_msg = f"[bold white]{prefix}{msg}[/]"
-        else:                       display_msg = f"{prefix}{msg}" # Default INFO style
+        elif lv == "ADMIN":   display_msg = f"[bold skyblue]{prefix}{msg}[/]"
+        elif lv == "SCAN":    display_msg = f"[dim white]{prefix}{msg}[/]"
+        elif lv == "TRADE":   display_msg = f"[bold green]{prefix}{msg}[/]"
+        elif lv == "MONEY":   display_msg = f"[bold gold3]{prefix}{msg}[/]"
+        elif lv == "ERROR":   display_msg = f"[bold white on red] !!! {short_lv}: {msg} !!! [/]"
+        else:                display_msg = f"{prefix}{msg}" # Default INFO style
 
         self.query_one(RichLog).write(display_msg)
         
@@ -1344,9 +1074,6 @@ class PulseApp(TradeEngineMixin, App):
 
             data = {
                 "scanner_weights": self.scanner_weights,
-                "shield_time": int(_v("#inp_shield_time", 45)),
-                "shield_reach": int(_v("#inp_shield_reach", 5)),
-                "total_risk_cap": float(_v("#inp_risk_alloc", 0.0) if _v("#inp_risk_alloc") else self.total_risk_cap),
                 "inp_amount":    _v("#inp_amount",    "1.00"),
                 "inp_tp":        _v("#inp_tp",        "95"),
                 "inp_sl":        _v("#inp_sl",        "40"),
@@ -1391,10 +1118,7 @@ class PulseApp(TradeEngineMixin, App):
                 "bri_settings": self.bri_settings,
                 "mom_adv_settings": self.mom_adv_settings,
                 "mm2_adv_settings": self.mm2_adv_settings,
-                "auto_sync_risk": self.auto_sync_risk,
-                "exec_safety_mode": self.exec_safety_mode,
-                "trend_efficiency": self.trend_efficiency,
-                "market_freq": self.config.MARKET_FREQ
+                "auto_sync_risk": self.auto_sync_risk
             }
             
             # Save HDO threshold from scanner object
@@ -1435,10 +1159,10 @@ class PulseApp(TradeEngineMixin, App):
         lbl = self.query_one("#header_stats")
         cap_display = f" (B.R.: ${self.risk_manager.risk_bankroll:.2f})" if self.risk_initialized else ""
         if is_live:
-            lbl.update(f"[bold red]{self.config.MARKET_FREQ}-LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
+            lbl.update(f"[bold red]5-LIVE[/] | Bal: ${self.live_broker.balance:.2f}{cap_display}")
             lbl.classes = "live_mode"
         else:
-            lbl.update(f"{self.config.MARKET_FREQ}-SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
+            lbl.update(f"5-SIM | Bal: ${self.sim_broker.balance:.2f}{cap_display}")
             lbl.classes = ""
 
     def update_sell_buttons(self):
@@ -1648,12 +1372,12 @@ class PulseApp(TradeEngineMixin, App):
             
             def _do_immediate_prebuy():
                 try:
-                    next_ts = self.market_data.get("start_ts", 0) + self.config.WINDOW_SECONDS
-                    if next_ts <= self.config.WINDOW_SECONDS:
+                    next_ts = self.market_data.get("start_ts", 0) + TradingConfig.WINDOW_SECONDS
+                    if next_ts <= TradingConfig.WINDOW_SECONDS:
                         self.safe_call(self.log_msg, "[bold red]Admin Error:[/] No active window to base 'next' window off of.")
                         return
                         
-                    next_slug = f"btc-updown-{self.config.MARKET_FREQ}m-{next_ts}"
+                    next_slug = f"btc-updown-5m-{next_ts}"
                     d = self.market_data_manager.fetch_polymarket(next_slug)
                     
                     price = d.get("up_ask", 0) if side == "UP" else d.get("down_ask", 0)
