@@ -120,7 +120,7 @@ class SimBroker:
             self.shares[side] += shares
 
         action = "BUY UP" if side == "UP" else "BUY DOWN"
-        msg = f"{action} | Sz: {shares:.2f} | Ent: {price*100:.1f}c | ${usd_amount:.2f} | [{reason}]"
+        msg = f"BUY {side}: {shares:.2f} @ {price*100:.1f}c | ${usd_amount:.2f} [{reason}]"
         self.log_trade("BUY", side, usd_amount, price, shares, context=context, note=reason)
         return True, msg, shares, price
 
@@ -137,7 +137,7 @@ class SimBroker:
             self.shares[side] -= size
             
         action = "SELL UP" if side == "UP" else "SELL DOWN"
-        msg = f"{action} | Sz: {shares:.2f} | Ext: {price*100:.1f}c | ${revenue:.2f} | [{reason}]"
+        msg = f"SELL {side}: {shares:.2f} @ {price*100:.1f}c | ${revenue:.2f} [{reason}]"
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, msg, revenue
     def settle_window(self, winning_side):
@@ -223,7 +223,7 @@ class LiveBroker:
                 ctx['main_bal'] = main_bal
 
                 action = "BUY UP" if side == "UP" else "BUY DOWN"
-                msg = f"{action} | Sz: {size:.2f} | Ent: {actual_price*100:.1f}c | ${actual_cost_usd:.2f} | [{reason}]"
+                msg = f"BUY {side}: {size:.2f} @ {actual_price*100:.1f}c | ${actual_cost_usd:.2f} [{reason}]"
                 self.sim_broker.log_trade("LIVE_BUY", side, actual_cost_usd, actual_price, size, context=ctx, note=reason)
                 return True, msg, size, actual_price
             else:
@@ -278,7 +278,7 @@ class LiveBroker:
                 
                 proceeds = size * eff_price
                 action = "SELL UP" if side == "UP" else "SELL DOWN"
-                msg = f"{action} | Sz: {size:.2f} | Ext: {eff_price*100:.1f}c | ${proceeds:.2f} | [{reason}]"
+                msg = f"SELL {side}: {size:.2f} @ {eff_price*100:.1f}c | ${proceeds:.2f} [{reason}]"
                 self.sim_broker.write_to_log(f"TRADE_EVENT,{datetime.now()},LIVE_SELL,{side},Shares:{size},Price:{eff_price},Total:{proceeds},{reason}")
                 self.update_balance()
                 return True, msg, proceeds

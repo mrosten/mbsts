@@ -296,15 +296,6 @@ class MomentumScanner(BaseScanner):
 
         if elapsed > 280: return "WAIT_EOW"
 
-        # --- Whale Shield Protection ---
-        s_time = self.adv_settings.get("shield_time", 45)
-        s_reach = self.adv_settings.get("shield_reach", 5) / 100.0
-        if elapsed >= s_time:
-            p_move = abs(up_bid - 0.5) 
-            if p_move < s_reach:
-                 self.last_skip_reason = f"Whale Shield Active: Price too tight ({p_move*100:.1f}c < {s_reach*100:.1f}c)"
-                 return "NONE"
-
         # 1. Volatility Gate (Focus on Decisive Markets)
         if atr_5m is not None and atr_5m < atr_floor:
             self.last_skip_reason = f"Low Vol (<${atr_floor})"
@@ -425,15 +416,6 @@ class Momentum2Scanner(BaseScanner):
             self.last_skip_reason = f"Low Vol (<${atr_floor})"
             return "NONE"
             
-        # --- Whale Shield Protection ---
-        s_time = self.adv_settings.get("shield_time", 45)
-        s_reach = self.adv_settings.get("shield_reach", 5) / 100.0
-        if elapsed >= s_time:
-            p_move = abs(up_bid - 0.5) 
-            if p_move < s_reach:
-                 self.last_skip_reason = f"Whale Shield Active: Price too tight ({p_move*100:.1f}c < {s_reach*100:.1f}c)"
-                 return "NONE"
-
         if elapsed > 280 and self.buy_mode == "STD":
             return "WAIT_EOW"
 

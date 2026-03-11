@@ -1,0 +1,53 @@
+# Polymarket Sniper V5 — Session Log
+# Generated: 2026-03-08 11:28:56
+# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.
+#
+# SNAPSHOT FIELDS:
+#   Timestamp      — Wall-clock time of snapshot
+#   SimBal         — Simulated wallet balance (USD)
+#   LiveBal        — Live Polymarket wallet balance (USD)
+#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)
+#   TimeRem        — Time remaining in current 5-min window (MM:SS)
+#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback
+#   BTC_Open       — BTC price at window open (Kraken REST)
+#   BTC_Diff       — BTC_Price minus BTC_Open (USD)
+#   BTC_Range      — Intra-window high-low price range (USD)
+#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)
+#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)
+#   Trend_1H       — 1-hour trend direction (same scale)
+#   RSI_1m         — 14-period RSI on 1-minute Binance candles
+#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)
+#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)
+#   Sig_Cobra      — Cobra scanner signal this tick
+#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick
+#   Sig_Flag       — BullFlag scanner signal this tick
+#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)
+#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL
+#   Active_Scanners— Count of scanners firing a BET signal this tick
+#   UP_Price       — Polymarket UP option midpoint price
+#   DN_Price       — Polymarket DOWN option midpoint price
+#   UP_Bid         — Polymarket UP option best bid
+#   DN_Bid         — Polymarket DOWN option best bid
+#   Shares_UP      — Current UP shares held
+#   Shares_DN      — Current DOWN shares held
+#
+# TRADE_EVENT FIELDS (interleaved rows):
+#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note
+Timestamp,SimBal,LiveBal,RiskBankroll,TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,Master_Score,Master_Status,Active_Scanners,UP_Price,DN_Price,UP_Bid,DN_Bid,Shares_UP,Shares_DN
+2026-03-08 11:28:58,100.00,97.12,100.00,01:02,0.00,0.00,0.00,0.00,0,NEUTRAL,NEUTRAL,50.0,0.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.500,0.500,0.500,0.500,0.00,0.00
+2026-03-08 11:29:14,100.00,97.12,100.00,00:46,67817.82,67756.90,60.92,64.60,3.0,NEUTRAL,S-UP,65.8,39.60,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.515,0.485,0.520,0.490,0.00,0.00
+2026-03-08 11:29:29,100.00,97.12,100.00,00:31,67816.75,67756.90,59.85,64.60,57.0,NEUTRAL,S-UP,66.2,42.77,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.785,0.215,0.800,0.230,0.00,0.00
+2026-03-08 11:29:44,100.00,97.12,100.00,00:16,67817.82,67756.90,60.92,64.60,77.1,NEUTRAL,S-UP,66.7,42.77,OFF,OFF,OFF,OFF,1,BUY_UP,1,0.885,0.115,0.890,0.119,0.00,0.00
+TRADE_EVENT,2026-03-08 11:29:59,SETTLE,UP,0.00,1.00000,1.00000,0.00000,0.00,0.00,N/A,0.00,100.00,Win: UP | PnL: 0.00
+2026-03-08 11:30:01,100.00,97.12,100.00,00:01,67820.69,67756.90,63.79,64.60,95.0,NEUTRAL,S-UP,66.7,42.77,OFF,OFF,OFF,OFF,1,BUY_UP,1,0.975,0.025,0.980,0.030,0.00,0.00
+2026-03-08 11:30:17,100.00,97.12,100.00,04:43,67832.70,67820.69,12.01,12.01,-11.0,NEUTRAL,S-UP,68.8,35.20,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.445,0.545,0.450,0.560,0.00,0.00
+2026-03-08 11:30:33,100.00,97.12,100.00,04:27,67820.00,67820.69,-0.69,22.99,-39.1,NEUTRAL,S-UP,60.6,45.85,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.300,0.695,0.309,0.700,0.00,0.00
+2026-03-08 11:30:48,100.00,97.12,100.00,04:12,67795.80,67820.69,-24.89,47.19,-37.0,NEUTRAL,S-UP,59.7,54.92,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.315,0.680,0.319,0.689,0.00,0.00
+2026-03-08 11:31:04,100.00,97.12,100.00,03:57,67792.25,67820.69,-28.44,68.19,-31.0,NEUTRAL,S-UP,60.3,54.92,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.345,0.655,0.349,0.659,0.00,0.00
+2026-03-08 11:31:19,100.00,97.12,100.00,03:41,67774.80,67820.69,-45.89,68.19,-55.0,NEUTRAL,S-UP,58.7,45.49,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.225,0.775,0.229,0.779,0.00,0.00
+2026-03-08 11:31:34,100.00,97.12,100.00,03:26,67479.67,67820.69,-341.02,363.32,-57.1,NEUTRAL,S-UP,56.0,49.75,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.215,0.785,0.219,0.790,0.00,0.00
+2026-03-08 11:31:50,100.00,97.12,100.00,03:10,67786.10,67820.69,-34.59,363.32,-49.0,NEUTRAL,S-UP,57.5,49.75,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.255,0.745,0.259,0.749,0.00,0.00
+2026-03-08 11:32:05,100.00,97.12,100.00,02:55,67772.00,67820.69,-48.69,363.32,-67.0,NEUTRAL,S-UP,55.9,49.88,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.165,0.835,0.169,0.839,0.00,0.00
+2026-03-08 11:32:21,100.00,97.12,100.00,02:39,67772.00,67820.69,-48.69,363.32,-77.0,NEUTRAL,S-UP,54.8,47.77,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.115,0.885,0.119,0.889,0.00,0.00
+2026-03-08 11:32:37,100.00,97.12,100.00,02:23,67763.43,67820.69,-57.26,363.32,-71.1,NEUTRAL,S-UP,56.3,50.55,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.145,0.855,0.149,0.860,0.00,0.00
+2026-03-08 11:32:53,100.00,97.12,100.00,02:07,67772.00,67820.69,-48.69,363.32,-49.1,NEUTRAL,S-UP,59.6,57.87,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.255,0.745,0.259,0.750,0.00,0.00

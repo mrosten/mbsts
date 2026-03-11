@@ -35,13 +35,15 @@ class GlobalSettingsModal(ModalScreen):
                     ("Side Lock", "side_lock"),
                     ("Unrestricted", "unrestricted"),
                     ("Risk Cap", "risk_cap"),
-                    ("Dynamic", "dynamic")
+                    ("Dynamic", "dynamic"),
+                    ("Original (v5bu6)", "original")
                 ], id="sel_exec_safety", value="global_lock")
             with Horizontal(id="modal_risk_cap"):
                 yield Label("Total Risk Cap ($):", id="lbl_risk_cap")
                 yield Input(placeholder="30.00", id="inp_risk_cap")
             with Horizontal(id="modal_trend_eff"):
                 yield Button("TREND EFFICIENCY", id="btn_trend_eff", variant="warning")
+                yield Button("CONVICTION SCALING", id="btn_conviction_scaling", variant="success")
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
 
@@ -97,7 +99,10 @@ class GlobalSettingsModal(ModalScreen):
         row_eff.styles.height = 3
         row_eff.styles.align = ("center", "middle")
         row_eff.styles.margin = (0, 0, 1, 0)
-        self.query_one("#btn_trend_eff").styles.width = 25
+        self.query_one("#btn_trend_eff").styles.width = 20
+        self.query_one("#btn_trend_eff").styles.margin = (0, 1)
+        self.query_one("#btn_conviction_scaling").styles.width = 20
+        self.query_one("#btn_conviction_scaling").styles.margin = (0, 1)
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -111,6 +116,11 @@ class GlobalSettingsModal(ModalScreen):
     def open_trend_eff(self):
         if self.main_app:
             self.main_app.push_screen(TrendEfficiencyModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_conviction_scaling")
+    def open_conviction_scaling(self):
+        if self.main_app:
+            self.main_app.push_screen(ConvictionScalingModal(self.main_app))
 
     @on(Button.Pressed, "#btn_modal_close")
     def close_modal(self):
@@ -3692,4 +3702,125 @@ class TrendEfficiencyModal(ModalScreen):
             self.main_app.trend_efficiency.update(new_cfg)
             self.main_app.save_settings()
             self.main_app.log_msg("⚙️ Trend Efficiency Updated", level="ADMIN")
+        self.dismiss()
+
+
+class ConvictionScalingModal(ModalScreen):
+    """A modal to configure bet scaling based on market odds conviction."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #00ff00]Market Conviction Scaling[/]", id="modal_title")
+            yield Static("Scale bets based on market odds strength (odds_score).", id="modal_subtitle")
+            
+            with Vertical(id="conviction_payload"):
+                with Horizontal(classes="conv_row"):
+                    yield Label("Enable Conviction Scaling:", classes="conv_lbl")
+                    yield Checkbox(id="cb_conviction_enabled")
+                
+                with Vertical(classes="conv_section"):
+                    yield Label("1. Thresholds (¢)", classes="conv_sec_title")
+                    with Horizontal(classes="conv_row"):
+                        yield Label("Strong Threshold (¢):", classes="conv_lbl_sub")
+                        yield Input(id="inp_conv_high", placeholder="10.0")
+                    with Horizontal(classes="conv_row"):
+                        yield Label("Decisive Threshold (¢):", classes="conv_lbl_sub")
+                        yield Input(id="inp_conv_extreme", placeholder="20.0")
+                
+                with Vertical(classes="conv_section"):
+                    yield Label("2. Multipliers (x)", classes="conv_sec_title")
+                    with Horizontal(classes="conv_row"):
+                        yield Label("Strong Multiplier:", classes="conv_lbl_sub")
+                        yield Input(id="inp_conv_mult_strong", placeholder="1.25")
+                    with Horizontal(classes="conv_row"):
+                        yield Label("Decisive Multiplier:", classes="conv_lbl_sub")
+                        yield Input(id="inp_conv_mult_decisive", placeholder="1.50")
+                    with Horizontal(classes="conv_row"):
+                        yield Label("Weak Odds Penalty:", classes="conv_lbl_sub")
+                        yield Input(id="inp_conv_penalty", placeholder="0.50")
+                
+            yield Static("[dim]Penalty applies when odds < 3¢. Multipliers apply when scanner matches sentiment.[/]", classes="conv_hint")
+            
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE & CLOSE", id="btn_conv_save", variant="primary")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        c = self.query_one("#modal_container")
+        c.styles.background = "#1a1a1a"
+        c.styles.border = ("thick", "#00ff00")
+        c.styles.padding = (1, 2)
+        c.styles.width = 50
+        c.styles.height = "auto"
+        c.styles.align = ("center", "middle")
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.width = "100%"
+        self.query_one("#modal_subtitle").styles.text_align = "center"
+        self.query_one("#modal_subtitle").styles.width = "100%"
+        self.query_one("#modal_subtitle").styles.color = "#666666"
+        self.query_one("#modal_subtitle").styles.margin = (0, 0, 1, 0)
+
+        for row in self.query(".conv_row"):
+            row.styles.height = 3
+            row.styles.align = ("center", "middle")
+        
+        for sec in self.query(".conv_section"):
+            sec.styles.border = ("ascii", "#333333")
+            sec.styles.margin = (1, 0)
+            sec.styles.padding = (0, 1)
+
+        for title in self.query(".conv_sec_title"):
+            title.styles.bold = True
+            title.styles.color = "#00ff00"
+        
+        for lbl in self.query(".conv_lbl"):
+            lbl.styles.width = 25
+        for lbl in self.query(".conv_lbl_sub"):
+            lbl.styles.width = 20
+        
+        for inp in self.query("Input"):
+            inp.styles.width = 10
+        
+        hint = self.query_one(".conv_hint")
+        hint.styles.text_align = "center"
+        hint.styles.width = "100%"
+        hint.styles.margin = (1, 0)
+
+        # Load current values
+        if self.main_app:
+            s = getattr(self.main_app, "conviction_scaling", {})
+            self.query_one("#cb_conviction_enabled").value = s.get("enabled", False)
+            self.query_one("#inp_conv_high").value = str(s.get("high_thresh", 10.0))
+            self.query_one("#inp_conv_extreme").value = str(s.get("extreme_thresh", 20.0))
+            self.query_one("#inp_conv_mult_strong").value = str(s.get("mult_strong", 1.25))
+            self.query_one("#inp_conv_mult_decisive").value = str(s.get("mult_decisive", 1.50))
+            self.query_one("#inp_conv_penalty").value = str(s.get("penalty", 0.50))
+
+        footer = self.query_one("#modal_footer")
+        footer.styles.align = ("center", "middle")
+        footer.styles.width = "100%"
+        footer.styles.margin = (1, 0, 0, 0)
+
+    @on(Button.Pressed, "#btn_conv_save")
+    def save_and_close(self):
+        if self.main_app:
+            try:
+                new_s = {
+                    "enabled": self.query_one("#cb_conviction_enabled").value,
+                    "high_thresh": float(self.query_one("#inp_conv_high").value),
+                    "extreme_thresh": float(self.query_one("#inp_conv_extreme").value),
+                    "mult_strong": float(self.query_one("#inp_conv_mult_strong").value),
+                    "mult_decisive": float(self.query_one("#inp_conv_mult_decisive").value),
+                    "penalty": float(self.query_one("#inp_conv_penalty").value)
+                }
+                self.main_app.conviction_scaling = new_s
+                self.main_app.save_settings()
+                self.main_app.log_msg("⚙️ Market Conviction Scaling Updated", level="ADMIN")
+            except Exception as e:
+                self.main_app.log_msg(f"[red]Error saving conviction settings: {e}[/]")
         self.dismiss()

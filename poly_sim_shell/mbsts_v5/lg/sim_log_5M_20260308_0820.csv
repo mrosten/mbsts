@@ -1,0 +1,55 @@
+# Polymarket Sniper V5 — Session Log
+# Generated: 2026-03-08 08:20:05
+# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.
+#
+# SNAPSHOT FIELDS:
+#   Timestamp      — Wall-clock time of snapshot
+#   SimBal         — Simulated wallet balance (USD)
+#   LiveBal        — Live Polymarket wallet balance (USD)
+#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)
+#   TimeRem        — Time remaining in current 5-min window (MM:SS)
+#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback
+#   BTC_Open       — BTC price at window open (Kraken REST)
+#   BTC_Diff       — BTC_Price minus BTC_Open (USD)
+#   BTC_Range      — Intra-window high-low price range (USD)
+#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)
+#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)
+#   Trend_1H       — 1-hour trend direction (same scale)
+#   RSI_1m         — 14-period RSI on 1-minute Binance candles
+#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)
+#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)
+#   Sig_Cobra      — Cobra scanner signal this tick
+#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick
+#   Sig_Flag       — BullFlag scanner signal this tick
+#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)
+#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL
+#   Active_Scanners— Count of scanners firing a BET signal this tick
+#   UP_Price       — Polymarket UP option midpoint price
+#   DN_Price       — Polymarket DOWN option midpoint price
+#   UP_Bid         — Polymarket UP option best bid
+#   DN_Bid         — Polymarket DOWN option best bid
+#   Shares_UP      — Current UP shares held
+#   Shares_DN      — Current DOWN shares held
+#
+# TRADE_EVENT FIELDS (interleaved rows):
+#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note
+Timestamp,SimBal,LiveBal,RiskBankroll,TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,Master_Score,Master_Status,Active_Scanners,UP_Price,DN_Price,UP_Bid,DN_Bid,Shares_UP,Shares_DN
+2026-03-08 08:20:06,100.00,97.12,100.00,04:54,0.00,0.00,0.00,0.00,0,NEUTRAL,NEUTRAL,50.0,0.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.500,0.500,0.500,0.500,0.00,0.00
+2026-03-08 08:20:21,100.00,97.12,100.00,04:39,67081.90,67078.50,3.40,10.49,21.0,NEUTRAL,M-DOWN,40.7,29.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.605,0.395,0.609,0.399,0.00,0.00
+2026-03-08 08:20:36,100.00,97.12,100.00,04:24,67102.00,67078.50,23.50,23.60,19.0,NEUTRAL,M-DOWN,40.7,29.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.595,0.405,0.599,0.409,0.00,0.00
+2026-03-08 08:20:52,100.00,97.12,100.00,04:08,67081.11,67078.50,2.61,23.60,33.1,NEUTRAL,M-DOWN,41.9,29.23,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.665,0.335,0.670,0.339,0.00,0.00
+TRADE_EVENT,2026-03-08 08:21:01,BUY,UP,6.40,0.70000,0.70000,0.00000,9.14,41.92,M-DOWN,0.00,93.60,BET_UP_NIT|BTC Gap $30.78 > ATR $29.23
+2026-03-08 08:21:07,93.60,97.12,93.60,03:53,67109.28,67078.50,30.78,30.78,40.0,NEUTRAL,M-DOWN,41.9,29.23,OFF,OFF,OFF,OFF,1,BUY_UP,1,0.705,0.300,0.710,0.310,9.14,0.00
+TRADE_EVENT,2026-03-08 08:21:07,BUY,UP,6.40,0.68100,0.68100,0.00000,9.40,43.75,M-DOWN,0.00,87.20,BET_UP_VSN|Vol Lead U! 205.4B > 100B
+2026-03-08 08:21:23,87.20,97.12,87.20,03:37,67121.00,67078.50,42.50,42.50,48.9,NEUTRAL,M-DOWN,45.6,28.77,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.745,0.255,0.749,0.260,18.54,0.00
+2026-03-08 08:21:39,87.20,97.12,87.20,03:21,67127.50,67078.50,49.00,49.00,45.0,NEUTRAL,M-DOWN,46.5,29.70,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.725,0.275,0.729,0.279,18.54,0.00
+2026-03-08 08:21:54,87.20,97.12,87.20,03:06,67121.65,67078.50,43.15,49.00,49.1,NEUTRAL,M-DOWN,46.5,29.70,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.745,0.255,0.750,0.259,18.54,0.00
+2026-03-08 08:22:10,87.20,97.12,87.20,02:50,67129.81,67078.50,51.31,51.31,61.0,NEUTRAL,M-DOWN,48.3,31.92,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.805,0.195,0.809,0.199,18.54,0.00
+2026-03-08 08:22:25,87.20,97.12,87.20,02:35,67131.70,67078.50,53.20,53.20,67.1,NEUTRAL,M-DOWN,46.6,31.75,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.835,0.165,0.840,0.169,18.54,0.00
+2026-03-08 08:22:41,87.20,97.12,87.20,02:19,67131.60,67078.50,53.10,53.20,35.0,NEUTRAL,M-DOWN,44.7,34.15,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.675,0.325,0.679,0.329,18.54,0.00
+2026-03-08 08:22:57,87.20,97.12,87.20,02:03,67133.04,67078.50,54.54,54.54,72.1,NEUTRAL,M-DOWN,49.9,35.82,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.865,0.140,0.870,0.149,18.54,0.00
+2026-03-08 08:23:12,87.20,97.12,87.20,01:48,67149.22,67078.50,70.72,70.72,83.1,NEUTRAL,M-DOWN,51.2,37.30,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.915,0.085,0.920,0.089,18.54,0.00
+2026-03-08 08:23:28,87.20,97.12,87.20,01:32,67158.30,67078.50,79.80,79.80,84.0,NEUTRAL,M-DOWN,53.2,36.27,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.920,0.080,0.930,0.090,18.54,0.00
+2026-03-08 08:23:43,87.20,97.12,87.20,01:17,67155.59,67078.50,77.09,79.80,85.0,NEUTRAL,M-DOWN,51.8,36.27,OFF,OFF,OFF,OFF,2,BUY_UP,2,0.925,0.075,0.930,0.080,18.54,0.00
+TRADE_EVENT,2026-03-08 08:23:50,BUY,UP,1.60,0.86000,0.86000,0.00000,1.86,50.76,M-DOWN,0.00,85.60,BET_UP_MOSHE_90|High Probability Win (BTC Diff: $77.09)
+2026-03-08 08:23:59,85.60,97.12,85.60,01:01,67155.59,67078.50,77.09,79.80,87.0,NEUTRAL,M-DOWN,50.8,36.69,OFF,OFF,OFF,OFF,3,BUY_UP,3,0.935,0.065,0.940,0.070,20.40,0.00

@@ -63,6 +63,10 @@ class MarketDataManager:
         self.ws_thread = threading.Thread(target=self._start_ws_thread, daemon=True)
         self.ws_thread.start()
         
+        # Connection status tracking to suppress log spam
+        self.connection_lost = False
+        self.just_reconnected = False
+        
     def _start_ws_thread(self):
         """Initializes a new event loop for the background WebSocket connection."""
         time.sleep(1) # Allow Textual UI time to mount before processing
@@ -98,8 +102,18 @@ class MarketDataManager:
                 self.log(f"[yellow]Kraken WS Disconnected: {e}. Reconnecting in 3s...[/]")
                 await asyncio.sleep(3)
 
-    def log(self, msg):
+    def log(self, msg, is_connection_error=False):
         try:
+            if is_connection_error:
+                if self.connection_lost:
+                    return # Suppress redundant connection error logs
+                self.connection_lost = True
+            elif self.connection_lost:
+                # If we get here with a successful call (non-connection error), reset status
+                self.log("[green]INTERNET CONNECTION RESTORED[/]")
+                self.connection_lost = False
+                self.just_reconnected = True
+
             if self.logger:
                 self.logger(msg)
         except Exception:
@@ -135,7 +149,7 @@ class MarketDataManager:
                 
             self.last_4h_update = time.time()
         except requests.RequestException as e:
-            self.log(f"[yellow]Warn: 4H Trend Update Failed: {e}[/]")
+            self.log(f"[yellow]Warn: 4H Trend Update Failed: {e}[/]", is_connection_error=True)
         except Exception as e:
             self.log(f"[red]Error: 4H Trend Calc Error: {e}[/]")
 
@@ -170,7 +184,7 @@ class MarketDataManager:
                 
             self.last_1h_update = time.time()
         except requests.RequestException as e:
-            self.log(f"[yellow]Warn: 1H Trend Update Failed: {e}[/]")
+            self.log(f"[yellow]Warn: 1H Trend Update Failed: {e}[/]", is_connection_error=True)
         except Exception as e:
             self.log(f"[red]Error: 1H Trend Calc Error: {e}[/]")
 
@@ -190,7 +204,7 @@ class MarketDataManager:
             data = r.json()
             return [float(x[4]) for x in data], [float(x[3]) for x in data], [float(x[2]) for x in data], data
         except Exception as e:
-            self.log(f"[yellow]Warn: candles Fetch Failed: {e}[/]")
+            self.log(f"[yellow]Warn: candles Fetch Failed: {e}[/]", is_connection_error=True)
             return [], [], [], []
 
     def fetch_current_price(self):
@@ -269,9 +283,8 @@ class MarketDataManager:
         return self.price_history[0]['price'] if self.price_history else curr_price
 
     def fetch_polymarket(self, slug):
-        up_id, down_id = None, None
-        up_bid, down_bid = 0.5, 0.5
         up_ask, down_ask = 0.51, 0.51
+        vol_up, vol_dn = 0, 0
         try:
             m = requests.get(f"https://gamma-api.polymarket.com/markets/slug/{slug}", timeout=2).json()
             ids = m["clobTokenIds"] if isinstance(m["clobTokenIds"], list) else json.loads(m["clobTokenIds"])
@@ -347,7 +360,7 @@ class MarketDataManager:
             vol_dn = self.market_data.get("vol_dn", 0)
             
         except Exception as e:
-            self.log(f"[red]Polymarket Fetch Error ({slug}): {e}[/]")
+            self.log(f"[red]Polymarket Fetch Error ({slug}): {e}[/]", is_connection_error=True)
         
         # Best Estimate of 'Current Price' is Midpoint or Bid/Ask
         def _best(b, a):
