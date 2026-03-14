@@ -30,6 +30,8 @@ class TradingConfig:
     MAX_BET_SESSION_CAP: float = 100.0
     LIVE_RISK_DIVISOR: int = 8 
     TOLERANCE_PCT: float = 0.002
+    REQUEST_TIMEOUT: float = 7.5  # Increased from 2.5s for GCP stability
+    HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")
 
 # --- Web3 & RPC Config ---
 POLYGON_RPC_LIST = [
@@ -43,6 +45,12 @@ POLYGON_RPC_LIST = list(dict.fromkeys(filter(None, POLYGON_RPC_LIST)))
 
 CHAINLINK_BTC_FEED = "0xc907E116054Ad103354f2D350FD2514433D57F6f"
 CHAINLINK_ABI = '[{"inputs":[],"name":"latestAnswer","outputs":[{"internalType":"int256","name":"","type":"int256"}],"stateMutability":"view","type":"function"}]'
+
+# --- FTP Config ---
+FTP_HOST = "ftps5.us.freehostia.com"
+FTP_USER = "mosros"
+FTP_PASS = "Myrost4012!!mmm"
+FTP_ROOT = "myfavoritemalshin.space"
 
 # Live Config
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")

@@ -5,7 +5,13 @@ from datetime import datetime
 from eth_account import Account
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, BalanceAllowanceParams
-from .config import PRIVATE_KEY, PROXY_ADDRESS, CHAIN_ID, HOST
+
+# Handle imports for both package and direct execution
+try:
+    from .config import PRIVATE_KEY, PROXY_ADDRESS, CHAIN_ID, HOST
+except ImportError:
+    # Running directly from vortex_pulse directory
+    from config import PRIVATE_KEY, PROXY_ADDRESS, CHAIN_ID, HOST
 
 class SimBroker:
     def __init__(self, balance, log_file):
@@ -70,6 +76,13 @@ class SimBroker:
                 f.write(meta + header + "\n")
 
     def write_to_log(self, text):
+        # Access app for log settings if possible. 
+        # PulseApp sets self.app = self on this broker during init.
+        current_app = getattr(self, "app", None)
+        if current_app and hasattr(current_app, "log_settings"):
+            if not current_app.log_settings.get("main_csv", True):
+                return
+
         with open(self.log_file, 'a') as f:
             f.write(text + "\n")
 
@@ -167,7 +180,7 @@ class LiveBroker:
         self.client = None
         self.sim_broker = sim_broker_ref 
         self.balance = 0.0
-        self.init_client()
+        # init_client() is now called by the App via a background worker to prevent startup hangs.
 
     def init_client(self):
         if not PRIVATE_KEY: return

@@ -1,6 +1,6 @@
 # Polymarket Vortex Pulse V5 — Complete System Reference
 
-> **Version:** 5.9.5  
+> **Version:** 5.9.11  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
 > **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)
 
@@ -11,10 +11,13 @@
 Polymarket Vortex Pulse V5 is a fully automated, high-frequency execution bot that trades short-term directional binary options (UP/DOWN) on the Polymarket BTC 5-minute market. It runs inside a rich terminal UI (Textual TUI), evaluates **20 independent technical scanners** every second, manages risk dynamically, and can execute both simulated and live limit orders against the Polymarket CLOB.
 
 Key capabilities:
+- **Trade Protection Suite (v5.9.11)** — Configurable **Late-Window Lockout (LWL)** and **Sentiment Guard** to prevent losses from last-second volatility and oracle mismatches.
 - **20 scanners** running in parallel, each with independent signal logic and full configurability
 - **Advanced scanner configuration modals** for all algorithms with individual parameter tuning
 - **Global skepticism filters** for odds and guess conflicts with premium adjustments
 - **Simulation and Live modes** — identical execution path, switchable at runtime
+- **Session-Specific Logging** — automated creation of a dedicated subfolder for every run
+- **Low-Resolution Verification Graphs** — compact 160x80 diagnostic charts saving 80% disk space
 - **Pending order queue** with automatic delayed execution when price enters bounds
 - **TP/SL monitoring** with SL+ counter-trade recovery and per-scanner whale shield
 - **Pre-buy system** for next-window anticipatory entries with mode selection
@@ -23,7 +26,7 @@ Key capabilities:
 - **Enhanced MOM/MM2** with Select widgets, mode explanations, and VECTOR scoring
 - **Safe UI thread calls** preventing crashes during shutdown
 - **Comprehensive CSV + console logging** with full field documentation
-- **Persistent settings** saved to `v5_settings.json` across sessions
+- **Persistent settings** saved to `pulse_settings.json` across sessions
 
 ---
 
@@ -31,9 +34,9 @@ Key capabilities:
 
 ```
 vortex_pulse/
-├── main.py              Entry point — mode selection, balance input, log file setup
-├── app.py               Core PulseApp class (TUI, compose, event handlers, settings)
-├── trade_engine.py      TradeEngineMixin — market loop, scanners, TP/SL, settlement
+├── main.py              Entry point — mode selection, balance input, session folder creation
+├── app.py               Core PulseApp class (TUI, compose, event handlers, settings persistence)
+├── trade_engine.py      TradeEngineMixin — market loop, scanners, TP/SL, settlement logic
 ├── broker.py            SimBroker, LiveBroker, TradeExecutor — all buy/sell execution
 ├── market.py            MarketDataManager — BTC prices, Polymarket CLOB, trends, ATR
 ├── risk.py              RiskManager + AlgorithmPortfolio — bankroll, bet sizing
@@ -41,20 +44,23 @@ vortex_pulse/
 ├── ui_modals.py         Modal screens (GlobalSettings, AlgoInfo, MOMExpert, BullFlag, etc.)
 ├── config.py            TradingConfig dataclass, Web3/RPC constants, env vars
 ├── __init__.py          Package init
-├── v5_settings.json     Auto-generated persistent settings (created on first run)
-└── lg/                  Session log directory (auto-created)
-    ├── sim_log_5M_YYYYMMDD_HHMM.csv          Main session CSV log
-    ├── sim_log_5M_YYYYMMDD_HHMM_console.txt   Rich console mirror (ASCII-scrubbed)
-    └── momentum_adv_YYYYMMDD_HHMMSS.csv        MOM Expert analytics log
+├── pulse_settings.json  Auto-generated persistent settings (created on first run)
+└── lg/                  Log archive root
+    └── session_YYYYMMDD_HHMMSS/     Unique folder for each run
+        ├── pulse_log_5M_*.csv           Main session CSV log
+        ├── pulse_log_5M_*_console.txt    Rich console mirror (ASCII-scrubbed)
+        ├── pulse_log_5M_*_verification.html  HTML verification report
+        ├── momentum_adv_*.csv             MOM Expert analytics log
+        └── graphs/                      Verification graph PNGs (160x80)
 ```
 
 ### File Responsibilities
 
 | File | Size (bytes) | Lines | Role |
 |---|---|---|---|
-| `main.py` | 1,487 | 44 | CLI entry point. Prompts for SIM/LIVE mode, initial balance, log filename. Creates `SimBroker`, `LiveBroker`, launches `PulseApp`. |
-| `app.py` | 58,658 | ~1,137 | `PulseApp(TradeEngineMixin, App)` — Textual CSS, `__init__`, `compose()` (full UI layout), all event handlers (`on_checkbox_changed`, `on_label_click`, `on_input_submitted`, `on_button_pressed`), `on_mount` (timer setup, settings restore), `log_msg` (Rich + file logging), `save_settings`, `init_web3`, `update_balance_ui`, `update_sell_buttons`, global skepticism inputs, safe UI calls. |
-| `trade_engine.py` | 72,950 | ~1,233 | `TradeEngineMixin` — mixed into PulseApp. Contains: `fetch_market_loop` (1Hz main tick), `_check_tpsl`, `_run_last_second_exit`, `update_timer`, `_check_bankroll_exhaustion`, `trigger_settlement`, `_add_risk_revenue`, `trigger_buy`, `trigger_sell_all`, pre-buy logic, MOM analytics writer, global skepticism filter, window briefing generation, safe UI thread wrapper. |
+| `main.py` | 1,800 | 50 | CLI entry point. Creates unique `session_` subdirectories. Prompts for SIM/LIVE mode, initial balance, and optional log filename override. |
+| `app.py` | 65,000 | ~2,000 | `PulseApp` — TUI layout, event handlers (`on_checkbox_changed`, `on_input_changed`, `on_bet_mode_changed`), `on_mount` (timer setup, robust settings restore), `save_settings` (auto-persistence). |
+| `trade_engine.py` | 85,000 | ~1,900 | `TradeEngineMixin` — 1Hz tick, TP/SL logic, settlement flow, and the corrected HTML audit generator that ensures window PnL matches console truth. |
 | `broker.py` | 16,267 | ~276 | `SimBroker` (balance, shares, CSV log writer, buy/sell/settle/promote_prebuy), `LiveBroker` (Polymarket CLOB client via `py_clob_client`, real buy/sell against on-chain order book), `TradeExecutor` (routes buy/sell to sim or live broker). |
 | `market.py` | 14,464 | ~328 | `MarketDataManager` — Kraken WebSocket (primary BTC price), Chainlink Oracle (secondary), Binance REST (tertiary fallback), Polymarket CLOB pricing, 4H/1H trend calculation, ATR, RSI, Bollinger Bands, price history tracking. |
 | `risk.py` | 5,836 | ~143 | `RiskManager` — bankroll tracking, bet sizing (12% base, trend penalty, consecutive-loss reduction, min/max clamping). `AlgorithmPortfolio` — per-scanner P&L tracking, win/loss counters, active trade management. |

@@ -9,7 +9,12 @@ from textual.containers import Horizontal, Vertical, Container
 from textual.widgets import Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, Select
 from textual import on
 
-from .scanners import ALGO_INFO
+# Handle imports for both package and direct execution
+try:
+    from .scanners import ALGO_INFO
+except ImportError:
+    # Running directly from vortex_pulse directory
+    from scanners import ALGO_INFO
 
 
 class GlobalSettingsModal(ModalScreen):
@@ -144,15 +149,101 @@ class GlobalSettingsModal(ModalScreen):
                 self.main_app.auto_sync_risk = self.query_one("#cb_sync_risk").value
                 self.main_app.exec_safety_mode = self.query_one("#sel_exec_safety").value
                 self.main_app.total_risk_cap = float(self.query_one("#inp_risk_cap").value)
+                
+                # Check for frequency change
                 if hasattr(self.main_app, "config"):
                     old_freq = self.main_app.config.MARKET_FREQ
                     new_freq = int(self.query_one("#sel_market_freq").value)
                     if old_freq != new_freq:
-                        self.main_app.config.MARKET_FREQ = new_freq
-                        self.main_app.log_msg(f"SETTING: Market Frequency switched to {new_freq}m", level="SYS")
+                        # Push the safety prompt!
+                        self.main_app.push_screen(FrequencySwitchPrompt(self.main_app, new_freq))
+                        self.dismiss()
+                        return
+
                 self.main_app.save_settings()
             except Exception:
                 pass
+        self.dismiss()
+
+
+class FrequencySwitchPrompt(ModalScreen):
+    """A dialog that warns about frequency changes and offers position exit."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app, new_freq):
+        super().__init__()
+        self.main_app = main_app
+        self.new_freq = new_freq
+
+    def compose(self) -> ComposeResult:
+        pos_count = len(getattr(self.main_app, "window_bets", {}))
+        with Vertical(id="modal_container"):
+            yield Static("[bold yellow]⚠️ WARNING: MARKET FREQUENCY CHANGE[/]", id="modal_title")
+            yield Static(f"Finalizing session for {self.main_app.config.MARKET_FREQ}m market.", classes="prompt_text")
+            yield Static(f"New session will begin for [bold cyan]{self.new_freq}m[/] market.", classes="prompt_text")
+            
+            if pos_count > 0:
+                yield Static(f"[bold red]CRITICAL:[/] You have {pos_count} active position(s).", id="pos_warning")
+                yield Static("Changing frequency mid-stream may cause tracking issues.", classes="prompt_text")
+                yield Horizontal(
+                    Button("EXIT ALL & SWITCH", id="btn_exit_switch", variant="error"),
+                    Button("SWITCH REGARDLESS", id="btn_just_switch", variant="warning"),
+                    classes="prompt_row"
+                )
+            else:
+                yield Static("No active positions found. Ready to transition.", classes="prompt_text")
+                yield Horizontal(
+                    Button("PROCEED WITH SWITCH", id="btn_just_switch", variant="primary"),
+                    classes="prompt_row"
+                )
+            
+            yield Horizontal(
+                Button("CANCEL", id="btn_cancel", variant="default"),
+                classes="prompt_row"
+            )
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        c = self.query_one("#modal_container")
+        c.styles.background = "#222222"
+        c.styles.border = ("thick", "yellow")
+        c.styles.padding = (1, 2)
+        c.styles.width = 50
+        c.styles.height = "auto"
+        c.styles.align = ("center", "middle")
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
+
+        for s in self.query(".prompt_text"):
+            s.styles.text_align = "center"
+            s.styles.margin = (0, 0, 1, 0)
+            s.styles.width = "100%"
+
+        if self.query("#pos_warning"):
+            self.query_one("#pos_warning").styles.text_align = "center"
+            self.query_one("#pos_warning").styles.margin = (1, 0)
+            self.query_one("#pos_warning").styles.width = "100%"
+
+        for r in self.query(".prompt_row"):
+            r.styles.height = 3
+            r.styles.align = ("center", "middle")
+            r.styles.width = "100%"
+            r.styles.margin = (1, 0, 0, 0)
+
+    @on(Button.Pressed, "#btn_cancel")
+    def on_cancel(self):
+        self.dismiss()
+
+    @on(Button.Pressed, "#btn_just_switch")
+    async def on_just_switch(self):
+        if self.main_app:
+            await self.main_app.perform_frequency_switch(self.new_freq, exit_positions=False)
+        self.dismiss()
+
+    @on(Button.Pressed, "#btn_exit_switch")
+    async def on_exit_switch(self):
+        if self.main_app:
+            await self.main_app.perform_frequency_switch(self.new_freq, exit_positions=True)
         self.dismiss()
 
 

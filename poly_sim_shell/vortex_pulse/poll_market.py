@@ -16,7 +16,7 @@ def poll_next_market():
     # Check for up to 10 minutes (to see when it appears relative to start)
     while time.time() - start_time < 600:
         try:
-            r = requests.get(url, timeout=2)
+            r = requests.get(url, timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 p2b = data.get('priceToBeat')

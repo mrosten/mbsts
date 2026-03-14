@@ -10,31 +10,80 @@ from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Check
 from textual import work, on, events
 from rich.text import Text
 
-from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
-from .market import MarketDataManager, calculate_rsi, calculate_bb, calculate_atr
-from .risk import RiskManager, AlgorithmPortfolio
-from .broker import TradeExecutor
-from .scanners import ALGO_INFO
-from .scanners import (
-    NPatternScanner, FakeoutScanner, MomentumScanner, RsiScanner, TrapCandleScanner,
-    MidGameScanner, LateReversalScanner, StaircaseBreakoutScanner, PostPumpScanner,
-    StepClimberScanner, SlingshotScanner, MinOneScanner, LiquidityVacuumScanner,
-    CobraScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner, GrindSnapScanner,
-    VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner, NitroScanner, VolSnapScanner,
-    HdoScanner, Momentum2Scanner, BriefingScanner
-)
-
-from .ui_modals import (
-    GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
-    BankrollExhaustedModal, MOMExpertModal, ResearchLogger, CCOExpertModal,
-    ManualFreezeModal, CommandHelpModal, GRISettingsModal,
-    RSISettingsModal, TRASettingsModal, MIDSettingsModal, LATSettingsModal, 
-    POSSettingsModal, STESettingsModal, SLISettingsModal, MINSettingsModal, 
-    LIQSettingsModal, COBSettingsModal, MESSettingsModal,
-    NPASettingsModal, FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
-    MOSSettingsModal, ZSCSettingsModal, BRISettingsModal
-)
-from .trade_engine import TradeEngineMixin
+# Handle imports for both package and direct execution
+try:
+    from .config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
+    from .market import MarketDataManager, calculate_rsi, calculate_bb, calculate_atr
+    from .risk import RiskManager, AlgorithmPortfolio
+    from .broker import TradeExecutor
+    from .scanners import ALGO_INFO
+    from .scanners import (
+        NPatternScanner, FakeoutScanner, MomentumScanner, RsiScanner, TrapCandleScanner,
+        MidGameScanner, LateReversalScanner, StaircaseBreakoutScanner, PostPumpScanner,
+        StepClimberScanner, SlingshotScanner, MinOneScanner, LiquidityVacuumScanner,
+        CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
+        BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
+        GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
+        VolSnapScanner
+    )
+    from .ui_modals import (
+        GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
+        BankrollExhaustedModal, MOMExpertModal, ResearchLogger, CCOExpertModal,
+        ManualFreezeModal, CommandHelpModal, GRISettingsModal,
+        RSISettingsModal, TRASettingsModal, MIDSettingsModal,
+        LATSettingsModal, POSSettingsModal, STESettingsModal,
+        SLISettingsModal, MINSettingsModal, LIQSettingsModal,
+        COBSettingsModal, MESSettingsModal, NPASettingsModal,
+        FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
+        TrendEfficiencyModal, ConvictionScalingModal,
+        BRISettingsModal, ZSCSettingsModal
+    )
+    from .ui_modals_intel import (
+        WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
+        DIVSettingsModal, SSISettingsModal
+    )
+    from .trade_engine import TradeEngineMixin
+    from .intel_scanners import (
+        WindowCandleProfiler, VPOCAnalyzer, SettlementDriftPredictor,
+        SentimentDivergenceScanner, StrategyInversionScanner
+    )
+except ImportError:
+    # Running directly from vortex_pulse directory
+    from config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
+    from market import MarketDataManager, calculate_rsi, calculate_bb, calculate_atr
+    from risk import RiskManager, AlgorithmPortfolio
+    from broker import TradeExecutor
+    from scanners import ALGO_INFO
+    from scanners import (
+        NPatternScanner, FakeoutScanner, MomentumScanner, RsiScanner, TrapCandleScanner,
+        MidGameScanner, LateReversalScanner, StaircaseBreakoutScanner, PostPumpScanner,
+        StepClimberScanner, SlingshotScanner, MinOneScanner, LiquidityVacuumScanner,
+        CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
+        BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
+        GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
+        VolSnapScanner
+    )
+    from ui_modals import (
+        GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
+        BankrollExhaustedModal, MOMExpertModal, ResearchLogger, CCOExpertModal,
+        ManualFreezeModal, CommandHelpModal, GRISettingsModal,
+        RSISettingsModal, TRASettingsModal, MIDSettingsModal,
+        LATSettingsModal, POSSettingsModal, STESettingsModal,
+        SLISettingsModal, MINSettingsModal, LIQSettingsModal,
+        COBSettingsModal, MESSettingsModal, NPASettingsModal,
+        FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
+        TrendEfficiencyModal, ConvictionScalingModal,
+        BRISettingsModal, ZSCSettingsModal
+    )
+    from ui_modals_intel import (
+        WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
+        DIVSettingsModal, SSISettingsModal
+    )
+    from trade_engine import TradeEngineMixin
+    from intel_scanners import (
+        WindowCandleProfiler, VPOCAnalyzer, SettlementDriftPredictor,
+        SentimentDivergenceScanner, StrategyInversionScanner
+    )
 
 
 class PulseLeanChart(Static):
@@ -45,14 +94,12 @@ class PulseLeanChart(Static):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.history = []
-        self.max_points = 100  # Will adjust to width on render
+        self.duration = 300 # Default to 5m
 
-    def push_value(self, value):
-        # Value is 0.0 - 1.0 (UP Price)
-        self.history.append(value)
-        # Keep enough points to fill common terminal widths
-        if len(self.history) > 400:
-            self.history.pop(0)
+    def push_value(self, elapsed, value):
+        # elapsed: seconds into current window
+        # value: 0.0 - 1.0 (UP Price)
+        self.history.append((elapsed, value))
         self.refresh()
 
     def reset(self):
@@ -82,13 +129,26 @@ class PulseLeanChart(Static):
                 c_bits, p_bits = grid[mid_cy][cx]
                 grid[mid_cy][cx] = (c_bits | (1 << dot_bit_map[mid_dr][dc]), p_bits)
 
-        # 2. Plot Price History (Continuous Line)
-        points = self.history[-pixel_w:]
-        offset_x = pixel_w - len(points)
-        
+        # 2. Plot Price History (Left-to-Right mapping)
+        if not self.history: return grid
+
+        # Ensure we always anchor the line to the left edge (px=0) if we have data
+        # If we started mid-window, we'll draw a horizontal line from the start
+        points = self.history
+        if points and points[0][0] > 0:
+            points = [(0, points[0][1])] + points
+
         prev_px, prev_py = None, None
-        for i, val in enumerate(points):
-            px = i + offset_x
+        
+        # Determine the duration for the mapping
+        duration = getattr(self.app.config, "WINDOW_SECONDS", self.duration)
+        
+        for elapsed, val in points:
+            # Map elapsed time to X-coordinate (0 to pixel_w)
+            px = int((elapsed / duration) * (pixel_w - 1))
+            px = max(0, min(px, pixel_w - 1))
+            
+            # Map price value to Y-coordinate (pixel_h to 0)
             py = int((1.0 - val) * (pixel_h - 1))
             py = max(0, min(py, pixel_h - 1))
             
@@ -134,6 +194,67 @@ class PulseLeanChart(Static):
                 output.append("\n")
                 
         return output
+
+    def save_graph_image(self, path):
+        """Rasterizes the internal history into a PNG image using Pillow."""
+        try:
+            from PIL import Image, ImageDraw
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Use low resolution for the output image (160x80)
+            img_w, img_h = 160, 80
+            # 15 pixel padding for low res
+            pad = 15
+            
+            # Background
+            img = Image.new("RGB", (img_w + pad*2, img_h + pad*2), (18, 18, 18))
+            draw = ImageDraw.Draw(img)
+            
+            # Draw Horizontal Grid Lines (every 20c for clarity at small scale)
+            for i in [2, 4, 5, 6, 8]: # 20c, 40c, 50c, 60c, 80c
+                y_val = i / 10.0
+                y_px = pad + int((1.0 - y_val) * (img_h - 1))
+                color = (60, 60, 60) if i == 5 else (35, 35, 35)
+                draw.line([(pad, y_px), (img_w + pad, y_px)], fill=color, width=1)
+            
+            # Draw Vertical Grid Lines (every 2.5 minutes / mid-window)
+            duration = getattr(self.app.config, "WINDOW_SECONDS", 300)
+            mid_px = pad + int((0.5) * (img_w - 1))
+            draw.line([(mid_px, pad), (mid_px, img_h + pad)], fill=(35, 35, 35), width=1)
+            
+            if not self.history:
+                img.save(path)
+                return True
+
+            points = self.history
+            if points and points[0][0] > 0:
+                points = [(0, points[0][1])] + points
+            
+            # Map points to image coordinates
+            coords = []
+            for elapsed, val in points:
+                x = pad + int((elapsed / duration) * (img_w - 1))
+                y = pad + int((1.0 - val) * (img_h - 1))
+                coords.append((x, y))
+            
+            # Draw the price line
+            if len(coords) > 1:
+                # Use width=2 for better visibility at 160px
+                draw.line(coords, fill=(255, 255, 0), width=2, joint="curve")
+                # Highlight last point
+                lx, ly = coords[-1]
+                draw.ellipse([lx-2, ly-2, lx+2, ly+2], fill=(255, 255, 0))
+            elif len(coords) == 1:
+                draw.ellipse([coords[0][0]-2, coords[0][1]-2, coords[0][0]+2, coords[0][1]+2], fill=(255, 255, 0))
+            
+            img.save(path)
+            return True
+        except Exception as e:
+            if hasattr(self, "app") and hasattr(self.app, "log_msg"):
+                self.app.log_msg(f"[red]Graph Save Error: {e}[/]")
+            return False
 
 class PulseApp(TradeEngineMixin, App):
     CSS = """
@@ -324,6 +445,7 @@ class PulseApp(TradeEngineMixin, App):
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         cb = event.checkbox
         cb_id = cb.id
+        if not cb_id: return
         
         if cb_id and cb_id.startswith("cb_"):
             code = cb_id[3:]
@@ -346,39 +468,55 @@ class PulseApp(TradeEngineMixin, App):
             # Auto-persist algorithm toggle
             if not getattr(self, "is_initializing", False):
                 self.save_settings()
+        
+        elif cb_id and cb_id.startswith("cb_log_"):
+            log_key = cb_id.replace("cb_log_", "")
+            # Mapping short ID to settings key
+            key_map = {"main": "main_csv", "console": "console_txt", "mom": "momentum_csv", "html": "verification_html"}
+            if log_key in key_map:
+                settings_key = key_map[log_key]
+                self.log_settings[settings_key] = event.value
+                self.log_msg(f"LOGGING {'ENABLED' if event.value else 'DISABLED'}: {settings_key.upper()}", level="SYS")
+                if not getattr(self, "is_initializing", False):
+                    self.save_settings()
 
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
         lbl_id = event.control.id
         if lbl_id and lbl_id.startswith("lbl_"):
             code = lbl_id[4:].upper()
-            # Specific config modals
-            modal_map = {
-                "STA": BullFlagSettingsModal(self),
-                "CCO": CCOExpertModal(self),
-                "GRI": GRISettingsModal(self, self.scanners.get("GrindSnap")),
-                "RSI": RSISettingsModal(self, self.scanners.get("RSI")),
-                "TRA": TRASettingsModal(self, self.scanners.get("TrapCandle")),
-                "MID": MIDSettingsModal(self, self.scanners.get("MidGame")),
-                "LAT": LATSettingsModal(self, self.scanners.get("LateReversal")),
-                "POS": POSSettingsModal(self, self.scanners.get("PostPump")),
-                "STE": STESettingsModal(self, self.scanners.get("StepClimber")),
-                "SLI": SLISettingsModal(self, self.scanners.get("Slingshot")),
-                "MIN": MINSettingsModal(self, self.scanners.get("MinOne")),
-                "LIQ": LIQSettingsModal(self, self.scanners.get("LiquidityVacuum")),
-                "COB": COBSettingsModal(self, self.scanners.get("Cobra")),
-                "MES": MESSettingsModal(self, self.scanners.get("Mesa")),
-                "NPA": NPASettingsModal(self, self.scanners.get("NPattern")),
-                "FAK": FAKSettingsModal(self, self.scanners.get("Fakeout")),
-                "MEA": MEASettingsModal(self, self.scanners.get("MeanReversion")),
-                "VOL": VOLSettingsModal(self, self.scanners.get("VolCheck")),
-                "MOS": MOSSettingsModal(self, self.scanners.get("Moshe")),
-                "ZSC": ZSCSettingsModal(self, self.scanners.get("ZScore")),
-                "BRI": BRISettingsModal(self, self.scanners.get("Briefing"))
+            # Specific config modals (Lazy instantiation)
+            modal_factory = {
+                "STA": lambda: BullFlagSettingsModal(self),
+                "CCO": lambda: CCOExpertModal(self),
+                "GRI": lambda: GRISettingsModal(self, self.scanners.get("GrindSnap")),
+                "RSI": lambda: RSISettingsModal(self, self.scanners.get("RSI")),
+                "TRA": lambda: TRASettingsModal(self, self.scanners.get("TrapCandle")),
+                "MID": lambda: MIDSettingsModal(self, self.scanners.get("MidGame")),
+                "LAT": lambda: LATSettingsModal(self, self.scanners.get("LateReversal")),
+                "POS": lambda: POSSettingsModal(self, self.scanners.get("PostPump")),
+                "STE": lambda: STESettingsModal(self, self.scanners.get("StepClimber")),
+                "SLI": lambda: SLISettingsModal(self, self.scanners.get("Slingshot")),
+                "MIN": lambda: MINSettingsModal(self, self.scanners.get("MinOne")),
+                "LIQ": lambda: LIQSettingsModal(self, self.scanners.get("LiquidityVacuum")),
+                "COB": lambda: COBSettingsModal(self, self.scanners.get("Cobra")),
+                "MES": lambda: MESSettingsModal(self, self.scanners.get("Mesa")),
+                "NPA": lambda: NPASettingsModal(self, self.scanners.get("NPattern")),
+                "FAK": lambda: FAKSettingsModal(self, self.scanners.get("Fakeout")),
+                "MEA": lambda: MEASettingsModal(self, self.scanners.get("MeanReversion")),
+                "VOL": lambda: VOLSettingsModal(self, self.scanners.get("VolCheck")),
+                "MOS": lambda: MOSSettingsModal(self, self.scanners.get("Moshe")),
+                "ZSC": lambda: ZSCSettingsModal(self, self.scanners.get("ZScore")),
+                "BRI": lambda: BRISettingsModal(self, self.scanners.get("Briefing")),
+                "WCP": lambda: WCPSettingsModal(self),
+                "VPOC": lambda: VPOCSettingsModal(self),
+                "SDP": lambda: SDPSettingsModal(self),
+                "DIV": lambda: DIVSettingsModal(self),
+                "SSI": lambda: SSISettingsModal(self)
             }
 
-            if code in modal_map:
-                self.push_screen(modal_map[code])
+            if code in modal_factory:
+                self.push_screen(modal_factory[code]())
                 return
             
             # Original logic for other algo codes
@@ -399,17 +537,26 @@ class PulseApp(TradeEngineMixin, App):
             try: self.query_one(f"#cb_{code.lower()}").value = False
             except: pass
 
-    def __init__(self, sim_broker, live_broker, start_live_mode=False):
+    def __init__(self, sim_broker, live_broker, start_live_mode=False, session_id=None):
         super().__init__()
+        import atexit
+        atexit.register(self.finalize_html_log)
         self.is_initializing = True
         self.config = TradingConfig() # Instantiate for dynamic frequency support
         self.sim_broker = sim_broker
+        self.sim_broker.app = self  # Set app reference for log toggle checks
         self.live_broker = live_broker
         self.start_live_mode = start_live_mode
-        self.market_data_manager = MarketDataManager(logger_func=lambda m: self.call_from_thread(self.log_msg, m))
+        self.market_data_manager = MarketDataManager(config=self.config, logger_func=lambda m: self.call_from_thread(self.log_msg, m))
         self.risk_manager = RiskManager(self.config)
         self.trade_executor = TradeExecutor(sim_broker, live_broker, self.risk_manager)
         self.trade_executor.config = self.config # Pass config to executor
+        
+        # FTP Sync System
+        from .ftp_manager import FTPManager
+        self.ftp_manager = FTPManager()
+        if session_id:
+            self.ftp_manager.set_session(f"session_{session_id}")
         self.market_data = self.market_data_manager.market_data 
         self.risk_initialized = False 
         self.last_second_exit_triggered = False
@@ -418,6 +565,8 @@ class PulseApp(TradeEngineMixin, App):
         self.pre_buy_triggered = False     # latch: only one pre-buy per window
         self.mom_buy_mode = "STD"          # "STD" = standard signal | "PRE" = pre-buy next window
         self.window_realized_revenue = 0.0 # cumulative revenue added this window (TP/SL/manual sells)
+        self.lw_lockout = 20               # Late-Window Lockout (seconds)
+        self.sentiment_guard = 15.0        # Sentiment Guard (Odds Score threshold)
         self.halted = False                # True = bankroll exhausted, all scanning stopped
         self.sl_plus_mode = True
         self.grow_riskbankroll = False     # Toggle for bankroll compounding
@@ -431,15 +580,17 @@ class PulseApp(TradeEngineMixin, App):
         self.exposure_up = {"cost": 0.0, "payout": 0.0}
         self.exposure_dn = {"cost": 0.0, "payout": 0.0}
         
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        log_dir = os.path.join(script_dir, "lg")
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            
-        base_log_name = os.path.basename(self.sim_broker.log_file).replace(".csv", "_console.txt")
-        self.console_log_file = os.path.join(log_dir, base_log_name)
-        with open(self.console_log_file, "w", encoding="utf-8") as f:
-            f.write("=== POLYMARKET VORTEX PULSE V5 CONSOLE LOG ===\n")
+        # Log Toggles
+        self.log_settings = {
+            "main_csv": True,
+            "console_txt": True,
+            "momentum_csv": True,
+            "verification_html": True
+        }
+        
+        # [REFACTORED LOG SETUP] - Moved to end of __init__ to handle session subfolders correctly.
+        pass
+        # Initialization continues...
         
         self.scanners = {
             "NPattern": NPatternScanner(self.config),
@@ -467,10 +618,16 @@ class PulseApp(TradeEngineMixin, App):
             "Nitro": NitroScanner(self.config),
             "VolSnap": VolSnapScanner(self.config),
             "HDO": HdoScanner(self.config),
-            "Briefing": BriefingScanner(self.config)
+            "Briefing": BriefingScanner(self.config),
+            "WCP": WindowCandleProfiler(self.config),
+            "VPOC": VPOCAnalyzer(self.config),
+            "SDP": SettlementDriftPredictor(self.config),
+            "DIV": SentimentDivergenceScanner(self.config),
+            "SSI": StrategyInversionScanner(self.config)
         }
         
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
+        self.logged_trend_wid = None # Latch for trend log deduplication
         self.window_bets = {} 
         self.pending_bets = {}
         self.last_second_exit_triggered = False 
@@ -478,6 +635,11 @@ class PulseApp(TradeEngineMixin, App):
         self.mid_window_lockout = False
         self.saved_sim_bankroll = None
         self.app_start_time = time.time()
+        
+        # Next-Strike Audit State
+        self.audit_pending_info = None
+        self.prev_window_expected_p2b = None
+        self.awaiting_next_strike = False
         self.session_win_count = 0 
         self.session_total_trades = 0
         self.session_windows_settled = 0
@@ -541,6 +703,11 @@ class PulseApp(TradeEngineMixin, App):
         self.zsc_settings = {"z_threshold": 3.5, "coil_threshold": 0.001}
         self.gri_settings = {"grind_duration": 100, "snap_duration": 20, "min_slope_pct": 0.1, "reversal_ratio": 0.60}
         self.bri_settings = {"rsi_low": 30, "rsi_high": 70, "odds_thresh": 5.0, "imb_thresh": 2.0, "signal_thresh": 2}
+        self.wcp_settings = {"body_ratio_thresh": 0.30, "shadow_ratio_thresh": 2.0}
+        self.vpoc_settings = {"dev_threshold": 0.0005}
+        self.sdp_settings = {"drift_threshold": 0.05}
+        self.div_settings = {"div_threshold": 5.0}
+        self.ssi_settings = {"loss_streak_threshold": 3}
         
         self.conviction_scaling = {
             "enabled": False,
@@ -569,9 +736,10 @@ class PulseApp(TradeEngineMixin, App):
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, "r") as f:
                     saved = json.load(f)
-                    for k, v in saved.items():
-                        if k in self.scanner_weights:
-                            self.scanner_weights[k] = float(v)
+                    if "scanner_weights" in saved:
+                        for sk, sv in saved["scanner_weights"].items():
+                            if sk in self.scanner_weights:
+                                self.scanner_weights[sk] = float(sv)
                     if "nit_settings" in saved:
                         self.nit_settings.update(saved["nit_settings"])
                         # Sync to scanner instance
@@ -587,7 +755,7 @@ class PulseApp(TradeEngineMixin, App):
                             sc.diff_threshold = self.vsn_settings["diff_threshold"]
                     
                     # Basic scanner settings mapping
-                    for key in ["rsi", "tra", "mid", "lat", "pos", "ste", "sli", "min", "liq", "cob", "mes", "gri", "npa", "fak", "mea", "vol", "mos", "zsc", "bri"]:
+                    for key in ["rsi", "tra", "mid", "lat", "pos", "ste", "sli", "min", "liq", "cob", "mes", "gri", "npa", "fak", "mea", "vol", "mos", "zsc", "bri", "wcp", "vpoc", "sdp", "div", "ssi"]:
                         s_key = f"{key}_settings"
                         if s_key in saved:
                             getattr(self, s_key).update(saved[s_key])
@@ -598,7 +766,8 @@ class PulseApp(TradeEngineMixin, App):
                         "PostPump": "pos", "StepClimber": "ste", "Slingshot": "sli", "MinOne": "min",
                         "Liquidity": "liq", "Cobra": "cob", "Mesa": "mes", "GrindSnap": "gri",
                         "NPattern": "npa", "Fakeout": "fak", "MeanReversion": "mea", "VolCheck": "vol",
-                        "Moshe": "mos", "ZScore": "zsc", "Briefing": "bri"
+                        "Moshe": "mos", "ZScore": "zsc", "Briefing": "bri",
+                        "WCP": "wcp", "VPOC": "vpoc", "SDP": "sdp", "DIV": "div", "SSI": "ssi"
                     }
                     for scanner_name, attr_prefix in sync_map.items():
                         sc = self.scanners.get(scanner_name)
@@ -626,17 +795,55 @@ class PulseApp(TradeEngineMixin, App):
                         self.conviction_scaling.update(saved["conviction_scaling"])
                     if "market_freq" in saved:
                         self.config.MARKET_FREQ = int(saved["market_freq"])
+                    if "log_settings" in saved:
+                        self.log_settings.update(saved["log_settings"])
         except Exception: pass
 
-        self.mom_analytics = self._reset_mom_analytics()
-        # Create a time-signatured log file for this session in lg/ subdirectory of current script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        log_dir = os.path.join(script_dir, "lg")
+        # Respect user-specified log directory from SimBroker (which is now session-specific)
+        if hasattr(self.sim_broker, "log_file") and self.sim_broker.log_file:
+            log_dir = os.path.dirname(self.sim_broker.log_file)
+        else:
+            log_dir = os.path.join(script_dir, "lg")
+            
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-            
-        session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.mom_adv_log_file = os.path.join(log_dir, f"momentum_adv_{session_time}.csv")
+
+        # ---------------------------------------------------------
+        # [SESSION LOG INITIALIZATION]
+        # ---------------------------------------------------------
+        csv_base = os.path.basename(self.sim_broker.log_file)
+        base_name_only = os.path.splitext(csv_base)[0]
+        
+        # 1. Console Log
+        self.console_log_file = os.path.join(log_dir, base_name_only + "_console.txt")
+        if self.log_settings["console_txt"]:
+            with open(self.console_log_file, "w", encoding="utf-8") as f:
+                f.write("=== POLYMARKET VORTEX PULSE V5 CONSOLE LOG ===\n")
+                
+        # 2. HTML Log
+        self.html_log_file = os.path.join(log_dir, base_name_only + "_verification.html")
+        if self.log_settings["verification_html"]:
+            with open(self.html_log_file, "w", encoding="utf-8") as f:
+                f.write("<html><head><title>Vortex Pulse Verification Log</title>")
+                f.write("<style>body{font-family:sans-serif;background:#111;color:#eee;padding:20px;}")
+                f.write("table{width:100%;border-collapse:collapse;margin-top:20px;}")
+                f.write("th,td{border:1px solid #444;padding:10px;text-align:left;}")
+                f.write("th{background:#222;color:#00ffff;}")
+                f.write("tr:nth-child(even){background:#1a1a1a;}")
+                f.write("a{color:#00ffff;text-decoration:none;}a:hover{text-decoration:underline;}")
+                f.write(".UP{color:#00ff00;font-weight:bold;}.DOWN{color:#ff0000;font-weight:bold;}")
+                f.write(".discrepancy{background:#4d0000 !important;}")
+                f.write(".graph-img{max-width:200px;border:1px solid #444;transition:transform 0.2s;cursor:zoom-in;}")
+                f.write(".graph-img:hover{transform:scale(2.5);z-index:100;position:relative;}")
+                f.write("</style></head><body>")
+                f.write("<h1>Vortex Pulse - Manual Verification Log</h1>")
+                f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
+                f.write("<table><thead><tr><th>Timestamp</th><th>Polymarket Window Link</th><th>Start Strike</th><th>End Strike</th><th>Delta ($)</th><th>Official Result</th><th>Pulse Result</th><th>Sync Status</th><th>PnL ($)</th><th>Balance ($)</th><th>Graph</th></tr></thead>")
+                f.write("<tbody>\n")
+
+        # 3. Momentum ADV Log
+        self.mom_analytics = self._reset_mom_analytics()
+        self.mom_adv_log_file = os.path.join(log_dir, f"momentum_adv_{base_name_only}.csv")
         self._init_mom_adv_log()
 
     def _reset_mom_analytics(self):
@@ -748,6 +955,24 @@ class PulseApp(TradeEngineMixin, App):
                     yield Input(placeholder="Secs", value=f"{getattr(self, 'shield_time', 45)}", id="inp_shield_time")
                     yield Label("Whale Cents:", classes="lbl_sm")
                     yield Input(placeholder="Cents", value=f"{getattr(self, 'shield_reach', 5)}", id="inp_shield_reach")
+                with Horizontal(classes="input_row"):
+                    yield Label("LWL Secs:", classes="lbl_sm")
+                    yield Input(placeholder="Secs", value=f"{self.lw_lockout}", id="inp_lw_lockout")
+                    yield Label("Sent. Guard:", classes="lbl_sm")
+                    yield Input(placeholder="¢", value=f"{self.sentiment_guard:.1f}", id="inp_sentiment_guard")
+            
+            with Vertical(classes="input_group"):
+                yield Label("LOGGING CONTROL (Persisted)", classes="input_title")
+                with Horizontal(classes="input_row"):
+                    yield Label("Main CSV:", classes="lbl_sm")
+                    yield Checkbox(value=self.log_settings["main_csv"], id="cb_log_main")
+                    yield Label("Console TXT:", classes="lbl_sm")
+                    yield Checkbox(value=self.log_settings["console_txt"], id="cb_log_console")
+                with Horizontal(classes="input_row"):
+                    yield Label("Momentum CSV:", classes="lbl_sm")
+                    yield Checkbox(value=self.log_settings["momentum_csv"], id="cb_log_mom")
+                    yield Label("Verification HTML:", classes="lbl_sm")
+                    yield Checkbox(value=self.log_settings["verification_html"], id="cb_log_html")
 
         yield Horizontal(
             Container(
@@ -807,6 +1032,29 @@ class PulseApp(TradeEngineMixin, App):
                     yield Horizontal(Checkbox(value=False, id="cb_liq"), Label("LIQ", id="lbl_liq"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_mid"), Label("MID ~", id="lbl_mid", classes="deprecated_lbl"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_min"), Label("MIN ~", id="lbl_min", classes="deprecated_lbl"), classes="algo_item")
+
+                with Vertical(classes="scanner_col"):
+                    yield Label("INTEL SUITE", classes="scanner_header")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=False, id="cb_wcp")
+                        yield Label("WCP", id="lbl_wcp")
+                        yield Input(value=str(self.scanner_weights.get("WCP", 0.0)), id="inp_wcp_weight", classes="algo_weight")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=False, id="cb_vpoc")
+                        yield Label("VPO", id="lbl_vpoc")
+                        yield Input(value=str(self.scanner_weights.get("VPOC", 0.0)), id="inp_vpoc_weight", classes="algo_weight")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=False, id="cb_sdp")
+                        yield Label("SDP", id="lbl_sdp")
+                        yield Input(value=str(self.scanner_weights.get("SDP", 0.0)), id="inp_sdp_weight", classes="algo_weight")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=False, id="cb_div")
+                        yield Label("DIV", id="lbl_div")
+                        yield Input(value=str(self.scanner_weights.get("DIV", 0.0)), id="inp_div_weight", classes="algo_weight")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=False, id="cb_ssi")
+                        yield Label("SSI", id="lbl_ssi")
+                        yield Input(value=str(self.scanner_weights.get("SSI", 0.0)), id="inp_ssi_weight", classes="algo_weight")
         yield Horizontal(
             Checkbox("TP/SL", value=True, id="cb_tp_active"),
             Checkbox("Tranche Exits", value=False, id="cb_tranche", tooltip="Track Take Profits by individual sequence bets."),
@@ -998,6 +1246,10 @@ class PulseApp(TradeEngineMixin, App):
                         self.log_msg(f"SETTING: {name} | Value: ${new_br:.2f} | Status: UPDATED", level="SYS")
                         self.risk_manager.risk_bankroll = new_br
                         self.risk_manager.target_bankroll = new_br
+                    
+                    # Ensure bankroll change is persisted
+                    if not getattr(self, "is_initializing", False):
+                        self.save_settings()
                 except ValueError:
                     pass
             else:
@@ -1011,37 +1263,78 @@ class PulseApp(TradeEngineMixin, App):
                         self.committed_sl = float(val) / 100
                         self.log_msg(f"SETTING: {name} | Value: {val}% | Status: COMMITTED", level="SYS")
                     except ValueError: pass
-                    try:
-                        self.global_skeptic_odds = float(val)
-                        self.log_msg(f"SETTING: Odds Skepticism | Value: {val}c", level="SYS")
-                    except ValueError: pass
+                elif event.input.id == "inp_skeptic_odds":
+                    self.global_skeptic_odds = float(val) if val else 0.05
+                    self.log_msg(f"SETTING: Odds Skepticism | Value: {self.global_skeptic_odds}c", level="SYS")
                 elif event.input.id == "inp_skeptic_guess":
-                    try:
-                        self.global_skeptic_guess = float(val)
-                        self.log_msg(f"SETTING: Guess Skepticism | Value: {val}c", level="SYS")
-                    except ValueError: pass
+                    self.global_skeptic_guess = float(val) if val else 0.03
+                    self.log_msg(f"SETTING: Guess Skepticism | Value: {self.global_skeptic_guess}c", level="SYS")
                 elif event.input.id == "inp_penalty_pct":
-                    try:
-                        self.penalty_percentage = float(val) / 100.0
-                        self.log_msg(f"SETTING: Bet Penalty | Value: {val}%", level="SYS")
-                    except ValueError: pass
+                    self.penalty_percentage = float(val)/100.0 if val else 0.10
+                    self.log_msg(f"SETTING: Bet Penalty | Value: {val}%", level="SYS")
+                elif event.input.id == "inp_lw_lockout":
+                    self.lw_lockout = int(val) if val else 20
+                    self.log_msg(f"SETTING: LW Lockout | Value: {val}s", level="SYS")
+                elif event.input.id == "inp_sentiment_guard":
+                    self.sentiment_guard = float(val) if val else 15.0
+                    self.log_msg(f"SETTING: Sentiment Guard | Value: {val}¢", level="SYS")
                 else:
                     self.log_msg(f"SETTING: {name} | Value: {val}", level="SYS")
 
         # Auto-persist any setting that was just changed
         if not getattr(self, "is_initializing", False):
-            if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach"}:
+            if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach", "inp_risk_alloc"}:
                 self.save_settings()
 
+    @on(Input.Changed)
+    def on_input_changed(self, event: Input.Changed):
+        """Auto-persist settings as the user types (no Enter required)."""
+        if getattr(self, "is_initializing", False): return
+        
+        # [CRITICAL] Unified State-Sync logic: 
+        # Update internal logic variables IMMEDIATELY so they are used in next tick
+        val = event.input.value
+        try:
+            if event.input.id == "inp_tp": self.committed_tp = float(val) / 100
+            elif event.input.id == "inp_sl": self.committed_sl = float(val) / 100
+            elif event.input.id == "inp_skeptic_odds": self.global_skeptic_odds = float(val)
+            elif event.input.id == "inp_skeptic_guess": self.global_skeptic_guess = float(val)
+            elif event.input.id == "inp_penalty_pct": self.penalty_percentage = float(val) / 100.0
+            elif event.input.id == "inp_lw_lockout": self.lw_lockout = int(val)
+            elif event.input.id == "inp_sentiment_guard": self.sentiment_guard = float(val)
+            elif event.input.id == "inp_shield_time": self.shield_time = int(val)
+            elif event.input.id == "inp_shield_reach": self.shield_reach = int(val)
+            elif event.input.id == "inp_risk_alloc": self.total_risk_cap = float(val) if val else 30.0
+        except: pass
+
+        # We only auto-save specific configuration inputs to avoid disk thrashing
+        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach", "inp_risk_alloc", "inp_lw_lockout", "inp_sentiment_guard"}:
+            self.save_settings()
+
+    @on(RadioSet.Changed, "#rs_bet_mode")
+    def on_bet_mode_changed(self, event: RadioSet.Changed):
+        """Auto-persist bet mode toggle."""
+        if not getattr(self, "is_initializing", False):
+            self.save_settings()
+            self.log_msg(f"SETTING: Bet Mode | Value: {event.pressed.label}", level="SYS")
+
     async def on_mount(self) -> None:
+        self.is_initializing = True
         self.app_active = True
         self.init_web3()
-        # self.log_msg(f"[bold cyan]=== RUNNING POLYMARKET SNIPER v5.9.5 (CCO Expert) ===[/]", level="ADMIN")
-        # Log the output files being produced
+        self.init_live_broker()
+        # Log the HTML file path once at start
+        if self.log_settings["verification_html"]:
+            self.log_msg(f"VERIFICATION LOG: {self.html_log_file}", level="ADMIN")
+        
+        # Display other active log files
         b_log = os.path.basename(self.sim_broker.log_file)
         c_log = os.path.basename(self.console_log_file)
         m_log = os.path.basename(self.mom_adv_log_file)
-        # self.log_msg(f"[dim]Output Files: {b_log}, {c_log}, {m_log}[/]", level="ADMIN")
+        
+        if self.log_settings.get("main_csv", True): self.log_msg(f"MAIN CSV LOG:     {b_log}", level="ADMIN")
+        if self.log_settings.get("console_txt", True): self.log_msg(f"CONSOLE LOG:      {c_log}", level="ADMIN")
+        if self.log_settings.get("momentum_csv", True): self.log_msg(f"MOMENTUM LOG:     {m_log}", level="ADMIN")
         
         # self.log_msg(f"Simulation Started. Bal: ${self.sim_broker.balance}")
         def_risk = self.sim_broker.balance
@@ -1057,10 +1350,10 @@ class PulseApp(TradeEngineMixin, App):
                     lbl.styles.text_style = "bold"
             except: pass
 
-        self.set_interval(1, self.fetch_market_loop)
-        self.set_interval(1, self.update_timer)
-        self.set_interval(1, self.check_dump_log)
-        self.set_interval(0.5, self.toggle_blinks)
+        self.set_interval(1, lambda: self.fetch_market_loop() if getattr(self, "app_active", False) else None)
+        self.set_interval(1, lambda: self.update_timer() if getattr(self, "app_active", False) else None)
+        self.set_interval(1, lambda: self.check_dump_log() if getattr(self, "app_active", False) else None)
+        self.set_interval(0.5, lambda: self.toggle_blinks() if getattr(self, "app_active", False) else None)
 
         # --- RESTORE PERSISTED SETTINGS ---
         try:
@@ -1090,6 +1383,12 @@ class PulseApp(TradeEngineMixin, App):
                     self.query_one("#inp_shield_reach").value = str(s["shield_reach"])
                 if "total_risk_cap" in s:
                     self.query_one("#inp_risk_alloc").value = str(s["total_risk_cap"])
+                
+                if "bet_mode" in s:
+                    if s["bet_mode"] == "pct":
+                        self.query_one("#rb_pct").value = True
+                    else:
+                        self.query_one("#rb_fixed").value = True
 
                 # Assign to variables for engine access
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
@@ -1097,6 +1396,13 @@ class PulseApp(TradeEngineMixin, App):
                 self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
                 self.total_risk_cap = float(s.get("total_risk_cap", 30.0))
                 self.exec_safety_mode = s.get("exec_safety_mode", "global_lock")
+                self.sl_plus_mode = bool(s.get("sl_plus_mode", True))
+                self.grow_riskbankroll = bool(s.get("grow_riskbankroll", False))
+                self.mom_buy_mode = s.get("mom_buy_mode", "STD")  # "STD" or "PRE"
+                self.bounce_mode = bool(s.get("bounce_mode", False))
+                self.bounce_dip_cents = float(s.get("bounce_dip_cents", 0.5))
+                self.lw_lockout = int(s.get("lw_lockout", 20))
+                self.sentiment_guard = float(s.get("sentiment_guard", 15.0))
 
                 # Restore committed TP/SL from saved values
                 try: self.committed_tp = float(s.get("inp_tp", 95)) / 100
@@ -1112,14 +1418,24 @@ class PulseApp(TradeEngineMixin, App):
                 try: self.query_one("#cb_one_trade").value = bool(s.get("cb_one_trade", False))
                 except: pass
                 
-                # Flags
-                self.sl_plus_mode = bool(s.get("sl_plus_mode", True))
-                self.grow_riskbankroll = bool(s.get("grow_riskbankroll", False))
-                self.mom_buy_mode = s.get("mom_buy_mode", "STD")  # "STD" or "PRE"
-                self.bounce_mode = bool(s.get("bounce_mode", False))
-                self.bounce_dip_cents = float(s.get("bounce_dip_cents", 0.5))
                 try: self.query_one("#cb_bounce").value = self.bounce_mode
                 except: pass
+
+                # Restore log settings
+                log_sets = s.get("log_settings", {})
+                for k, v in log_sets.items():
+                    self.log_settings[k] = v
+                
+                # Sync log switches
+                sync_logs = {
+                    "#cb_log_main": "main_csv",
+                    "#cb_log_console": "console_txt",
+                    "#cb_log_mom": "momentum_csv",
+                    "#cb_log_html": "verification_html"
+                }
+                for qid, k in sync_logs.items():
+                    try: self.query_one(qid).value = bool(self.log_settings.get(k, True))
+                    except: pass
 
                 # Restore algorithm checkbox states
                 algo_states = s.get("algo_enabled", {})
@@ -1183,14 +1499,31 @@ class PulseApp(TradeEngineMixin, App):
 
     def on_unmount(self) -> None:
         self.app_active = False
+        self.log_msg("[dim]Shutting down...[/]", level="ADMIN")
+        
+        # Finalize logs immediately before stopping managers
+        self.finalize_html_log()
+        
+        if hasattr(self, "market_data_manager"):
+            self.market_data_manager.stop()
+            
+        if hasattr(self, "ftp_manager"):
+            # ftp_manager threads are daemon, but we should clear the queue if needed
+            # for now, letting them flush naturally is usually fine, but 
+            # we want to avoid long hangs.
+            pass
 
     def _finalize_startup_logs(self):
         """Finalizes initialization: logs summary and allows further events to log."""
-        active = [code for code in ALGO_INFO if self.query_one(f"#cb_{code.lower()}").value]
-        if active:
-            self.log_msg(f"[bold cyan]Active Scanners:[/] {', '.join(active)}", level="ADMIN")
-        self.is_initializing = False
-        self.log_msg("[dim]System initialization complete. Event logging enabled.[/]", level="ADMIN")
+        try:
+            active = [code for code in ALGO_INFO if self.query_one(f"#cb_{code.lower()}").value]
+            if active:
+                self.log_msg(f"[bold cyan]Active Scanners:[/] {', '.join(active)}", level="ADMIN")
+        except Exception as e:
+            self.log_msg(f"[dim]Note: Startup scanner summary skipped ({e})[/]", level="ADMIN")
+        finally:
+            self.is_initializing = False
+            self.log_msg("[dim]System initialization complete. Event logging enabled.[/]", level="ADMIN")
 
     @on(Checkbox.Changed, "#cb_live")
     def on_live_toggle(self, event: Checkbox.Changed):
@@ -1229,7 +1562,10 @@ class PulseApp(TradeEngineMixin, App):
         # Update runtime state for bounce toggle
         if cid == "cb_bounce":
             self.bounce_mode = event.value
-        self.save_settings()
+        
+        if not getattr(self, "is_initializing", False):
+            self.save_settings()
+            
         name = ""
         if cid == "cb_tp_active": name = "TP/SL Monitoring"
         elif cid == "cb_strong": name = "Strong Only Mode"
@@ -1297,7 +1633,11 @@ class PulseApp(TradeEngineMixin, App):
         elif short_lv == "STATS":   display_msg = f"[bold white]{prefix}{msg}[/]"
         else:                       display_msg = f"{prefix}{msg}" # Default INFO style
 
-        self.query_one(RichLog).write(display_msg)
+        try:
+            self.query_one(RichLog).write(display_msg)
+        except:
+            # During shutdown or if UI is not ready, skip RichLog but still mirror to file
+            pass
         
         # Mirror to console log file for persistence (pure ASCII scrubbing)
         import re
@@ -1307,8 +1647,9 @@ class PulseApp(TradeEngineMixin, App):
         clean_msg = clean_msg.encode('ascii', 'ignore').decode('ascii').strip()
         
         try:
-            with open(self.console_log_file, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {clean_msg}\n")
+            if getattr(self, "log_settings", {}).get("console_txt", True):
+                with open(self.console_log_file, "a", encoding="utf-8") as f:
+                    f.write(f"[{timestamp}] {clean_msg}\n")
         except: pass
 
     def dump_state_log(self):
@@ -1334,6 +1675,14 @@ class PulseApp(TradeEngineMixin, App):
 
     def save_settings(self):
         try:
+            # [CRITICAL] Guard: If UI is not fully mounted or already unmounting, 
+            # query_one will fail or return default False, which would destroy user settings.
+            try:
+                sentinel = self.query_one("#cb_mom")
+                if not sentinel.is_mounted: return 
+            except:
+                return # Abort save if UI is not queryable
+
             # Gather current UI field values (widgets must be mounted)
             def _v(wid, default=""):
                 try: return self.query_one(wid).value
@@ -1366,7 +1715,7 @@ class PulseApp(TradeEngineMixin, App):
                 "bounce_mode":   getattr(self, "bounce_mode", False),
                 "bounce_dip_cents": getattr(self, "bounce_dip_cents", 0.5),
                 "penalty_percentage": getattr(self, "penalty_percentage", 0.10),
-                "bet_mode":      "pct" if self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct" else "fixed",
+                "bet_mode":      "fixed", # Default
                 "algo_enabled":  {code: _cb(f"#cb_{code.lower()}", False) for code in ALGO_INFO},
                 "nit_settings": self.nit_settings,
                 "vsn_settings": self.vsn_settings,
@@ -1389,13 +1738,28 @@ class PulseApp(TradeEngineMixin, App):
                 "mos_settings": self.mos_settings,
                 "zsc_settings": self.zsc_settings,
                 "bri_settings": self.bri_settings,
+                "wcp_settings": self.wcp_settings,
+                "vpoc_settings": self.vpoc_settings,
+                "sdp_settings": self.sdp_settings,
+                "div_settings": self.div_settings,
+                "ssi_settings": self.ssi_settings,
                 "mom_adv_settings": self.mom_adv_settings,
                 "mm2_adv_settings": self.mm2_adv_settings,
+                "lw_lockout": self.lw_lockout,
+                "sentiment_guard": self.sentiment_guard,
                 "auto_sync_risk": self.auto_sync_risk,
                 "exec_safety_mode": self.exec_safety_mode,
                 "trend_efficiency": self.trend_efficiency,
-                "market_freq": self.config.MARKET_FREQ
+                "market_freq": self.config.MARKET_FREQ,
+                "log_settings": self.log_settings  # Persist log toggles
             }
+            
+            # [SANITY] Try to get bet_mode from UI if possible (it's not a standard value/checkbox)
+            try:
+                rs = self.query_one("#rs_bet_mode")
+                if rs.pressed_button and rs.pressed_button.id == "rb_pct":
+                    data["bet_mode"] = "pct"
+            except: pass
             
             # Save HDO threshold from scanner object
             hdo_scanner = self.scanners.get("HDO")
@@ -1429,6 +1793,47 @@ class PulseApp(TradeEngineMixin, App):
                 return
             except: continue
         self.safe_call(self.log_msg, "[red]All Web3 RPCs Failed. Using Binance backup.[/]")
+
+    @work(exclusive=True, thread=True)
+    def init_live_broker(self):
+        if not getattr(self, "app_active", False): return
+        self.safe_call(self.log_msg, "[dim]Initializing Wallet background connection...[/]", level="ADMIN")
+        try:
+            self.live_broker.init_client()
+            if not getattr(self, "app_active", False): return
+            if self.live_broker.client:
+                # Clarify this is the "Wallet" balance to avoid confusion with SIM balance
+                self.safe_call(self.log_msg, f"[bold green]Live Wallet Connected.[/] Balance: ${self.live_broker.balance:.2f}", level="ADMIN")
+                self.safe_call(self.update_balance_ui)
+            else:
+                self.safe_call(self.log_msg, "[yellow]Live Wallet: No Private Key found. LIVE mode disabled.[/]", level="ADMIN")
+        except Exception as e:
+            if getattr(self, "app_active", False):
+                self.safe_call(self.log_msg, f"[bold red]Live Wallet Init Error:[/] {e}", level="ERROR")
+
+    def on_unmount(self):
+        """Cleanup on app exit."""
+        self.app_active = False 
+        self.finalize_html_log()
+        self.save_settings()
+
+    def finalize_html_log(self):
+        # Use a latch to ensure we only write the closing tags once
+        if getattr(self, "_html_finalized", False):
+            return
+        if hasattr(self, "html_log_file") and os.path.exists(self.html_log_file):
+            try:
+                with open(self.html_log_file, "r+", encoding="utf-8") as f:
+                    content = f.read()
+                    if "</tbody></table>" not in content:
+                        f.seek(0, os.SEEK_END)
+                        f.write("</tbody></table></body></html>\n")
+                self._html_finalized = True
+                # Final FTP upload
+                if self.log_settings.get("verification_html", True):
+                    self.ftp_manager.upload_html_log(self.html_log_file)
+            except:
+                pass
 
     def update_balance_ui(self):
         is_live = self.query_one("#cb_live").value
@@ -1701,3 +2106,72 @@ class PulseApp(TradeEngineMixin, App):
             await self.trigger_buy("UP" if "_up" in bid else "DOWN")
         elif "btn_sell_" in bid:
             await self.trigger_sell_all("UP" if "_up" in bid else "DOWN")
+
+    async def perform_frequency_switch(self, new_freq, exit_positions=False):
+        """Orchestrates a safe transition between market frequencies."""
+        try:
+            old_freq = self.config.MARKET_FREQ
+            self.log_msg(f"[bold yellow]🔄 FREQUENCY SWITCH INITIATED:[/] {old_freq}m -> {new_freq}m", level="SYS")
+            
+            # 1. Handle Positions
+            if exit_positions:
+                pos_count = len(self.window_bets)
+                if pos_count > 0:
+                    self.log_msg(f"[bold red]Exiting {pos_count} positions before switch...[/]", level="TRADE")
+                    await self.trigger_sell_all("UP")
+                    await self.trigger_sell_all("DOWN")
+            
+            # 2. Show Session Summary
+            self.show_session_summary()
+            
+            # 3. Apply changes to config
+            self.config.MARKET_FREQ = new_freq
+            
+            # 4. Reset Session State (excluding Balance/BR)
+            self.session_win_count = 0 
+            self.session_total_trades = 0
+            self.session_pnl = 0.0
+            self.session_windows_settled = 0
+            self.window_settled = False
+            self.pre_buy_pending = None
+            self.pre_buy_triggered = False
+            self.hdo_fired_in_window = False
+            self.window_realized_revenue = 0.0
+            
+            # 5. Reset Analytics
+            self.mom_analytics = self._reset_mom_analytics()
+            for sc in self.scanners.values():
+                if hasattr(sc, "reset"): sc.reset() # Some scanners might have state
+            
+            # 6. Force First-Window Lockout
+            self.mid_window_lockout = True
+            
+            # 7. Update UI
+            self.update_balance_ui()
+            self.log_msg(f"[bold green]✅ SWITCH COMPLETE:[/] Now trading {new_freq}m markets. [cyan]Lockout Active[/] until first window closes.", level="SYS")
+            
+            # Save new config
+            self.save_settings()
+            
+        except Exception as e:
+            self.log_msg(f"[bold red]ERROR during frequency switch:[/] {e}", level="ERROR")
+
+    def show_session_summary(self):
+        """Prints a comprehensive summary of the frequency-specific session being closed."""
+        freq = self.config.MARKET_FREQ
+        bal = self.sim_broker.balance
+        pnl = self.session_pnl
+        wins = self.session_win_count
+        total = self.session_total_trades
+        acc = (wins / total * 100) if total > 0 else 0
+        
+        self.log_msg("", level="STATS")
+        self.log_msg(f"[bold white]══════════════════════════════════════════════════════[/]", level="STATS")
+        self.log_msg(f"[bold white]  SESSION TERMINATED: {freq}M MARKET[/]", level="STATS")
+        self.log_msg(f"[bold white]══════════════════════════════════════════════════════[/]", level="STATS")
+        self.log_msg(f"  [dim]• Final PnL:[/] { '[green]+' if pnl>=0 else '[red]' }${pnl:,.2f}", level="STATS")
+        self.log_msg(f"  [dim]• Accuracy:[/]  {acc:.1f}% ({wins}/{total} trades)", level="STATS")
+        self.log_msg(f"  [dim]• Windows:[/]   {self.session_windows_settled}", level="STATS")
+        self.log_msg(f"  [dim]• Balance:[/]   ${bal:,.2f}", level="STATS")
+        self.log_msg(f"[bold white]══════════════════════════════════════════════════════[/]", level="STATS")
+        self.log_msg("", level="STATS")

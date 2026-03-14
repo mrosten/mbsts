@@ -1,5 +1,10 @@
 import time
-from .config import TradingConfig
+# Handle imports for both package and direct execution
+try:
+    from .config import TradingConfig
+except ImportError:
+    # Running directly from vortex_pulse directory
+    from config import TradingConfig
 
 class RiskManager:
     """

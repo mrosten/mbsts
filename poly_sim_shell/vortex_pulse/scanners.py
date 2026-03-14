@@ -1,4 +1,9 @@
-from .config import TradingConfig
+# Handle imports for both package and direct execution
+try:
+    from .config import TradingConfig
+except ImportError:
+    # Running directly from vortex_pulse directory
+    from config import TradingConfig
 
 class BaseScanner:
     def __init__(self, config: TradingConfig = None):
@@ -1368,5 +1373,12 @@ ALGO_INFO = {
     "ZSC": {"name": "Z-Score", "desc": "Statistical breakout scanner triggering when price deviates >3.5 Standard Deviations from the window mean."},
     "VSN": {"name": "Vol Snap", "desc": "Triggers when BTC order book depth near the window open exceeds X BTC on one side, indicating strong directional conviction."},
     "HDO": {"name": "Hedge Direction Opposite", "desc": "Protects portfolio by entering an opposite position when the counter-side price crosses a threshold. Amount is scaled by Algo Weight."},
-    "BRI": {"name": "Briefing", "desc": "Automated 'My Guess' logic: Uses 1H trend, RSI, bid spread, and ask imbalance at window start to determine conviction."}
+    "BRI": {"name": "Briefing", "desc": "Automated 'My Guess' logic: Uses 1H trend, RSI, bid spread, and ask imbalance at window start to determine conviction."},
+    "WCP": {"name": "Window Candle Profiler", "desc": "Analyzes OHLC of the previous window to detect reversal patterns like Shooting Stars or Hammers."},
+    "VPOC": {"name": "VPOC Analyzer", "desc": "Tracks Volume Point of Control to identify overextended 'thin' price moves vs most traded price."},
+    "SDP": {"name": "Settlement Drift Predictor", "desc": "Analyzes the Basis Gap between Polymarket and Kraken at settlement to predict snap-backs."},
+    "DIV": {"name": "Sentiment Divergence", "desc": "Compares Odds Score delta vs BTC Price delta to detect human over-anticipation or panic bubbles."},
+    "SSI": {"name": "Strategy Success Inversion", "desc": "Monitors session win streaks to identify whipsaw regimes and invert signals if accuracy is critically low."}
 }
+
+BullFlagScanner = StaircaseBreakoutScanner
