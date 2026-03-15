@@ -1,6 +1,6 @@
 # Polymarket Vortex Pulse V5 — Complete System Reference
 
-> **Version:** 5.9.11  
+> **Version:** 5.9.12  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
 > **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)
 
@@ -12,6 +12,9 @@ Polymarket Vortex Pulse V5 is a fully automated, high-frequency execution bot th
 
 Key capabilities:
 - **Trade Protection Suite (v5.9.11)** — Configurable **Late-Window Lockout (LWL)** and **Sentiment Guard** to prevent losses from last-second volatility and oracle mismatches.
+- **Time-Based Take Profit (NEW)** — Sell at target price when time threshold reached (e.g., "90c@90" = 90¢ when ≤90s remaining) to lock in gains before reversals.
+- **Enhanced Console Logging (NEW)** — Detailed trade breakdown, PnL calculation transparency, and individual trade status tracking for debugging.
+- **Moshe Scanner Anti-Spam (FIXED)** — Cooldown mechanism prevents signal spamming with proper reset logic and realistic defaults.
 - **20 scanners** running in parallel, each with independent signal logic and full configurability
 - **Advanced scanner configuration modals** for all algorithms with individual parameter tuning
 - **Global skepticism filters** for odds and guess conflicts with premium adjustments
