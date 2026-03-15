@@ -848,6 +848,7 @@ class PulseApp(TradeEngineMixin, App):
                 f.write(".discrepancy{background:#4d0000 !important;}")
                 f.write(".graph-img{max-width:200px;border:1px solid #444;transition:transform 0.2s;cursor:zoom-in;}")
                 f.write(".graph-img:hover{transform:scale(2.5);z-index:100;position:relative;}")
+                f.write(".no-data{background:#2a2a2a;color:#888;padding:20px;text-align:center;border-radius:8px;margin:20px 0;}")
                 f.write("</style></head><body>")
                 f.write("<h1>Vortex Pulse - Manual Verification Log</h1>")
                 f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
@@ -873,6 +874,9 @@ class PulseApp(TradeEngineMixin, App):
                 f.write("<th>Graph</th>")
                 f.write("</tr></thead>")
                 f.write("<tbody>\n")
+                
+                # Add a placeholder row for early exits - will be replaced if data is added
+                f.write("<!-- SESSION_DATA_PLACEHOLDER -->\n")
 
         # 3. Momentum ADV Log
         self.mom_analytics = self._reset_mom_analytics()
@@ -1898,14 +1902,33 @@ class PulseApp(TradeEngineMixin, App):
                 with open(self.html_log_file, "r+", encoding="utf-8") as f:
                     content = f.read()
                     if "</tbody></table>" not in content:
+                        # Check if we have any actual data rows
+                        has_data = "<tr class=" in content and "SESSION_DATA_PLACEHOLDER" not in content
+                        
+                        if not has_data:
+                            # Replace placeholder with no-data message
+                            if "<!-- SESSION_DATA_PLACEHOLDER -->" in content:
+                                content = content.replace(
+                                    "<!-- SESSION_DATA_PLACEHOLDER -->\n",
+                                    f'<tr><td colspan="16"><div class="no-data">📊 No trading activity recorded during this session<br><small>Session ended early or no windows were processed</small></div></td></tr>\n'
+                                )
+                        else:
+                            # Remove placeholder if data was added
+                            content = content.replace("<!-- SESSION_DATA_PLACEHOLDER -->\n", "")
+                        
+                        # Write the final content
+                        f.seek(0)
+                        f.write(content)
+                        f.truncate()
                         f.seek(0, os.SEEK_END)
                         f.write("</tbody></table></body></html>\n")
+                        
                 self._html_finalized = True
                 # Final FTP upload
                 if self.log_settings.get("verification_html", True):
                     self.ftp_manager.upload_html_log(self.html_log_file)
-            except:
-                pass
+            except Exception as e:
+                self.log_msg(f"[dim]Warning: Could not finalize HTML log: {e}[/]", level="ERROR")
 
     def update_balance_ui(self):
         is_live = self.query_one("#cb_live").value
