@@ -25,6 +25,10 @@ class SimBroker:
         self.init_log()
 
     def init_log(self):
+        log_dir = os.path.dirname(self.log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+            
         if not os.path.exists(self.log_file):
             with open(self.log_file, 'w') as f:
                 meta = (
@@ -82,6 +86,9 @@ class SimBroker:
         if current_app and hasattr(current_app, "log_settings"):
             if not current_app.log_settings.get("main_csv", True):
                 return
+
+        if not os.path.exists(os.path.dirname(self.log_file)):
+            os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
 
         with open(self.log_file, 'a') as f:
             f.write(text + "\n")

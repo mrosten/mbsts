@@ -806,7 +806,7 @@ class PulseApp(TradeEngineMixin, App):
             log_dir = os.path.join(script_dir, "lg")
             
         if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+            os.makedirs(log_dir, exist_ok=True)
 
         # ---------------------------------------------------------
         # [SESSION LOG INITIALIZATION]
@@ -1653,8 +1653,18 @@ class PulseApp(TradeEngineMixin, App):
         except: pass
 
     def dump_state_log(self):
-        is_live = self.query_one("#cb_live").value
-        self.sim_broker.log_snapshot(self.market_data, self.time_rem_str, is_live, self.live_broker.balance, self.risk_manager.risk_bankroll)
+        try:
+            is_live = False
+            try:
+                cb_live = self.query_one("#cb_live")
+                if cb_live.is_mounted:
+                    is_live = cb_live.value
+            except: pass
+            
+            self.sim_broker.log_snapshot(self.market_data, self.time_rem_str, is_live, self.live_broker.balance, self.risk_manager.risk_bankroll)
+        except Exception as e:
+            # Silent fail to prevent interval crash if UI or files are locked
+            pass
 
     def check_dump_log(self):
         now = time.time()

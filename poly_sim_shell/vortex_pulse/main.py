@@ -33,7 +33,7 @@ def main():
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = os.path.join(log_base, f"session_{session_id}")
     if not os.path.exists(log_dir): 
-        os.makedirs(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
         
     default_log = os.path.join(log_dir, f"pulse_log_5M_{session_id}.csv")
     log_file = input(f"Enter Log Filename (default: {default_log}): ").strip()
