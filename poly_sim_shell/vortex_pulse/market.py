@@ -158,7 +158,7 @@ class MarketDataManager:
             # WebSocket stop logic - loop checks self.app_active
             pass
 
-    def log(self, msg, is_connection_error=False):
+    def log(self, msg, is_connection_error=False, level="INFO"):
         try:
             if is_connection_error:
                 if self.connection_lost:
@@ -171,7 +171,11 @@ class MarketDataManager:
                 self.just_reconnected = True
 
             if self.logger:
-                self.logger(msg)
+                # Check if the logger supports a level argument
+                try:
+                    self.logger(msg, level=level)
+                except TypeError:
+                    self.logger(msg)
         except Exception:
             pass # Failsafe if the UI thread is not ready to receive logs
 
@@ -330,7 +334,7 @@ class MarketDataManager:
                     if target_candle:
                         open_p = float(target_candle[1]) 
                         self.price_history.append({'timestamp': start_ts, 'elapsed': 0, 'price': open_p})
-                        self.log(f"[cyan]Fixed Mid-Window Start: Found Kraken Open @ ${open_p:,.2f}[/]")
+                        self.log(f"[cyan]Fixed Mid-Window Start: Found Kraken Open @ ${open_p:,.2f}[/]", level="SYS")
             except:
                 pass
         
