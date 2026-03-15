@@ -500,6 +500,9 @@ class TradeEngineMixin:
                                 entry_price = 0
                                 primary_scanner = "N/A"
                                 
+                                # Calculate window_invested for this HTML log entry
+                                window_invested = sum(info.get("cost", 0) for info in self.window_bets.values())
+                                
                                 # Find the earliest/primary trade for this window
                                 for trade_id, trade_info in self.window_bets.items():
                                     if not trade_info.get("closed"):
@@ -1155,21 +1158,54 @@ class TradeEngineMixin:
             time_tp_input = self.query_one("#inp_time_tp").value
             if not time_tp_input or "@" not in time_tp_input:
                 return None
+            
+            # Clean up the input - remove extra spaces
+            time_tp_input = time_tp_input.strip()
+            if not time_tp_input or "@" not in time_tp_input:
+                return None
                 
             price_str, time_str = time_tp_input.split("@")
             
+            # Clean up individual parts
+            price_str = price_str.strip()
+            time_str = time_str.strip()
+            
             # Parse price (e.g., "90c" -> 0.90)
             if price_str.endswith("c"):
-                target_price = float(price_str[:-1]) / 100
+                price_str = price_str[:-1].strip()  # Remove 'c' and any spaces
+                if not price_str:
+                    self.log_msg(f"[dim]Time TP config error: Empty price value[/]")
+                    return None
+                target_price = float(price_str) / 100
             else:
+                if not price_str:
+                    self.log_msg(f"[dim]Time TP config error: Empty price value[/]")
+                    return None
                 target_price = float(price_str)
                 
             # Parse time (e.g., "90" -> 90, "1:30" -> 90)
+            if not time_str:
+                self.log_msg(f"[dim]Time TP config error: Empty time value[/]")
+                return None
+                
             if ":" in time_str:
-                minutes, seconds = time_str.split(":")
-                max_time_seconds = int(minutes) * 60 + int(seconds)
+                time_parts = time_str.split(":")
+                if len(time_parts) != 2:
+                    self.log_msg(f"[dim]Time TP config error: Invalid time format '{time_str}'[/]")
+                    return None
+                try:
+                    minutes = int(time_parts[0].strip())
+                    seconds = int(time_parts[1].strip())
+                    max_time_seconds = minutes * 60 + seconds
+                except ValueError:
+                    self.log_msg(f"[dim]Time TP config error: Invalid time values '{time_str}'[/]")
+                    return None
             else:
-                max_time_seconds = int(time_str)
+                try:
+                    max_time_seconds = int(time_str)
+                except ValueError:
+                    self.log_msg(f"[dim]Time TP config error: Invalid time value '{time_str}'[/]")
+                    return None
                 
             return target_price, max_time_seconds
             
