@@ -199,7 +199,8 @@ class TradeEngineMixin:
                 "Slingshot": "#cb_sli", "MinOne": "#cb_min", "Liquidity": "#cb_liq", "Cobra": "#cb_cob",
                 "Mesa": "#cb_mes", "MeanReversion": "#cb_mea", "GrindSnap": "#cb_gri", "VolCheck": "#cb_vol",
                 "Moshe": "#cb_mos", "ZScore": "#cb_zsc", "Nitro": "#cb_nit", "VolSnap": "#cb_vsn", "HDO": "#cb_hdo", "Briefing": "#cb_bri",
-                "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div", "SSI": "#cb_ssi"
+                "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div", "SSI": "#cb_ssi",
+                "SSC": "#cb_ssc", "ADT": "#cb_adt"
             }
             
             if not self.risk_initialized:
@@ -214,10 +215,20 @@ class TradeEngineMixin:
             if ts_start != self.market_data["start_ts"]:
                 if not is_first_tick:
                     is_new_window = True
-                    # [FIX] Capture state for the window we are about to settle
-                    old_slug = self.market_data.get("slug")
-                    old_strike = self.market_data.get("window_strike")
-                    self.trigger_settlement(settlement_slug=old_slug, settlement_strike=old_strike)
+                    
+                    # GAP DETECTION (v5.9.9): Prevent stale settlements after long disconnections
+                    last_window_ts = getattr(self, "last_window_ts", 0)
+                    gap = ts_start - last_window_ts if last_window_ts > 0 else 0
+                    if last_window_ts > 0 and gap > 420: # 7-minute gap (tolerant to 5m + slight drift)
+                        self.log_msg(f"[bold yellow]GAP DETECTED: {gap}s since last window. Skipping stale settlement/audit.[/]", level="ADMIN")
+                        self.audit_buffer = None # Discard pending audit for the window before the gap
+                    else:
+                        # [FIX] Capture state for the window we are about to settle
+                        old_slug = self.market_data.get("slug")
+                        old_strike = self.market_data.get("window_strike")
+                        self.trigger_settlement(settlement_slug=old_slug, settlement_strike=old_strike)
+                
+                self.last_window_ts = ts_start # Track for gap detection
                 
                 self.market_data["start_ts"] = ts_start # Latch immediately to prevent double-trigger
                 self.sim_broker.promote_prebuy()  # Move any pre-buy shares/costs to current window
@@ -249,7 +260,7 @@ class TradeEngineMixin:
                     # Note: Shares are promoted by sim_broker.promote_prebuy() above.
                     self.pre_buy_pending = None
                     action = "LONG" if sd == "UP" else "SHORT"
-                    self.log_msg(f"MONITORING: [{action}] Active | Status: TP/SL Engaged {reason_str}", level="SYS")
+                    self.log_msg(f"MONITORING: [{action}] Active | Status: TP/SL Engaged {reason_str}", level="ADMIN")
 
                 self.skipped_logs.clear() # reset the spam preventer
                 self.pending_bets.clear()  # discard any stale pending bets from last window
@@ -379,8 +390,11 @@ class TradeEngineMixin:
                 async def _perform_official_audit():
                     if not getattr(self, "app_active", False): return
                     try:
+                        # Capture the elapsed time at audit start for consistent logging
+                        audit_start_elapsed = int(time.time() - self.market_data["start_ts"])
+                        
                         # 1. Fetch official baseline from CURRENT window
-                        self.log_msg(f"[bold cyan]🔍 AUDIT INITIATED:[/bold cyan] Fetching state for {audit_slug}...", level="SYS")
+                        self.log_msg(f"[bold cyan]🔍 AUDIT INITIATED:[/bold cyan] T+{audit_start_elapsed}s - Fetching state for {audit_slug}...", level="SYS")
                         
                         # We may need to retry a few times if the market isn't 'resolved' yet
                         official_winner = "TIE"
@@ -400,7 +414,8 @@ class TradeEngineMixin:
                                 break
                             
                             if attempt < 2:
-                                self.log_msg(f"[dim]Audit: Market {audit_slug} not resolved yet. Retrying in 5s...[/]")
+                                current_elapsed = int(time.time() - self.market_data["start_ts"])
+                                self.log_msg(f"[dim]Audit: T+{current_elapsed}s - Market {audit_slug} not resolved yet. Retrying in 5s...[/]")
                                 await asyncio.sleep(5)
 
                         # 2. Definitively Establish the Strike-to-Strike Baseline
@@ -430,28 +445,31 @@ class TradeEngineMixin:
                             off_delta_str = f"Δ ${p_delta:+.2f}"
                             
                             # Compare Action (Kraken) vs Outcome (Poly)
+                            audit_completion_elapsed = int(time.time() - self.market_data["start_ts"])
                             if official_winner == buf["pulse_result"]:
-                                self.log_msg(f"[bold green]✅ SYNC MATCH:[/] Bot {buf['pulse_result']} | Poly {official_winner} ({off_delta_str})", level="SYS")
+                                self.log_msg(f"[bold green]✅ SYNC MATCH:[/] T+{audit_completion_elapsed}s - Bot {buf['pulse_result']} | Poly {official_winner} ({off_delta_str})", level="SYS")
                                 sync_status = "Match"
                             else:
                                 # DIRECTIONAL MISMATCH
                                 if official_winner == "TIE":
-                                    self.log_msg(f"[bold cyan]⚖️ SYNC TIE:[/] Bot {buf['pulse_result']} | Poly TIE ({off_delta_str})", level="SYS")
+                                    self.log_msg(f"[bold cyan]⚖️ SYNC TIE:[/] T+{audit_completion_elapsed}s - Bot {buf['pulse_result']} | Poly TIE ({off_delta_str})", level="SYS")
                                     sync_status = "Tie (Mismatch)"
                                 else:
-                                    self.log_msg(f"[bold yellow]⚠️ SYNC MISMATCH:[/] Bot {buf['pulse_result']} | Poly {official_winner} ({off_delta_str})", level="STATS")
+                                    self.log_msg(f"[bold yellow]⚠️ SYNC MISMATCH:[/] T+{audit_completion_elapsed}s - Bot {buf['pulse_result']} | Poly {official_winner} ({off_delta_str})", level="STATS")
                                     sync_status = "Mismatch"
 
                             # --- FINANCIAL RECONCILIATION (PnL Correction) ---
-                            # Logic: If Directional Mismatch, reverse the local error.
-                            if official_winner != buf["pulse_result"] and official_winner != "TIE":
+                            # DISABLED: Trust pulse_result over official resolution
+                            # Logic: If Directional Mismatch, reverse local error.
+                            # User observation: pulse_result is usually correct when Polymarket shows mismatch
+                            if False:  # official_winner != buf["pulse_result"] and official_winner != "TIE":
                                 is_l = self.query_one("#cb_live").value
-                                # Calculate what the correct payout SHOULD have been
+                                # Calculate what correct payout SHOULD have been
                                 shares_up = buf.get("shares", {}).get("UP", 0)
                                 shares_dn = buf.get("shares", {}).get("DOWN", 0)
                                 correct_payout = shares_up if official_winner == "UP" else shares_dn
                                 
-                                # The 'logged_pnl' already includes the incorrect payout.
+                                # The 'logged_pnl' already includes incorrect payout.
                                 actual_payout = shares_up if buf["pulse_result"] == "UP" else shares_dn
                                 recon_amt = correct_payout - actual_payout
                                 
@@ -475,7 +493,23 @@ class TradeEngineMixin:
                                 pm_url = f"https://polymarket.com/event/{audit_slug}"
                                 row_class = "match" if sync_status == "Match" else "discrepancy"
                                 if official_winner == "TIE": row_class = "result_tie"
-                                    
+                                
+                                # Calculate new fields from audit buffer
+                                # Entry timing: calculate when entry occurred after window start
+                                entry_time = 0
+                                entry_price = 0
+                                primary_scanner = "N/A"
+                                
+                                # Find the earliest/primary trade for this window
+                                for trade_id, trade_info in self.window_bets.items():
+                                    if not trade_info.get("closed"):
+                                        entry_time = max(entry_time, int(time.time() - buf.get("window_id", 0)))
+                                        entry_price = trade_info.get("entry", 0)
+                                        primary_scanner = trade_info.get("algorithm", "Unknown")
+                                        break  # Use first/primary trade
+                                
+                                risk_percent = (window_invested / self.risk_manager.risk_bankroll * 100) if self.risk_manager.risk_bankroll > 0 else 0
+                                
                                 with open(self.html_log_file, "a", encoding="utf-8") as f:
                                     is_l = self.query_one("#cb_live").value
                                     main_bal = self.live_broker.balance if is_l else self.sim_broker.balance
@@ -484,12 +518,21 @@ class TradeEngineMixin:
                                     f.write(f"<tr class='{row_class}'>")
                                     f.write(f"<td>{timestamp_str}</td>")
                                     f.write(f"<td><a href='{pm_url}' target='_blank'>{audit_slug}</a></td>")
-                                    f.write(f"<td>${p2b_start:,.2f}</td>")
-                                    f.write(f"<td>${p2b_next:,.2f} ({audit_src})</td>")
-                                    f.write(f"<td>{p_delta:+.2f}</td>")
-                                    f.write(f"<td><span class='{official_winner}'>{official_winner}</span></td>")
-                                    f.write(f"<td><span class='{buf['pulse_result']}'>{buf['pulse_result']}</span></td>")
+                                    f.write(f"<td>${p2b_start:,.2f}</td>") # Bot Strike
+                                    f.write(f"<td>${p2b_next:,.2f} ({audit_src})</td>") # Poly Strike
+                                    f.write(f"<td>{p_delta:+.2f}</td>") # Strike Drift
+                                    f.write(f"<td>${buf.get('close_price', 0):,.2f}</td>") # Settlement Price
+                                    f.write(f"<td><span class='{official_winner}'>{official_winner}</span></td>") # Resolution
+                                    f.write(f"<td><span class='{buf['pulse_result']}'>{buf['pulse_result']}</span></td>") # Pulse Result
                                     f.write(f"<td>{sync_status}</td>")
+                                    
+                                    # NEW HIGH-IMPACT FIELDS
+                                    risk_class = "risk-low" if risk_percent < 5 else ("risk-medium" if risk_percent < 15 else "risk-high")
+                                    f.write(f"<td>${buf.get('entry_price', 0):,.2f}</td>") # Entry Price
+                                    f.write(f"<td><span class='value {risk_class}'>{risk_percent:.1f}%</span></td>") # Risk % 
+                                    f.write(f"<td><span class='value scanner'>{primary_scanner}</span></td>") # Scanner Name
+                                    f.write(f"<td><span class='value entry-time'>{entry_time}s</span></td>") # Entry Timing
+                                    
                                     f.write(f"<td>{logged_pnl:+.2f}</td>")
                                     f.write(f"<td>${main_bal:,.2f}</td>") # Simulated/Live Balance
                                     graph_fn = buf.get("graph_filename", "")
@@ -502,6 +545,16 @@ class TradeEngineMixin:
                                     # Parallel FTP Upload
                                     if self.log_settings.get("verification_html", True):
                                         self.ftp_manager.upload_html_log(self.html_log_file)
+                                        
+                                    # Push metrics to dashboard
+                                    try:
+                                        self.ftp_manager.push_session_stats(
+                                            pnl=getattr(self, "session_pnl", 0.0),
+                                            trades=getattr(self, "session_total_trades", 0),
+                                            status="ACTIVE",
+                                            interval=f"{self.config.MARKET_FREQ}M"
+                                        )
+                                    except: pass
                             except Exception as e:
                                 self.log_msg(f"[red]HTML Log Error: {e}[/]", level="ERROR")
                         else:
@@ -641,6 +694,8 @@ class TradeEngineMixin:
                     active_bets = [info for info in self.window_bets.values() if not info.get("closed")]
                     for name, info in list(self.pending_bets.items()):
                         sd = info["side"]
+                        # Recalculate cost to include any new executions this tick
+                        total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
                         bs = info["bs"] * mult
                         
                         # Decide if this bet is blocked by our safety mode
@@ -664,6 +719,15 @@ class TradeEngineMixin:
                             else:
                                 if any(ab["side"] == sd for ab in active_bets): is_blocked = True
                         
+                        # --- UNIVERSAL WINDOW CAP ENFORCEMENT (v5.9.9) ---
+                        # Strictly enforce self.total_risk_cap regardless of safety mode.
+                        if not is_blocked:
+                            remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                            if bs > remaining_cap:
+                                bs = remaining_cap
+                                if bs < 1.00:
+                                    is_blocked = True
+                        
                         if is_blocked:
                             continue 
                         
@@ -678,6 +742,17 @@ class TradeEngineMixin:
                         
                         # Use unified scaling logic (Pass info to ensure logging latches work)
                         ok_final, final_bs, final_skeptic = self._refant_finalize_bet(name, sd, bs, pr, res, info=info)
+                        
+                        # [FEATURE] Global Window Investment Cap enforcement for Pending Bets
+                        remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                        if final_bs > remaining_cap:
+                            final_bs = remaining_cap
+                            if final_bs < 1.00:
+                                suppress_key = f"CAP_REACHED_{name}"
+                                if suppress_key not in self.skipped_logs:
+                                    self.log_msg(f"SKIPPED {name} | Window Risk Cap Reached (${total_window_cost:.2f}/$30)", level="SCAN")
+                                    self.skipped_logs.add(suppress_key)
+                                continue
                         
                         if ok_final:
                             is_l = self.query_one("#cb_live").value
@@ -761,6 +836,8 @@ class TradeEngineMixin:
                 "btc_pct_delta": (d["cur"] - d["opn"]) / d["opn"] if d["opn"] > 0 else 0
             }
 
+            # 1. Process All Scanners to find signals
+            total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
             for name, sc in self.scanners.items():
                 if not self.query_one(scanner_map[name]).value: continue
                 
@@ -902,6 +979,17 @@ class TradeEngineMixin:
 
                     # Final Safety Clamp (Bankroll & Max Cap)
                     bs = min(bs, TradingConfig.MAX_BET_SESSION_CAP)
+                    
+                    # [FEATURE] Global Window Investment Cap ($30 Limit enforcement)
+                    remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                    if bs > remaining_cap:
+                        bs = remaining_cap
+                        if bs < 1.00: # Below min bet
+                           if f"SKIP_CAP_{name}" not in self.skipped_logs:
+                               self.log_msg(f"SKIPPED {name} | Window Risk Cap Reached (${total_window_cost:.2f}/$30)", level="SCAN")
+                               self.skipped_logs.add(f"SKIP_CAP_{name}")
+                           continue
+                    
                     if bs > self.risk_manager.risk_bankroll:
                         bs = self.risk_manager.risk_bankroll
                     
@@ -1058,10 +1146,43 @@ class TradeEngineMixin:
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
 
+    def _parse_time_tp_config(self):
+        """Parse time-based TP configuration from input field.
+        Format: "90c@90" = 90¢ when ≤90 seconds remaining
+        Format: "85c@1:30" = 85¢ when ≤90 seconds remaining (1:30 format)
+        """
+        try:
+            time_tp_input = self.query_one("#inp_time_tp").value
+            if not time_tp_input or "@" not in time_tp_input:
+                return None
+                
+            price_str, time_str = time_tp_input.split("@")
+            
+            # Parse price (e.g., "90c" -> 0.90)
+            if price_str.endswith("c"):
+                target_price = float(price_str[:-1]) / 100
+            else:
+                target_price = float(price_str)
+                
+            # Parse time (e.g., "90" -> 90, "1:30" -> 90)
+            if ":" in time_str:
+                minutes, seconds = time_str.split(":")
+                max_time_seconds = int(minutes) * 60 + int(seconds)
+            else:
+                max_time_seconds = int(time_str)
+                
+            return target_price, max_time_seconds
+            
+        except Exception as e:
+            self.log_msg(f"[dim]Time TP config error: {e}[/]")
+            return None
+
     async def _check_tpsl(self):
         is_tp_active = self.query_one("#cb_tp_active").value
         try: use_tranche = self.query_one("#cb_tranche").value
         except: use_tranche = False
+        try: time_tp_active = self.query_one("#cb_time_tp").value
+        except: time_tp_active = False
 
         for bid, info in list(self.window_bets.items()):
             if not isinstance(info, dict): continue
@@ -1077,7 +1198,17 @@ class TradeEngineMixin:
             # 1. Universal Max Profit (99c Guaranteed Win Exit)
             if cur >= 0.99 and not has_limit_order: 
                 reason = f"MAX: {ent*100:.1f} -> {cur*100:.1f}¢ (+{roi*100:.1f}%)"
-            # 2. UI-configurable TP/SL Check
+            # 2. Time-based TP Check (NEW!)
+            elif time_tp_active and not has_limit_order:
+                time_tp_config = self._parse_time_tp_config()
+                if time_tp_config:
+                    target_price, max_time_seconds = time_tp_config
+                    elapsed = int(time.time() - self.market_data.get("start_ts", 0))
+                    time_remaining = 300 - elapsed  # 5 minutes = 300 seconds
+                    
+                    if time_remaining <= max_time_seconds and cur >= target_price:
+                        reason = f"TIME_TP: {ent*100:.1f} -> {cur*100:.1f}¢ (+{roi*100:.1f}%) @ {time_remaining}s left"
+            # 3. UI-configurable TP/SL Check
             elif is_tp_active:
                 if cur >= tp and not has_limit_order: 
                     reason = f"TP: {ent*100:.1f} -> {cur*100:.1f}¢ (+{roi*100:.1f}%)"
@@ -1397,7 +1528,7 @@ class TradeEngineMixin:
                     up_ask = d.get("up_ask", 0)
                     dn_ask = d.get("down_ask", 0)
                     if up_ask <= 0 and dn_ask <= 0:
-                        self.call_from_thread(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
+                        self.safe_call(self.log_msg, "[dim]🚀 PRE-BUY skipped — next window prices unavailable[/]")
                         return
                     
                     # Bet Sizing Logic explicitly for Pre-Buy
@@ -1527,7 +1658,19 @@ class TradeEngineMixin:
                             if trend_bad:
                                 pre_bs = 1.00 # Drop to minimum bet on low confidence
                             if pre_bs > self.risk_manager.risk_bankroll: pre_bs = self.risk_manager.risk_bankroll
-                            if pre_bs < 1.00: pre_bs = 1.00
+                                
+                            # Enforce Global Window Cap for Pre-Buy
+                            # (Note: total_window_cost is usually 0 here since it's the very start of a window boot)
+                            # But we check anyway for consistency.
+                            total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
+                            remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                            if pre_bs > remaining_cap:
+                                pre_bs = remaining_cap
+                                if pre_bs < 1.00:
+                                    self.safe_call(self.log_msg, f"[yellow]PRE-BUY ABORTED:[/] Risk Cap Reached (${total_window_cost:.2f}/$30)")
+                                    return
+
+                            if pre_bs < 1.00: pre_bs = 1.00 # hard floor for execution
 
                             self.safe_call(self.log_msg, f"[dim]{algo_id} PRE-BUY Trigger: {side} ({reason})[/]")
 
@@ -1690,12 +1833,36 @@ class TradeEngineMixin:
         # window_invested must include ALL trades (active and closed) to compute correct PnL
         window_invested = sum(info.get("cost", 0) for info in self.window_bets.values())
         
+        # Validate for potential calculation errors
+        if window_invested <= 0:
+            self.log_msg(f"[yellow]WARNING: Window invested is ${window_invested:.2f} - checking trade data[/]", level="STATS")
+            for trade_id, info in self.window_bets.items():
+                cost = info.get("cost", 0)
+                entry = info.get("entry", 0)
+                self.log_msg(f"  Trade {trade_id}: cost=${cost:.2f}, entry=${entry:.4f}, closed={info.get('closed', False)}", level="STATS")
+        
         # settlement_pay only calculates revenue from trades STILL OPEN at the final second
         active_bets = [info for info in self.window_bets.values() if not info.get("closed")]
-        settlement_pay = sum((info.get("cost", 0)/info.get("entry", 0.5)) for info in active_bets if info.get("side") == winner)
+        settlement_pay = 0
+        for info in active_bets:
+            if info.get("side") == winner:
+                cost = info.get("cost", 0)
+                entry = info.get("entry", 0)
+                if entry > 0:
+                    shares = cost / entry
+                    settlement_pay += shares
+                else:
+                    self.log_msg(f"[red]ERROR: Trade has entry price of ${entry:.4f} - cost=${cost:.2f}[/]", level="ERROR")
         
         total_window_revenue = settlement_pay + self.window_realized_revenue
         net_pnl = total_window_revenue - window_invested
+        
+        # Check for infinity or NaN issues
+        if not (-1000000 <= net_pnl <= 1000000) or net_pnl != net_pnl:  # NaN check
+            self.log_msg(f"[red]CRITICAL ERROR: PnL calculation issue - net_pnl={net_pnl}[/]", level="ERROR")
+            self.log_msg(f"  settlement_pay={settlement_pay}, window_realized_revenue={self.window_realized_revenue}, window_invested={window_invested}", level="ERROR")
+            net_pnl = 0  # Fallback to prevent corruption
+        
         self.session_pnl += net_pnl
         
         # --- [NEW] Session Streak Tracker ---
@@ -1714,7 +1881,9 @@ class TradeEngineMixin:
         self.sim_broker.settle_window(winner) 
         
         # REFILL RISK BANKROLL! (v5.9.6 Fix)
-        self.risk_manager.register_settlement(payout, self.window_realized_revenue, grow=self.grow_riskbankroll)
+        # Note: payout (settlement_pay) should ONLY include revenue from active trades.
+        # realized_revenue is already in the bankroll.
+        self.risk_manager.register_settlement(payout, 0, grow=self.grow_riskbankroll)
         self.update_balance_ui()
         
         # Accuracy: Count settlement winners
@@ -1731,6 +1900,35 @@ class TradeEngineMixin:
         
         # 3. Immediate Logging (v5.9.8)
         self.log_msg(f"SETTLEMENT: {winner} ({reason.capitalize()})", level="RSLT")
+        
+        # Enhanced PnL breakdown for debugging
+        active_bets_count = len([info for info in self.window_bets.values() if not info.get("closed")])
+        closed_bets_count = len([info for info in self.window_bets.values() if info.get("closed")])
+        total_bets_count = len(self.window_bets)
+        
+        # Log individual trades for clarity
+        if self.window_bets:
+            trade_details = []
+            for trade_id, info in self.window_bets.items():
+                side = info.get("side", "??")
+                cost = info.get("cost", 0)
+                entry = info.get("entry", 0)
+                closed = info.get("closed", False)
+                status = "CLOSED" if closed else "ACTIVE"
+                if entry > 0:
+                    shares = cost / entry
+                    trade_details.append(f"{side}(${cost:.2f}@{entry*100:.1f}¢,{shares:.1f}shares,{status})")
+                else:
+                    trade_details.append(f"{side}(${cost:.2f}@0.0¢,ERROR,{status})")
+            
+            self.log_msg(f"TRADES: Active:{active_bets_count} Closed:{closed_bets_count} Total:{total_bets_count}", level="STATS")
+            self.log_msg(f"TRADE DETAIL: {' | '.join(trade_details[:4])}", level="STATS")
+            if len(trade_details) > 4:
+                self.log_msg(f"MORE TRADES: +{len(trade_details)-4} additional trades", level="STATS")
+        else:
+            self.log_msg(f"TRADES: No trades this window", level="STATS")
+        
+        self.log_msg(f"PNL BREAKDOWN: Invested=${window_invested:.2f} | Revenue=${total_window_revenue:.2f} | Net=${net_pnl:+.2f}", level="STATS")
         self.log_msg(f"PNL: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Ses: {'+' if self.session_pnl >= 0 else ''}${self.session_pnl:.2f} | Eq: ${main_bal:.1f} | Acc: {acc_val:.1f}%", level="STATS")
 
         # HTML Verification row is now written at T+15 after official audit
@@ -1765,12 +1963,14 @@ class TradeEngineMixin:
             "pnl": net_pnl,
             "graph_filename": graph_filename,
             "shares": {
-                "UP": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in active_bets if info.get("side") == "UP"),
-                "DOWN": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in active_bets if info.get("side") == "DOWN")
+                "UP": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in self.window_bets.values() if info.get("side") == "UP"),
+                "DOWN": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in self.window_bets.values() if info.get("side") == "DOWN")
             }
         }
         
-        self._add_risk_revenue(payout)
+        
+        # [FIXED] Removed redundant _add_risk_revenue(payout) call as it is already handled 
+        # by risk_manager.register_settlement above.
 
         # --- BANKROLL EXHAUSTION CHECK ---
         self._check_bankroll_exhaustion(net_pnl=net_pnl)

@@ -24,7 +24,7 @@ try:
         CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
-        VolSnapScanner
+        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
     )
     from .ui_modals import (
         GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
@@ -36,7 +36,7 @@ try:
         COBSettingsModal, MESSettingsModal, NPASettingsModal,
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
-        BRISettingsModal, ZSCSettingsModal
+        BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -319,6 +319,14 @@ class PulseApp(TradeEngineMixin, App):
     .algo_item Label { width: auto; margin: 0 0 0 1; color: #666666; }
     .algo_item Label:hover { color: cyan; text-style: underline; }
     
+    /* Enhanced Modal Styles */
+    .setting_section { margin: 1 0; padding: 1; background: #2a2a2a; border-left: solid #00ff88; }
+    .section_title { color: #00ff88; text-style: bold; margin-bottom: 1; }
+    .help_text { color: #888888; text-style: italic; margin-bottom: 1; padding: 0 1; }
+    .field_note { color: #666666; text-style: italic; }
+    .info_box { background: #1a1a1a; border: solid #333333; padding: 1; margin: 1 0; }
+    .mode_info_box { color: #aaaaaa; padding: 1; }
+    
     .live_row { align: center middle; height: 3; background: #220000; padding: 0 1; border-top: solid #440000; }
     .live_row Checkbox { height: 1; min-height: 1; width: auto; margin: 0 1; background: #220000; color: #aaaaaa; border: none; }
     
@@ -512,7 +520,9 @@ class PulseApp(TradeEngineMixin, App):
                 "VPOC": lambda: VPOCSettingsModal(self),
                 "SDP": lambda: SDPSettingsModal(self),
                 "DIV": lambda: DIVSettingsModal(self),
-                "SSI": lambda: SSISettingsModal(self)
+                "SSI": lambda: SSISettingsModal(self),
+                "SSC": lambda: SSCSettingsModal(self),
+                "ADT": lambda: ADTSettingsModal(self)
             }
 
             if code in modal_factory:
@@ -547,14 +557,14 @@ class PulseApp(TradeEngineMixin, App):
         self.sim_broker.app = self  # Set app reference for log toggle checks
         self.live_broker = live_broker
         self.start_live_mode = start_live_mode
-        self.market_data_manager = MarketDataManager(config=self.config, logger_func=lambda m: self.call_from_thread(self.log_msg, m))
+        self.market_data_manager = MarketDataManager(config=self.config, logger_func=lambda m, level="INFO": self.safe_call(self.log_msg, m, level=level))
         self.risk_manager = RiskManager(self.config)
         self.trade_executor = TradeExecutor(sim_broker, live_broker, self.risk_manager)
         self.trade_executor.config = self.config # Pass config to executor
         
         # FTP Sync System
         from .ftp_manager import FTPManager
-        self.ftp_manager = FTPManager()
+        self.ftp_manager = FTPManager(logger_func=lambda m, level="INFO": self.safe_call(self.log_msg, m, level=level))
         if session_id:
             self.ftp_manager.set_session(f"session_{session_id}")
         self.market_data = self.market_data_manager.market_data 
@@ -579,6 +589,7 @@ class PulseApp(TradeEngineMixin, App):
         self.hdo_fired_in_window = False   # Latch: True if a hedge was triggered this window
         self.exposure_up = {"cost": 0.0, "payout": 0.0}
         self.exposure_dn = {"cost": 0.0, "payout": 0.0}
+        self.last_window_ts = 0             # Track for gap detection (v5.9.9)
         
         # Log Toggles
         self.log_settings = {
@@ -623,7 +634,9 @@ class PulseApp(TradeEngineMixin, App):
             "VPOC": VPOCAnalyzer(self.config),
             "SDP": SettlementDriftPredictor(self.config),
             "DIV": SentimentDivergenceScanner(self.config),
-            "SSI": StrategyInversionScanner(self.config)
+            "SSI": StrategyInversionScanner(self.config),
+            "SSC": ShallowSymmetricalContinuationScanner(self.config),
+            "ADT": AsymmetricDoubleTestScanner(self.config)
         }
         
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
@@ -838,7 +851,27 @@ class PulseApp(TradeEngineMixin, App):
                 f.write("</style></head><body>")
                 f.write("<h1>Vortex Pulse - Manual Verification Log</h1>")
                 f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
-                f.write("<table><thead><tr><th>Timestamp</th><th>Polymarket Window Link</th><th>Start Strike</th><th>End Strike</th><th>Delta ($)</th><th>Official Result</th><th>Pulse Result</th><th>Sync Status</th><th>PnL ($)</th><th>Balance ($)</th><th>Graph</th></tr></thead>")
+                f.write("<table><thead><tr>")
+                f.write("<th>Timestamp</th>")
+                f.write("<th>Polymarket Window Link</th>")
+                f.write("<th>Bot Strike</th>")
+                f.write("<th>Poly Strike</th>")
+                f.write("<th>Strike Drift</th>")
+                f.write("<th>Settlement Price</th>")
+                f.write("<th>Resolution</th>")
+                f.write("<th>Pulse Result</th>")
+                f.write("<th>Sync Status</th>")
+                
+                # NEW HIGH-IMPACT FIELDS
+                f.write("<th>Entry Price</th>")
+                f.write("<th>Risk %</th>")
+                f.write("<th>Scanner</th>")
+                f.write("<th>Entry Time</th>")
+                
+                f.write("<th>PnL ($)</th>")
+                f.write("<th>Balance ($)</th>")
+                f.write("<th>Graph</th>")
+                f.write("</tr></thead>")
                 f.write("<tbody>\n")
 
         # 3. Momentum ADV Log
@@ -921,8 +954,8 @@ class PulseApp(TradeEngineMixin, App):
                         id="rs_bet_mode"
                     )
                 with Horizontal(classes="input_row"):
-                    yield Label("Risk Cap:", classes="lbl_sm")
-                    yield Input(placeholder="Allocated", id="inp_risk_alloc")
+                    yield Label("Bankroll:", classes="lbl_sm")
+                    yield Input(placeholder="Allocated Funds", id="inp_risk_alloc")
                     yield Label("TP %:", classes="lbl_sm")
                     yield Input(placeholder="TP %", value="95", id="inp_tp")
                     yield Label("SL %:", classes="lbl_sm")
@@ -1030,6 +1063,8 @@ class PulseApp(TradeEngineMixin, App):
                     yield Label("DYNAMICS / MISC", classes="scanner_header")
                     yield Horizontal(Checkbox(value=False, id="cb_vol"), Label("VOL", id="lbl_vol"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_liq"), Label("LIQ", id="lbl_liq"), classes="algo_item")
+                    yield Horizontal(Checkbox(value=False, id="cb_ssc"), Label("SSC", id="lbl_ssc"), classes="algo_item")
+                    yield Horizontal(Checkbox(value=False, id="cb_adt"), Label("ADT", id="lbl_adt"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_mid"), Label("MID ~", id="lbl_mid", classes="deprecated_lbl"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_min"), Label("MIN ~", id="lbl_min", classes="deprecated_lbl"), classes="algo_item")
 
@@ -1038,23 +1073,18 @@ class PulseApp(TradeEngineMixin, App):
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_wcp")
                         yield Label("WCP", id="lbl_wcp")
-                        yield Input(value=str(self.scanner_weights.get("WCP", 0.0)), id="inp_wcp_weight", classes="algo_weight")
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_vpoc")
                         yield Label("VPO", id="lbl_vpoc")
-                        yield Input(value=str(self.scanner_weights.get("VPOC", 0.0)), id="inp_vpoc_weight", classes="algo_weight")
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_sdp")
                         yield Label("SDP", id="lbl_sdp")
-                        yield Input(value=str(self.scanner_weights.get("SDP", 0.0)), id="inp_sdp_weight", classes="algo_weight")
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_div")
                         yield Label("DIV", id="lbl_div")
-                        yield Input(value=str(self.scanner_weights.get("DIV", 0.0)), id="inp_div_weight", classes="algo_weight")
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_ssi")
                         yield Label("SSI", id="lbl_ssi")
-                        yield Input(value=str(self.scanner_weights.get("SSI", 0.0)), id="inp_ssi_weight", classes="algo_weight")
         yield Horizontal(
             Checkbox("TP/SL", value=True, id="cb_tp_active"),
             Checkbox("Tranche Exits", value=False, id="cb_tranche", tooltip="Track Take Profits by individual sequence bets."),
@@ -1063,6 +1093,12 @@ class PulseApp(TradeEngineMixin, App):
             Checkbox("Whale Protect", value=False, id="cb_whale", tooltip="Emergency Exit: Sell all if price is tight near window end."),
             Checkbox("Bounce Entry", value=False, id="cb_bounce", tooltip="Wait for price to dip below entry level then recover before executing."),
             id="settings_row",
+            classes="live_row"
+        )
+        yield Horizontal(
+            Input(placeholder="90c @ 1:30", id="inp_time_tp", tooltip="Time-based TP: Price@Time (e.g., 90c@90 = 90¢ when ≤90s remaining)"),
+            Checkbox("Time TP", value=False, id="cb_time_tp", tooltip="Enable time-based take profit (e.g., sell at 90¢ when ≤90s left)"),
+            id="time_tp_row",
             classes="live_row"
         )
         yield Horizontal(
@@ -1115,11 +1151,11 @@ class PulseApp(TradeEngineMixin, App):
                         up_ask = d.get("up_ask", 0)
                         dn_ask = d.get("down_ask", 0)
                         if up_ask > 0 or dn_ask > 0:
-                            self.call_from_thread(self.log_msg, f"[bold cyan]NEXT WINDOW:[/] UP ask={up_ask*100:.1f}¢ | DN ask={dn_ask*100:.1f}¢")
+                            self.safe_call(self.log_msg, f"[bold cyan]NEXT WINDOW:[/] UP ask={up_ask*100:.1f}¢ | DN ask={dn_ask*100:.1f}¢")
                         else:
-                            self.call_from_thread(self.log_msg, "[bold red]NEXT WINDOW:[/] Markets not yet active/available.")
+                            self.safe_call(self.log_msg, "[bold red]NEXT WINDOW:[/] Markets not yet active/available.")
                     except Exception as e:
-                        self.call_from_thread(self.log_msg, f"[bold red]NEXT WINDOW ERROR:[/] {e}")
+                        self.safe_call(self.log_msg, f"[bold red]NEXT WINDOW ERROR:[/] {e}")
                 import threading
                 threading.Thread(target=_do_fetch_pre, daemon=True).start()
             elif cmd.startswith("penalty_percentage="):
@@ -1308,7 +1344,7 @@ class PulseApp(TradeEngineMixin, App):
         except: pass
 
         # We only auto-save specific configuration inputs to avoid disk thrashing
-        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach", "inp_risk_alloc", "inp_lw_lockout", "inp_sentiment_guard"}:
+        if event.input.id in {"inp_amount", "inp_tp", "inp_sl", "inp_min_diff", "inp_min_price", "inp_max_price", "inp_skeptic_odds", "inp_skeptic_guess", "inp_penalty_pct", "inp_shield_time", "inp_shield_reach", "inp_risk_alloc", "inp_lw_lockout", "inp_sentiment_guard", "inp_time_tp"}:
             self.save_settings()
 
     @on(RadioSet.Changed, "#rs_bet_mode")
@@ -1366,7 +1402,7 @@ class PulseApp(TradeEngineMixin, App):
                     "inp_min_diff": "inp_min_diff", "inp_min_price": "inp_min_price",
                     "inp_max_price": "inp_max_price", "inp_skeptic_odds": "inp_skeptic_odds",
                     "inp_skeptic_guess": "inp_skeptic_guess", "inp_penalty_pct": "inp_penalty_pct",
-                    "inp_sim_bal": "inp_sim_bal"
+                    "inp_sim_bal": "inp_sim_bal", "inp_time_tp": "inp_time_tp"
                 }
                 for fid, json_key in sync_map_ui.items():
                     if json_key in s:
@@ -1381,8 +1417,11 @@ class PulseApp(TradeEngineMixin, App):
                     self.query_one("#inp_shield_time").value = str(s["shield_time"])
                 if "shield_reach" in s:
                     self.query_one("#inp_shield_reach").value = str(s["shield_reach"])
-                if "total_risk_cap" in s:
-                    self.query_one("#inp_risk_alloc").value = str(s["total_risk_cap"])
+                if "inp_risk_alloc" in s:
+                    self.query_one("#inp_risk_alloc").value = str(s["inp_risk_alloc"])
+                
+                # Separate loading for total_risk_cap (Window Limit)
+                self.total_risk_cap = float(s.get("total_risk_cap", 30.0))
                 
                 if "bet_mode" in s:
                     if s["bet_mode"] == "pct":
@@ -1394,7 +1433,7 @@ class PulseApp(TradeEngineMixin, App):
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
                 self.global_skeptic_guess = float(s.get("inp_skeptic_guess", 0.03))
                 self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
-                self.total_risk_cap = float(s.get("total_risk_cap", 30.0))
+                # self.total_risk_cap already handled above
                 self.exec_safety_mode = s.get("exec_safety_mode", "global_lock")
                 self.sl_plus_mode = bool(s.get("sl_plus_mode", True))
                 self.grow_riskbankroll = bool(s.get("grow_riskbankroll", False))
@@ -1416,6 +1455,8 @@ class PulseApp(TradeEngineMixin, App):
                 try: self.query_one("#cb_hdo").value = bool(s.get("cb_hdo", False))
                 except: pass
                 try: self.query_one("#cb_one_trade").value = bool(s.get("cb_one_trade", False))
+                except: pass
+                try: self.query_one("#cb_time_tp").value = bool(s.get("cb_time_tp", False))
                 except: pass
                 
                 try: self.query_one("#cb_bounce").value = self.bounce_mode
@@ -1506,6 +1547,12 @@ class PulseApp(TradeEngineMixin, App):
         
         if hasattr(self, "market_data_manager"):
             self.market_data_manager.stop()
+
+        # Mark session as SETTLED on web dash
+        try:
+            self.ftp_manager.push_session_stats(status="SETTLED")
+            self.ftp_manager.force_update_index()  # Force immediate index update for settlement
+        except: pass
             
         if hasattr(self, "ftp_manager"):
             # ftp_manager threads are daemon, but we should clear the queue if needed
@@ -1556,6 +1603,7 @@ class PulseApp(TradeEngineMixin, App):
     @on(Checkbox.Changed, "#cb_one_trade")
     @on(Checkbox.Changed, "#cb_whale")
     @on(Checkbox.Changed, "#cb_bounce")
+    @on(Checkbox.Changed, "#cb_time_tp")
     def on_settings_checkbox_changed(self, event: Checkbox.Changed):
         """Auto-persist setting checkboxes and log them."""
         cid = event.checkbox.id
@@ -1572,6 +1620,9 @@ class PulseApp(TradeEngineMixin, App):
         elif cid == "cb_one_trade": name = "1 Trade Max Guard"
         elif cid == "cb_whale": name = "Whale Protect"
         elif cid == "cb_bounce": name = "Bounce Entry Mode"
+        elif cid == "cb_time_tp": name = "Time-Based TP"
+        elif cid == "cb_tranche": name = "Tranche Exits"
+        elif cid == "cb_hdo": name = "Hedge Direction Opposite"
         
         if name:
             state = "ON" if event.value else "OFF"
@@ -1662,6 +1713,16 @@ class PulseApp(TradeEngineMixin, App):
             except: pass
             
             self.sim_broker.log_snapshot(self.market_data, self.time_rem_str, is_live, self.live_broker.balance, self.risk_manager.risk_bankroll)
+            
+            # Push to Web Dashboard
+            try:
+                self.ftp_manager.push_session_stats(
+                    pnl=self.session_pnl,
+                    trades=self.session_total_trades,
+                    status="ACTIVE",
+                    interval=f"{self.config.MARKET_FREQ}M"
+                )
+            except: pass
         except Exception as e:
             # Silent fail to prevent interval crash if UI or files are locked
             pass
@@ -1705,7 +1766,8 @@ class PulseApp(TradeEngineMixin, App):
                 "scanner_weights": self.scanner_weights,
                 "shield_time": int(_v("#inp_shield_time", 45)),
                 "shield_reach": int(_v("#inp_shield_reach", 5)),
-                "total_risk_cap": float(_v("#inp_risk_alloc", 0.0) if _v("#inp_risk_alloc") else self.total_risk_cap),
+                "total_risk_cap": getattr(self, "total_risk_cap", 30.0),
+                "inp_risk_alloc": _v("#inp_risk_alloc", "0.0"),
                 "inp_amount":    _v("#inp_amount",    "1.00"),
                 "inp_tp":        _v("#inp_tp",        "95"),
                 "inp_sl":        _v("#inp_sl",        "40"),
@@ -2085,7 +2147,17 @@ class PulseApp(TradeEngineMixin, App):
                     except: pre_bs = 1.0
                         
                     if pre_bs > self.risk_manager.risk_bankroll: pre_bs = self.risk_manager.risk_bankroll
-                    if pre_bs < 1.00: pre_bs = 1.00
+                    
+                    # Enforce Global Window Cap for Manual Pre-Buy
+                    total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
+                    remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                    if pre_bs > remaining_cap:
+                        pre_bs = remaining_cap
+                        if pre_bs < 1.00:
+                            self.safe_call(self.log_msg, f"[yellow]MANUAL PRE-BUY ABORTED:[/] Risk Cap Reached (${total_window_cost:.2f}/$30)")
+                            return
+
+                    if pre_bs < 1.00: pre_bs = 1.00 # hard floor for execution
                     
                     ok, msg, act_shares, act_price = self.trade_executor.execute_buy(
                         is_live, side, pre_bs, price, token_id, 

@@ -1091,22 +1091,26 @@ class VolCheckScanner(BaseScanner):
         return "WAIT"
 
 class MosheSpecializedScanner(BaseScanner):
-    def __init__(self, config: TradingConfig = None, t1=290, d1=2000.0, t2=80, d2=80.0, t3=15, d3=25.0, moshe_threshold=0.86):
+    def __init__(self, config: TradingConfig = None, t1=290, d1=200.0, t2=80, d2=80.0, t3=15, d3=25.0, moshe_threshold=0.86, cooldown_ticks=5):
         super().__init__(config)
         self.checkpoints = {}
         # 3-Point Time Remaining and Min Diff Curve
         self.bet_size = 2.0
-        self.t1 = t1; self.d1 = d1
+        self.t1 = t1; self.d1 = d1  # Reduced from 2000.0 to 200.0 (more realistic)
         self.t2 = t2; self.d2 = d2
         self.t3 = t3; self.d3 = d3
         self.moshe_threshold = moshe_threshold
+        self.cooldown_ticks = cooldown_ticks  # Prevent spamming
+        self.last_signal_tick = -1
         
-    def reset(self): super().reset(); self.checkpoints = {}
+    def reset(self): 
+        super().reset()
+        self.checkpoints = {}
+        self.last_signal_tick = -1  # Reset signal tracking
     
     def get_signal(self, context: dict):
-        if self.triggered_signal: return self.triggered_signal
-        
         elapsed = context.get("elapsed", 0)
+        tick_count = context.get("tick_count", 0)
         price = context.get("current_price", 0.5)
         open_price = context.get("open_price", 0.5)
         trend_1h = context.get("trend_1h", "NEUTRAL")
@@ -1116,6 +1120,14 @@ class MosheSpecializedScanner(BaseScanner):
         
         time_rem = window_seconds - elapsed
         
+        # ANTI-SPAM: Check cooldown BEFORE checking triggered_signal
+        if self.last_signal_tick >= 0 and tick_count - self.last_signal_tick < self.cooldown_ticks:
+            return "WAIT_COOLDOWN"
+        
+        # Check if already triggered (but not in cooldown)
+        if self.triggered_signal: 
+            return self.triggered_signal
+        
         # Check if we have a valid 3-point sequence defined
         has_curve = (self.t1 > 0 or self.t2 > 0 or self.t3 > 0)
         
@@ -1123,7 +1135,7 @@ class MosheSpecializedScanner(BaseScanner):
             # Block if time remaining is outside the outer boundaries (t1 to t3)
             # Assuming standard input where t1 is highest, t3 is lowest remaining time
             if time_rem > max(self.t1, self.t2, self.t3) or time_rem < min(self.t1, self.t2, self.t3):
-                return "WAIT"
+                return "WAIT_TIME_BOUNDARY"
                 
             required_diff = 0.0
             
@@ -1142,7 +1154,8 @@ class MosheSpecializedScanner(BaseScanner):
             # Ensure price difference meets the interpolated curve calculation
             actual_diff = abs(price - open_price)
             if actual_diff < required_diff:
-                return "WAIT"
+                return "WAIT_DIFF_INSUFFICIENT"
+        
         # Ensure actual_diff is calculated for logging
         actual_diff = abs(price - open_price)
         
@@ -1151,12 +1164,16 @@ class MosheSpecializedScanner(BaseScanner):
         if self.moshe_threshold <= up_p < 1.0 and up_p > down_p:
             if "DOWN" in trend_1h and "S-" in trend_1h:
                 return "WAIT_TREND_SAFE"
+            # ANTI-SPAM: Record signal tick and latch
+            self.last_signal_tick = tick_count
             self.triggered_signal = f"BET_UP_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
             
         if self.moshe_threshold <= down_p < 1.0 and down_p > up_p:
             if "UP" in trend_1h and "S-" in trend_1h:
                 return "WAIT_TREND_SAFE"
+            # ANTI-SPAM: Record signal tick and latch
+            self.last_signal_tick = tick_count
             self.triggered_signal = f"BET_DOWN_MOSHE_90|High Probability Win (BTC Diff: ${actual_diff:.2f})"
             return self.triggered_signal
 
@@ -1378,7 +1395,257 @@ ALGO_INFO = {
     "VPOC": {"name": "VPOC Analyzer", "desc": "Tracks Volume Point of Control to identify overextended 'thin' price moves vs most traded price."},
     "SDP": {"name": "Settlement Drift Predictor", "desc": "Analyzes the Basis Gap between Polymarket and Kraken at settlement to predict snap-backs."},
     "DIV": {"name": "Sentiment Divergence", "desc": "Compares Odds Score delta vs BTC Price delta to detect human over-anticipation or panic bubbles."},
-    "SSI": {"name": "Strategy Success Inversion", "desc": "Monitors session win streaks to identify whipsaw regimes and invert signals if accuracy is critically low."}
+    "SSI": {"name": "Strategy Success Inversion", "desc": "Monitors session win streaks to identify whipsaw regimes and invert signals if accuracy is critically low."},
+    "SSC": {"name": "Shallow Symmetrical Continuation", "desc": "Detects shallow trends with pullback and symmetrical recovery continuation patterns."},
+    "ADT": {"name": "Asymmetric Double Test", "desc": "Identifies baseline moves with asymmetric double dips/rallies requiring full recovery before execution."}
 }
 
 BullFlagScanner = StaircaseBreakoutScanner
+
+class ShallowSymmetricalContinuationScanner(BaseScanner):
+    """
+    Algorithm 1: Shallow Trend with Symmetrical Continuation
+    Detects shallow trends with pullback and symmetrical recovery patterns.
+    """
+    def __init__(self, config: TradingConfig = None, max_shallow_slope=0.05, min_shallow_slope=0.01, 
+                 max_angle_variance=0.005, max_pullback_periods=5, recovery_tolerance=0.002):
+        super().__init__(config)
+        self.max_shallow_slope = max_shallow_slope
+        self.min_shallow_slope = min_shallow_slope
+        self.max_angle_variance = max_angle_variance
+        self.max_pullback_periods = max_pullback_periods
+        self.recovery_tolerance = recovery_tolerance
+        
+    def calculate_slope(self, history, start_idx, end_idx):
+        """Calculate linear slope between two points in history"""
+        if start_idx >= end_idx or end_idx >= len(history):
+            return 0
+        p1, t1 = history[start_idx]['price'], history[start_idx]['elapsed']
+        p2, t2 = history[end_idx]['price'], history[end_idx]['elapsed']
+        return (p2 - p1) / (t2 - t1) if t2 != t1 else 0
+    
+    def find_local_extrema(self, history, start_idx, target_direction, max_periods=10):
+        """Find local extrema in specified direction"""
+        if not history or start_idx >= len(history):
+            return None
+            
+        target_direction = 1 if target_direction > 0 else -1
+        
+        for i in range(start_idx, min(start_idx + max_periods, len(history))):
+            # Simple extrema detection - could be enhanced
+            if i > 0 and i < len(history) - 1:
+                prev_price = history[i-1]['price']
+                current_price = history[i]['price']
+                next_price = history[i+1]['price']
+                
+                if target_direction == 1:  # Looking for high
+                    if current_price > prev_price and current_price > next_price:
+                        return i
+                else:  # Looking for low
+                    if current_price < prev_price and current_price < next_price:
+                        return i
+        
+        return None
+    
+    def get_signal(self, context: dict):
+        if self.triggered_signal and "BET_" in self.triggered_signal:
+            return self.triggered_signal
+            
+        history_objs = context.get("history_objs", [])
+        if len(history_objs) < 20:  # Need minimum data
+            return "WAIT"
+        
+        # Determine market direction from recent trend
+        recent_prices = [h['price'] for h in history_objs[-10:]]
+        direction = 1 if recent_prices[-1] > recent_prices[0] else -1
+        
+        # PHASE 1: Identify Shallow Trend
+        # Look for trend window in recent history (last 15-20 periods)
+        trend_start = max(0, len(history_objs) - 20)
+        trend_end = len(history_objs) - 10
+        
+        if trend_end <= trend_start:
+            return "WAIT"
+            
+        m1 = self.calculate_slope(history_objs, trend_start, trend_end)
+        
+        # Verify slope magnitude matches "shallow" definition
+        if abs(m1) < self.min_shallow_slope or abs(m1) > self.max_shallow_slope:
+            return "WAIT"
+            
+        # Verify slope direction matches market direction
+        if (direction == 1 and m1 < 0) or (direction == -1 and m1 > 0):
+            return "WAIT"
+        
+        # PHASE 2: The Pullback (Dip/Rally)
+        # Search for an extreme point moving against the trend
+        pullback_direction = direction * -1
+        t3 = self.find_local_extrema(history_objs, trend_end, pullback_direction, self.max_pullback_periods)
+        
+        if t3 is None or (t3 - trend_end) > self.max_pullback_periods:
+            return "WAIT"
+        
+        # PHASE 3: Full Recovery
+        # Calculate where the original trendline should be at current time
+        current_time = history_objs[-1]['elapsed']
+        base_time = history_objs[trend_end]['elapsed']
+        base_price = history_objs[trend_end]['price']
+        
+        projected_price = base_price + (m1 * (current_time - base_time))
+        current_price = history_objs[-1]['price']
+        
+        if abs(current_price - projected_price) > self.recovery_tolerance:
+            return "WAIT"
+        
+        # PHASE 4: Symmetrical Continuation
+        # Measure the slope of the recovery phase
+        m2 = self.calculate_slope(history_objs, t3, len(history_objs) - 1)
+        
+        # Verify new trajectory matches initial trajectory
+        if abs(m1 - m2) <= self.max_angle_variance:
+            signal = "BUY_UP" if direction == 1 else "BUY_DOWN"
+            self.triggered_signal = signal
+            return signal
+        
+        return "WAIT"
+
+class AsymmetricDoubleTestScanner(BaseScanner):
+    """
+    Algorithm 2: Asymmetric Double Test
+    Identifies baseline moves with asymmetric double dips/rallies requiring full recovery.
+    """
+    def __init__(self, config: TradingConfig = None, baseline_tolerance=0.0015, 
+                 asymmetry_ratio=1.25, min_move_distance=0.005):
+        super().__init__(config)
+        self.baseline_tolerance = baseline_tolerance
+        self.asymmetry_ratio = asymmetry_ratio
+        self.min_move_distance = min_move_distance
+        self.baseline_price = None
+        self.baseline_time = None
+        
+    def find_consolidation_start(self, history, lookback_periods=10):
+        """Find the start of a consolidation period"""
+        if len(history) < lookback_periods:
+            return None
+            
+        # Simple approach: find the flattest segment
+        min_variance = float('inf')
+        best_start = len(history) - lookback_periods
+        
+        for i in range(len(history) - lookback_periods, len(history) - 2):
+            prices = [h['price'] for h in history[i:i+lookback_periods]]
+            variance = max(prices) - min(prices)
+            
+            if variance < min_variance:
+                min_variance = variance
+                best_start = i
+                
+        return best_start
+    
+    def find_local_extrema(self, history, start_idx, target_direction, max_periods=15):
+        """Find local extrema in specified direction"""
+        if not history or start_idx >= len(history):
+            return None
+            
+        target_direction = 1 if target_direction > 0 else -1
+        best_idx = None
+        best_price = None
+        
+        for i in range(start_idx, min(start_idx + max_periods, len(history))):
+            current_price = history[i]['price']
+            
+            if target_direction == 1:  # Looking for high
+                if best_price is None or current_price > best_price:
+                    best_price = current_price
+                    best_idx = i
+            else:  # Looking for low
+                if best_price is None or current_price < best_price:
+                    best_price = current_price
+                    best_idx = i
+        
+        return best_idx
+    
+    def find_return_to_price(self, history, target_price, tolerance, start_idx):
+        """Find when price returns to target within tolerance"""
+        for i in range(start_idx, len(history)):
+            if abs(history[i]['price'] - target_price) <= tolerance:
+                return i
+        return None
+    
+    def validate_continuous_move(self, history, from_time, to_time):
+        """Validate price moved continuously from extrema to current"""
+        if from_time >= to_time or to_time >= len(history):
+            return False
+            
+        # Simple validation: ensure no major reversals
+        start_price = history[from_time]['price']
+        direction = 1 if history[to_time]['price'] > start_price else -1
+        
+        for i in range(from_time + 1, to_time):
+            if direction == 1 and history[i]['price'] < start_price * 0.98:
+                return False
+            elif direction == -1 and history[i]['price'] > start_price * 1.02:
+                return False
+                
+        return True
+    
+    def get_signal(self, context: dict):
+        if self.triggered_signal and "BET_" in self.triggered_signal:
+            return self.triggered_signal
+            
+        history_objs = context.get("history_objs", [])
+        if len(history_objs) < 25:  # Need minimum data for double test
+            return "WAIT"
+        
+        # Determine market direction from recent trend
+        recent_prices = [h['price'] for h in history_objs[-10:]]
+        direction = 1 if recent_prices[-1] > recent_prices[0] else -1
+        
+        # PHASE 1: Establish Baseline and Initial Move
+        t_base = self.find_consolidation_start(history_objs, 8)
+        if t_base is None:
+            return "WAIT"
+            
+        P_base = history_objs[t_base]['price']
+        
+        # Target direction: -1 (Dip for Bullish), 1 (Rally for Bearish)
+        target_direction = direction * -1
+        t_ext1 = self.find_local_extrema(history_objs, t_base, target_direction, 10)
+        
+        if t_ext1 is None:
+            return "WAIT"
+            
+        dist_1 = abs(history_objs[t_ext1]['price'] - P_base)
+        
+        if dist_1 < self.min_move_distance:
+            return "WAIT"
+        
+        # PHASE 2: First Recovery to Baseline
+        t_rec1 = self.find_return_to_price(history_objs, P_base, self.baseline_tolerance, t_ext1)
+        
+        if t_rec1 is None:
+            return "WAIT"
+        
+        # PHASE 3: Secondary Deeper Move
+        t_ext2 = self.find_local_extrema(history_objs, t_rec1, target_direction, 10)
+        
+        if t_ext2 is None:
+            return "WAIT"
+            
+        dist_2 = abs(history_objs[t_ext2]['price'] - P_base)
+        
+        # Verify asymmetric condition (second move must be larger than the first)
+        if dist_2 < (dist_1 * self.asymmetry_ratio):
+            return "WAIT"
+        
+        # PHASE 4: Secondary Recovery and Execution Trigger
+        current_price = history_objs[-1]['price']
+        
+        if abs(current_price - P_base) <= self.baseline_tolerance:
+            # Ensure the price originated from the deeper extrema (t_ext2)
+            if self.validate_continuous_move(history_objs, t_ext2, len(history_objs) - 1):
+                signal = "BUY_UP" if direction == 1 else "BUY_DOWN"
+                self.triggered_signal = signal
+                return signal
+        
+        return "WAIT"

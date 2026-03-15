@@ -262,9 +262,13 @@ class AlgoInfoModal(ModalScreen):
             yield Static(f"[bold cyan]{self.algo_id}[/] - {self.full_name}", id="modal_title")
             yield Static(self.description, id="modal_body")
             
-            with Horizontal(id="modal_algo_weight"):
-                yield Label("Algo Weight (x):", id="lbl_algo_weight")
-                yield Input(placeholder="1.0", id="inp_algo_weight")
+            # Enhanced weight section with help text
+            with Vertical(id="modal_algo_weight", classes="setting_section"):
+                yield Static("[bold #00ff88]Algorithm Weight[/]", classes="section_title")
+                yield Static("Multiplier applied to bet size when this scanner triggers. Higher values = larger positions. Default: 1.0x", classes="help_text")
+                with Horizontal():
+                    yield Label("Weight Multiplier (x):", id="lbl_algo_weight")
+                    yield Input(placeholder="1.0", id="inp_algo_weight", tooltip="Values: 0.1x (minimal) to 3.0x (aggressive)")
             
             # Additional settings for specific algorithms
             if self.algo_id == "MOS":
@@ -284,39 +288,50 @@ class AlgoInfoModal(ModalScreen):
                     yield Input(placeholder="Time 3", id="inp_mos_t3")
                     yield Input(placeholder="Diff 3", id="inp_mos_d3")
             elif self.algo_id in ["MOM", "MM2"]:
-                with Horizontal(id="modal_mom_row1"):
-                    yield Label("Mode:", id="lbl_mom_mode")
+                # Enhanced MOM/MM2 settings section
+                with Vertical(id="modal_momentum_settings", classes="setting_section"):
+                    yield Static("[bold #00ff88]Momentum Strategy[/]", classes="section_title")
+                    yield Static("Configure entry timing and threshold behavior for momentum-based trading.", classes="help_text")
                     
-                    # Define modes based on algorithm
-                    if self.algo_id == "MM2":
-                        modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
-                    else:
-                        modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                    with Horizontal(id="modal_mom_row1"):
+                        yield Label("Trading Mode:", id="lbl_mom_mode", tooltip="How the algorithm decides when to enter trades")
+                        
+                        # Define modes based on algorithm
+                        if self.algo_id == "MM2":
+                            modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                        else:
+                            modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                        
+                        # Initial value based on scanner
+                        scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
+                        mom = self.main_app.scanners.get(scanner_key)
+                        initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
+                        
+                        yield Select(modes, value=initial_mode, id="sel_mom_mode")
+                        yield Label("Wait Time (s):", id="lbl_mom_duration", tooltip="How long to wait before making decision")
+                        yield Input(placeholder="10", id="inp_mom_duration")
                     
-                    # Initial value based on scanner
-                    scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
-                    mom = self.main_app.scanners.get(scanner_key)
-                    initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
-                    
-                    yield Select(modes, value=initial_mode, id="sel_mom_mode")
-                    yield Label("Duration(s):", id="lbl_mom_duration")
-                    yield Input(placeholder="10", id="inp_mom_duration")
-                    
-                yield Static("", id="lbl_mode_explanation", classes="mode_info_box")
+                with Vertical(id="modal_mode_explanation", classes="info_box"):
+                    yield Static("", id="lbl_mode_explanation", classes="mode_info_box")
                 
-                with Horizontal(id="modal_mom_threshold"):
-                    yield Label("Threshold ¢ (51-70):", id="lbl_mom_threshold")
-                    yield Input(placeholder="60", id="inp_mom_threshold")
-                with Vertical(id="modal_mom_buymode_grid"):
-                    yield Label("Buy Mode:", id="lbl_mom_buymode")
-                    with Horizontal(classes="buy_mode_row"):
-                        yield Checkbox(label="STN",  value=True,  id="cb_mom_std", tooltip="Standard Momentum — Threshold/time signals after window opens.")
-                        yield Checkbox(label="PBN", value=False, id="cb_mom_pre", tooltip="Pre-Buy Next — Prediction-based entry at T-15s using velocity and RSI.")
-                    with Horizontal(classes="buy_mode_row"):
-                        yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", tooltip="Hybrid Mode — Pre-buys on strong leads, otherwise waits for STN.")
-                        yield Checkbox(label="ADV", value=False, id="cb_mom_adv", tooltip="Advanced/ATR — Uses dynamic ATR tiers to shift thresholds and behavior.")
-                with Horizontal(id="modal_mom_adv_btn"):
-                    yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
+                with Vertical(id="modal_threshold_settings", classes="setting_section"):
+                    yield Static("[bold #ffff00]Entry Thresholds[/]", classes="section_title")
+                    yield Static("Price thresholds that trigger buy signals. Higher values = more selective entries.", classes="help_text")
+                    
+                    with Horizontal(id="modal_mom_threshold"):
+                        yield Label("Price Threshold (¢):", id="lbl_mom_threshold", tooltip="Cent level that triggers entry (51-70¢ range)")
+                        yield Input(placeholder="60", id="inp_mom_threshold")
+                        
+                    with Vertical(id="modal_mom_buymode_grid"):
+                        yield Label("Buy Mode:", id="lbl_mom_buymode")
+                        with Horizontal(classes="buy_mode_row"):
+                            yield Checkbox(label="STN",  value=True,  id="cb_mom_std", tooltip="Standard Momentum — Threshold/time signals after window opens.")
+                            yield Checkbox(label="PBN", value=False, id="cb_mom_pre", tooltip="Pre-Buy Next — Prediction-based entry at T-15s using velocity and RSI.")
+                        with Horizontal(classes="buy_mode_row"):
+                            yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", tooltip="Hybrid Mode — Pre-buys on strong leads, otherwise waits for STN.")
+                            yield Checkbox(label="ADV", value=False, id="cb_mom_adv", tooltip="Advanced/ATR — Uses dynamic ATR tiers to shift thresholds and behavior.")
+                    with Horizontal(id="modal_mom_adv_btn"):
+                        yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
             elif self.algo_id == "NIT":
                 with Horizontal(id="modal_nit_row1"):
                     yield Label("Time Cutoff (s):", id="lbl_nit_cutoff")
@@ -3931,4 +3946,325 @@ class ConvictionScalingModal(ModalScreen):
                 self.main_app.log_msg("⚙️ Market Conviction Scaling Updated", level="ADMIN")
             except Exception as e:
                 self.main_app.log_msg(f"[red]Error saving conviction settings: {e}[/]")
+        self.dismiss()
+
+class SSCSettingsModal(ModalScreen):
+    """Shallow Symmetrical Continuation Scanner Settings"""
+    
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+    
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Static("🌊 SHALLOW SYMMETRICAL CONTINUATION SETTINGS", classes="modal_title"),
+            Static("Detects shallow trends with pullback and symmetrical recovery patterns.", classes="modal_subtitle"),
+            
+            Vertical(id="ssc_settings_grid", classes="settings_grid"),
+            
+            Horizontal(classes="button_row"),
+            id="ssc_modal"
+        )
+    
+    def on_mount(self) -> None:
+        settings_grid = self.query_one("#ssc_settings_grid")
+        
+        # Trend Detection Settings
+        settings_grid.mount(Static("📈 TREND DETECTION", classes="section_title"))
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Max Shallow Slope:"),
+                Input(placeholder="0.05", id="inp_ssc_max_slope", value="0.05"),
+                classes="setting_row"
+            )
+        )
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Min Shallow Slope:"),
+                Input(placeholder="0.01", id="inp_ssc_min_slope", value="0.01"),
+                classes="setting_row"
+            )
+        )
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Max Angle Variance:"),
+                Input(placeholder="0.005", id="inp_ssc_angle_variance", value="0.005"),
+                classes="setting_row"
+            )
+        )
+        
+        # Pullback Settings
+        settings_grid.mount(Static("🔄 PULLBACK SETTINGS", classes="section_title"))
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Max Pullback Periods:"),
+                Input(placeholder="5", id="inp_ssc_pullback_periods", value="5"),
+                classes="setting_row"
+            )
+        )
+        
+        # Recovery Settings
+        settings_grid.mount(Static("✅ RECOVERY SETTINGS", classes="section_title"))
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Recovery Tolerance:"),
+                Input(placeholder="0.002", id="inp_ssc_recovery_tolerance", value="0.002"),
+                classes="setting_row"
+            )
+        )
+        
+        # Help Text
+        settings_grid.mount(Static(
+            "📋 HELP:\n"
+            "• Max/Min Shallow Slope: Range for acceptable shallow trend angles\n"
+            "• Max Angle Variance: Allowed deviation between initial and continuation slopes\n"
+            "• Max Pullback Periods: Maximum time allowed for pullback phase\n"
+            "• Recovery Tolerance: Price tolerance for trendline recovery detection",
+            classes="help_text"
+        ))
+        
+        # Buttons
+        button_row = self.query_one(".button_row")
+        button_row.mount(Button("💾 Save", id="btn_ssc_save", variant="primary"))
+        button_row.mount(Button("❌ Cancel", id="btn_ssc_cancel"))
+        
+        # Styling
+        self._apply_styles()
+        
+        # Load current values
+        self._load_values()
+    
+    def _apply_styles(self):
+        title = self.query_one(".modal_title")
+        title.styles.text_align = "center"
+        title.styles.margin = (0, 0, 1, 0)
+        title.styles.color = "#00ffff"
+        
+        subtitle = self.query_one(".modal_subtitle")
+        subtitle.styles.text_align = "center"
+        subtitle.styles.margin = (0, 0, 2, 0)
+        subtitle.styles.color = "#888"
+        subtitle.styles.width = "80%"
+        subtitle.styles.text_align = "center"
+        
+        modal = self.query_one("#ssc_modal")
+        modal.styles.width = "60%"
+        modal.styles.height = "auto"
+        modal.styles.padding = 2
+        modal.styles.border = ("thick", "#00ffff")
+        modal.styles.background = "#0a0a0a"
+        
+        for section in self.query(".section_title"):
+            section.styles.margin = (1, 0, 0, 0)
+            section.styles.color = "#00ff88"
+            section.styles.bold = True
+        
+        for row in self.query(".setting_row"):
+            row.styles.justify_content = "space-between"
+            row.styles.margin = (0, 0, 1, 0)
+        
+        for label in self.query("Label"):
+            label.styles.width = 25
+        
+        for inp in self.query("Input"):
+            inp.styles.width = 15
+        
+        help_text = self.query_one(".help_text")
+        help_text.styles.margin = (2, 0, 0, 0)
+        help_text.styles.padding = 1
+        help_text.styles.background = "rgba(0,255,255,0.1)"
+        help_text.styles.border = ("solid", "#00ffff")
+        help_text.styles.border_radius = 4
+        help_text.styles.color = "#ccc"
+        help_text.styles.width = "100%"
+        
+        button_row = self.query_one(".button_row")
+        button_row.styles.justify_content = "center"
+        button_row.styles.margin = (2, 0, 0, 0)
+        button_row.styles.gap = 1
+    
+    def _load_values(self):
+        if self.main_app:
+            scanner = self.main_app.scanners.get("SSC")
+            if scanner:
+                self.query_one("#inp_ssc_max_slope").value = str(scanner.max_shallow_slope)
+                self.query_one("#inp_ssc_min_slope").value = str(scanner.min_shallow_slope)
+                self.query_one("#inp_ssc_angle_variance").value = str(scanner.max_angle_variance)
+                self.query_one("#inp_ssc_pullback_periods").value = str(scanner.max_pullback_periods)
+                self.query_one("#inp_ssc_recovery_tolerance").value = str(scanner.recovery_tolerance)
+    
+    @on(Button.Pressed, "#btn_ssc_save")
+    def save_and_close(self):
+        if self.main_app:
+            try:
+                scanner = self.main_app.scanners.get("SSC")
+                if scanner:
+                    scanner.max_shallow_slope = float(self.query_one("#inp_ssc_max_slope").value)
+                    scanner.min_shallow_slope = float(self.query_one("#inp_ssc_min_slope").value)
+                    scanner.max_angle_variance = float(self.query_one("#inp_ssc_angle_variance").value)
+                    scanner.max_pullback_periods = int(self.query_one("#inp_ssc_pullback_periods").value)
+                    scanner.recovery_tolerance = float(self.query_one("#inp_ssc_recovery_tolerance").value)
+                    
+                    self.main_app.save_settings()
+                    self.main_app.log_msg("⚙️ SSC Settings Updated", level="ADMIN")
+            except Exception as e:
+                self.main_app.log_msg(f"[red]Error saving SSC settings: {e}[/]")
+        self.dismiss()
+    
+    @on(Button.Pressed, "#btn_ssc_cancel")
+    def cancel_and_close(self):
+        self.dismiss()
+
+class ADTSettingsModal(ModalScreen):
+    """Asymmetric Double Test Scanner Settings"""
+    
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+    
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Static("⚖️ ASYMMETRIC DOUBLE TEST SETTINGS", classes="modal_title"),
+            Static("Identifies baseline moves with asymmetric double dips/rallies requiring full recovery.", classes="modal_subtitle"),
+            
+            Vertical(id="adt_settings_grid", classes="settings_grid"),
+            
+            Horizontal(classes="button_row"),
+            id="adt_modal"
+        )
+    
+    def on_mount(self) -> None:
+        settings_grid = self.query_one("#adt_settings_grid")
+        
+        # Baseline Settings
+        settings_grid.mount(Static("📊 BASELINE SETTINGS", classes="section_title"))
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Baseline Tolerance:"),
+                Input(placeholder="0.0015", id="inp_adt_baseline_tolerance", value="0.0015"),
+                classes="setting_row"
+            )
+        )
+        
+        # Asymmetry Settings
+        settings_grid.mount(Static("🔀 ASYMMETRY SETTINGS", classes="section_title"))
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Asymmetry Ratio:"),
+                Input(placeholder="1.25", id="inp_adt_asymmetry_ratio", value="1.25"),
+                classes="setting_row"
+            )
+        )
+        
+        settings_grid.mount(
+            Horizontal(
+                Label("Min Move Distance:"),
+                Input(placeholder="0.005", id="inp_adt_min_move", value="0.005"),
+                classes="setting_row"
+            )
+        )
+        
+        # Help Text
+        settings_grid.mount(Static(
+            "📋 HELP:\n"
+            "• Baseline Tolerance: Maximum deviation to register return to baseline\n"
+            "• Asymmetry Ratio: Secondary move must be at least this ratio larger than first move\n"
+            "• Min Move Distance: Minimum price movement to filter out market noise\n"
+            "• Example: Ratio 1.25 means second dip must be 25% deeper than first dip",
+            classes="help_text"
+        ))
+        
+        # Buttons
+        button_row = self.query_one(".button_row")
+        button_row.mount(Button("💾 Save", id="btn_adt_save", variant="primary"))
+        button_row.mount(Button("❌ Cancel", id="btn_adt_cancel"))
+        
+        # Styling
+        self._apply_styles()
+        
+        # Load current values
+        self._load_values()
+    
+    def _apply_styles(self):
+        title = self.query_one(".modal_title")
+        title.styles.text_align = "center"
+        title.styles.margin = (0, 0, 1, 0)
+        title.styles.color = "#ff00ff"
+        
+        subtitle = self.query_one(".modal_subtitle")
+        subtitle.styles.text_align = "center"
+        subtitle.styles.margin = (0, 0, 2, 0)
+        subtitle.styles.color = "#888"
+        subtitle.styles.width = "80%"
+        subtitle.styles.text_align = "center"
+        
+        modal = self.query_one("#adt_modal")
+        modal.styles.width = "60%"
+        modal.styles.height = "auto"
+        modal.styles.padding = 2
+        modal.styles.border = ("thick", "#ff00ff")
+        modal.styles.background = "#0a0a0a"
+        
+        for section in self.query(".section_title"):
+            section.styles.margin = (1, 0, 0, 0)
+            section.styles.color = "#ff88ff"
+            section.styles.bold = True
+        
+        for row in self.query(".setting_row"):
+            row.styles.justify_content = "space-between"
+            row.styles.margin = (0, 0, 1, 0)
+        
+        for label in self.query("Label"):
+            label.styles.width = 25
+        
+        for inp in self.query("Input"):
+            inp.styles.width = 15
+        
+        help_text = self.query_one(".help_text")
+        help_text.styles.margin = (2, 0, 0, 0)
+        help_text.styles.padding = 1
+        help_text.styles.background = "rgba(255,0,255,0.1)"
+        help_text.styles.border = ("solid", "#ff00ff")
+        help_text.styles.border_radius = 4
+        help_text.styles.color = "#ccc"
+        help_text.styles.width = "100%"
+        
+        button_row = self.query_one(".button_row")
+        button_row.styles.justify_content = "center"
+        button_row.styles.margin = (2, 0, 0, 0)
+        button_row.styles.gap = 1
+    
+    def _load_values(self):
+        if self.main_app:
+            scanner = self.main_app.scanners.get("ADT")
+            if scanner:
+                self.query_one("#inp_adt_baseline_tolerance").value = str(scanner.baseline_tolerance)
+                self.query_one("#inp_adt_asymmetry_ratio").value = str(scanner.asymmetry_ratio)
+                self.query_one("#inp_adt_min_move").value = str(scanner.min_move_distance)
+    
+    @on(Button.Pressed, "#btn_adt_save")
+    def save_and_close(self):
+        if self.main_app:
+            try:
+                scanner = self.main_app.scanners.get("ADT")
+                if scanner:
+                    scanner.baseline_tolerance = float(self.query_one("#inp_adt_baseline_tolerance").value)
+                    scanner.asymmetry_ratio = float(self.query_one("#inp_adt_asymmetry_ratio").value)
+                    scanner.min_move_distance = float(self.query_one("#inp_adt_min_move").value)
+                    
+                    self.main_app.save_settings()
+                    self.main_app.log_msg("⚙️ ADT Settings Updated", level="ADMIN")
+            except Exception as e:
+                self.main_app.log_msg(f"[red]Error saving ADT settings: {e}[/]")
+        self.dismiss()
+    
+    @on(Button.Pressed, "#btn_adt_cancel")
+    def cancel_and_close(self):
         self.dismiss()
