@@ -5,8 +5,8 @@ from datetime import datetime
 
 # Get the directory where this script is located
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# Get the parent directory (vortex_pulse folder)
-parent_dir = current_dir
+# Get the parent directory (vortex_pulse folder) - go up one level from scripts
+parent_dir = os.path.dirname(current_dir)
 
 # Add the parent directory to sys.path so we can import the modules directly
 if parent_dir not in sys.path:
@@ -16,9 +16,8 @@ if parent_dir not in sys.path:
 try:
     from broker import SimBroker, LiveBroker
     from app import PulseApp
-    print(f"DEBUG: Successfully imported modules from {parent_dir}")
 except ImportError as e:
-    print(f"DEBUG: Failed to import modules: {e}")
+    print(f"ERROR: Failed to import modules: {e}")
     sys.exit(1)
 
 def main():
