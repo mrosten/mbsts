@@ -849,6 +849,9 @@ class PulseApp(TradeEngineMixin, App):
                 f.write(".graph-img{max-width:200px;border:1px solid #444;transition:transform 0.2s;cursor:zoom-in;}")
                 f.write(".graph-img:hover{transform:scale(2.5);z-index:100;position:relative;}")
                 f.write(".no-data{background:#2a2a2a;color:#888;padding:20px;text-align:center;border-radius:8px;margin:20px 0;}")
+                f.write(".algorithm-signals{background:#1a1a1a;border-bottom:2px solid #333;}")
+                f.write(".algorithm-signals td{padding:8px 10px;font-size:0.9em;color:#bbb;}")
+                f.write(".algorithm-signals strong{color:#00ffff;}")
                 f.write("</style></head><body>")
                 f.write("<h1>Vortex Pulse - Manual Verification Log</h1>")
                 f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
@@ -862,13 +865,6 @@ class PulseApp(TradeEngineMixin, App):
                 f.write("<th>Resolution</th>")
                 f.write("<th>Pulse Result</th>")
                 f.write("<th>Sync Status</th>")
-                
-                # NEW HIGH-IMPACT FIELDS
-                f.write("<th>Entry Price</th>")
-                f.write("<th>Risk %</th>")
-                f.write("<th>Scanner</th>")
-                f.write("<th>Entry Time</th>")
-                
                 f.write("<th>PnL ($)</th>")
                 f.write("<th>Balance ($)</th>")
                 f.write("<th>Graph</th>")
@@ -1910,7 +1906,7 @@ class PulseApp(TradeEngineMixin, App):
                             if "<!-- SESSION_DATA_PLACEHOLDER -->" in content:
                                 content = content.replace(
                                     "<!-- SESSION_DATA_PLACEHOLDER -->\n",
-                                    f'<tr><td colspan="16"><div class="no-data">📊 No trading activity recorded during this session<br><small>Session ended early or no windows were processed</small></div></td></tr>\n'
+                                    f'<tr><td colspan="12"><div class="no-data">📊 No trading activity recorded during this session<br><small>Session ended early or no windows were processed</small></div></td></tr>\n'
                                 )
                         else:
                             # Remove placeholder if data was added

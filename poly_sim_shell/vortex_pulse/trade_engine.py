@@ -266,6 +266,7 @@ class TradeEngineMixin:
                 self.pending_bets.clear()  # discard any stale pending bets from last window
                 self.bounce_pending.clear() # discard any stale bounce entries from last window
                 for sc in self.scanners.values(): sc.reset() # reset all scanner signals/timers
+                self._window_tick_signals = {}  # Clear tick signals for new window
                 
                 if self.mid_window_lockout:
                     self.mid_window_lockout = False
@@ -503,15 +504,22 @@ class TradeEngineMixin:
                                 # Calculate window_invested for this HTML log entry
                                 window_invested = sum(info.get("cost", 0) for info in self.window_bets.values())
                                 
-                                # Find the earliest/primary trade for this window
-                                for trade_id, trade_info in self.window_bets.items():
-                                    if not trade_info.get("closed"):
-                                        entry_time = max(entry_time, int(time.time() - buf.get("window_id", 0)))
-                                        entry_price = trade_info.get("entry", 0)
-                                        primary_scanner = trade_info.get("algorithm", "Unknown")
-                                        break  # Use first/primary trade
+                                # Generate algorithm signals paragraph
+                                tick_signals = buf.get("tick_signals", {})
+                                algorithm_summary = []
+                                for algo_name, signal in tick_signals.items():
+                                    if "UP" in signal:
+                                        algorithm_summary.append(f"{algo_name} (UP)")
+                                    elif "DOWN" in signal:
+                                        algorithm_summary.append(f"{algo_name} (DOWN)")
                                 
-                                risk_percent = (window_invested / self.risk_manager.risk_bankroll * 100) if self.risk_manager.risk_bankroll > 0 else 0
+                                algorithms_text = ""
+                                if algorithm_summary:
+                                    # Sort by algorithm name for consistency
+                                    algorithm_summary.sort()
+                                    algorithms_text = f"<p><strong>Algorithms Fired:</strong> {', '.join(algorithm_summary)}</p>"
+                                else:
+                                    algorithms_text = "<p><strong>Algorithms Fired:</strong> None</p>"
                                 
                                 with open(self.html_log_file, "a", encoding="utf-8") as f:
                                     is_l = self.query_one("#cb_live").value
@@ -528,14 +536,6 @@ class TradeEngineMixin:
                                     f.write(f"<td><span class='{official_winner}'>{official_winner}</span></td>") # Resolution
                                     f.write(f"<td><span class='{buf['pulse_result']}'>{buf['pulse_result']}</span></td>") # Pulse Result
                                     f.write(f"<td>{sync_status}</td>")
-                                    
-                                    # NEW HIGH-IMPACT FIELDS
-                                    risk_class = "risk-low" if risk_percent < 5 else ("risk-medium" if risk_percent < 15 else "risk-high")
-                                    f.write(f"<td>${buf.get('entry_price', 0):,.2f}</td>") # Entry Price
-                                    f.write(f"<td><span class='value {risk_class}'>{risk_percent:.1f}%</span></td>") # Risk % 
-                                    f.write(f"<td><span class='value scanner'>{primary_scanner}</span></td>") # Scanner Name
-                                    f.write(f"<td><span class='value entry-time'>{entry_time}s</span></td>") # Entry Timing
-                                    
                                     f.write(f"<td>{logged_pnl:+.2f}</td>")
                                     f.write(f"<td>${main_bal:,.2f}</td>") # Simulated/Live Balance
                                     graph_fn = buf.get("graph_filename", "")
@@ -544,6 +544,9 @@ class TradeEngineMixin:
                                     else:
                                         f.write(f"<td>N/A</td>")
                                     f.write(f"</tr>\n")
+                                    
+                                    # Add algorithm signals paragraph as a separate row below
+                                    f.write(f"<tr class='algorithm-signals'><td colspan='12'>{algorithms_text}</td></tr>\n")
                                     
                                     # Parallel FTP Upload
                                     if self.log_settings.get("verification_html", True):
@@ -1095,6 +1098,10 @@ class TradeEngineMixin:
             self.market_data['active_scanners'] = _up_sigs + _dn_sigs
             self.market_data['master_score'] = _up_sigs - _dn_sigs
             self.market_data['master_status'] = 'BUY_UP' if _up_sigs > _dn_sigs else ('BUY_DN' if _dn_sigs > _up_sigs else 'NEUTRAL')
+
+            # Store tick_signals for HTML logging (collect all signals during window)
+            self._window_tick_signals = getattr(self, "_window_tick_signals", {})
+            self._window_tick_signals.update(tick_signals)
 
             # Individual key-scanner flags
             self.market_data['sling_signal'] = tick_signals.get('Slingshot', 'OFF')
@@ -1998,6 +2005,7 @@ class TradeEngineMixin:
             "close_price": btc_p,
             "pnl": net_pnl,
             "graph_filename": graph_filename,
+            "tick_signals": getattr(self, "_window_tick_signals", {}),  # Store scanner signals for this window
             "shares": {
                 "UP": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in self.window_bets.values() if info.get("side") == "UP"),
                 "DOWN": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in self.window_bets.values() if info.get("side") == "DOWN")
