@@ -3,14 +3,23 @@ import os
 import time
 from datetime import datetime
 
-# Handle imports for both package and direct execution
+# Get the directory where this script is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory (vortex_pulse folder)
+parent_dir = current_dir
+
+# Add the parent directory to sys.path so we can import the modules directly
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+# Import modules directly
 try:
-    from .broker import SimBroker, LiveBroker
-    from .app import PulseApp
-except ImportError:
-    # Running directly from vortex_pulse directory
     from broker import SimBroker, LiveBroker
     from app import PulseApp
+    print(f"DEBUG: Successfully imported modules from {parent_dir}")
+except ImportError as e:
+    print(f"DEBUG: Failed to import modules: {e}")
+    sys.exit(1)
 
 def main():
     print("\n=== POLYMARKET VORTEX PULSE V5 [PENDING ORDER EXECUTION] ===")
