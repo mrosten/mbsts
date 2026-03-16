@@ -62,7 +62,7 @@ except ImportError:
         CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
-        VolSnapScanner
+        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
     )
     from ui_modals import (
         GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
