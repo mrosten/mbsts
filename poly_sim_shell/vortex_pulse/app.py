@@ -324,7 +324,7 @@ class PulseApp(TradeEngineMixin, App):
     /* Enhanced Modal Styles */
     .setting_section { margin: 1 0; padding: 1; background: #2a2a2a; border-left: solid #00ff88; }
     .section_title { color: #00ff88; text-style: bold; margin-bottom: 1; }
-    .subsection_title { color: #ffff00; text-style: bold; margin: 1 0; padding: 0.5 0; border-bottom: solid #444444; }
+    .subsection_title { color: #ffff00; text-style: bold; margin: 1 0; padding: 1 0; border-bottom: solid #444444; }
     .help_text { color: #888888; text-style: italic; margin-bottom: 1; padding: 0 1; }
     .field_note { color: #666666; text-style: italic; }
     .field_label { color: #cccccc; min-width: 12; margin-right: 1; }
@@ -332,23 +332,23 @@ class PulseApp(TradeEngineMixin, App):
     .mode_info_box { color: #aaaaaa; padding: 1; }
     
     /* New MOM/MM2 Layout Styles */
-    .mode_section { margin: 1 0; padding: 1; background: #1a1a1a; border-radius: 4px; }
-    .threshold_section { margin: 1 0; padding: 1; background: #1a1a1a; border-radius: 4px; }
-    .buymode_section { margin: 1 0; padding: 1; background: #1a1a1a; border-radius: 4px; }
-    .explanation_box { background: #002233; border: solid #004466; padding: 1; margin: 1 0; border-radius: 4px; }
+    .mode_section { margin: 1 0; padding: 1; background: #1a1a1a; }
+    .threshold_section { margin: 1 0; padding: 1; background: #1a1a1a; }
+    .buymode_section { margin: 1 0; padding: 1; background: #1a1a1a; }
+    .explanation_box { background: #002233; border: solid #004466; padding: 1; margin: 1 0; }
     
-    .spaced_row { margin: 0.5 0; align: left middle; }
+    .spaced_row { margin: 1 0; align: left middle; }
     .mode_select { width: 20; margin-right: 2; }
     .threshold_input { width: 8; }
     .time_input { width: 6; }
     
-    .buymode_grid { margin: 0.5 0; }
-    .buymode_row { align: left middle; margin: 0.3 0; padding: 0.2 0; }
+    .buymode_grid { margin: 1 0; }
+    .buymode_row { align: left middle; margin: 1 0; padding: 1 0; }
     .mode_checkbox { margin-right: 1; }
     .mode_desc { color: #888888; text-style: italic; margin-left: 1; }
     
-    .button_row { margin: 1 0; align: center; }
-    .adv_button { margin: 1 0; padding: 0.5 2; }
+    .button_row { margin: 1 0; align: center middle; }
+    .adv_button { margin: 1 0; padding: 1 2; }
     
     .live_row { align: center middle; height: 3; background: #220000; padding: 0 1; border-top: solid #440000; }
     .live_row Checkbox { height: 1; min-height: 1; width: auto; margin: 0 1; background: #220000; color: #aaaaaa; border: none; }

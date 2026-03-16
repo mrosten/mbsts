@@ -448,7 +448,6 @@ class AlgoInfoModal(ModalScreen):
             exp_box.styles.border = ("solid", "#004466")
             exp_box.styles.padding = (1, 1)
             exp_box.styles.margin = (1, 0)
-            exp_box.styles.border_radius = 4
             
             # Style rows
             for row in self.query(".spaced_row"):
