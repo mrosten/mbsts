@@ -288,50 +288,68 @@ class AlgoInfoModal(ModalScreen):
                     yield Input(placeholder="Time 3", id="inp_mos_t3")
                     yield Input(placeholder="Diff 3", id="inp_mos_d3")
             elif self.algo_id in ["MOM", "MM2"]:
-                # Enhanced MOM/MM2 settings section
+                # Enhanced MOM/MM2 settings section with better spacing
                 with Vertical(id="modal_momentum_settings", classes="setting_section"):
-                    yield Static("[bold #00ff88]Momentum Strategy[/]", classes="section_title")
+                    yield Static(f"[bold #00ff88]{self.algo_id} Strategy[/]", classes="section_title")
                     yield Static("Configure entry timing and threshold behavior for momentum-based trading.", classes="help_text")
                     
-                    with Horizontal(id="modal_mom_row1"):
-                        yield Label("Trading Mode:", id="lbl_mom_mode")
+                    # Trading Mode Section
+                    with Vertical(classes="mode_section"):
+                        yield Static("🎯 Trading Mode", classes="subsection_title")
+                        with Horizontal(id="modal_mom_row1", classes="spaced_row"):
+                            yield Label("Mode:", id="lbl_mom_mode", classes="field_label")
+                            
+                            # Define modes based on algorithm
+                            if self.algo_id == "MM2":
+                                modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                            else:
+                                modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                            
+                            # Initial value based on scanner
+                            scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
+                            mom = self.main_app.scanners.get(scanner_key)
+                            initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
+                            
+                            yield Select(modes, value=initial_mode, id="sel_mom_mode", classes="mode_select")
                         
-                        # Define modes based on algorithm
-                        if self.algo_id == "MM2":
-                            modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
-                        else:
-                            modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
-                        
-                        # Initial value based on scanner
-                        scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
-                        mom = self.main_app.scanners.get(scanner_key)
-                        initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
-                        
-                        yield Select(modes, value=initial_mode, id="sel_mom_mode")
-                        yield Label("Wait Time (s):", id="lbl_mom_duration")
-                        yield Input(placeholder="10", id="inp_mom_duration")
+                        # Mode explanation box
+                        with Vertical(id="modal_mode_explanation", classes="explanation_box"):
+                            yield Static("", id="lbl_mode_explanation", classes="mode_info_box")
                     
-                with Vertical(id="modal_mode_explanation", classes="info_box"):
-                    yield Static("", id="lbl_mode_explanation", classes="mode_info_box")
-                
-                with Vertical(id="modal_threshold_settings", classes="setting_section"):
-                    yield Static("[bold #ffff00]Entry Thresholds[/]", classes="section_title")
-                    yield Static("Price thresholds that trigger buy signals. Higher values = more selective entries.", classes="help_text")
-                    
-                    with Horizontal(id="modal_mom_threshold"):
-                        yield Label("Price Threshold (¢):", id="lbl_mom_threshold")
-                        yield Input(placeholder="60", id="inp_mom_threshold")
+                    # Threshold Section
+                    with Vertical(classes="threshold_section"):
+                        yield Static("⚡ Entry Thresholds", classes="subsection_title")
+                        yield Static("Price thresholds that trigger buy signals. Higher values = more selective entries.", classes="help_text")
                         
-                    with Vertical(id="modal_mom_buymode_grid"):
-                        yield Label("Buy Mode:", id="lbl_mom_buymode")
-                        with Horizontal(classes="buy_mode_row"):
-                            yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
-                            yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
-                        with Horizontal(classes="buy_mode_row"):
-                            yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
-                            yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
-                    with Horizontal(id="modal_mom_adv_btn"):
-                        yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
+                        with Horizontal(id="modal_mom_threshold", classes="spaced_row"):
+                            yield Label("Threshold (¢):", id="lbl_mom_threshold", classes="field_label")
+                            yield Input(placeholder="60", id="inp_mom_threshold", classes="threshold_input")
+                        
+                        # Wait time for TIME mode
+                        with Horizontal(id="modal_mom_wait_time", classes="spaced_row"):
+                            yield Label("Wait Time (s):", id="lbl_mom_duration", classes="field_label")
+                            yield Input(placeholder="10", id="inp_mom_duration", classes="time_input")
+                    
+                    # Buy Mode Section
+                    with Vertical(classes="buymode_section"):
+                        yield Static("💰 Buy Mode Options", classes="subsection_title")
+                        with Vertical(id="modal_mom_buymode_grid", classes="buymode_grid"):
+                            with Horizontal(classes="buymode_row"):
+                                yield Checkbox(label="STN", value=True, id="cb_mom_std", classes="mode_checkbox")
+                                yield Static("Standard - Threshold/time signals", classes="mode_desc")
+                            with Horizontal(classes="buymode_row"):
+                                yield Checkbox(label="PBN", value=False, id="cb_mom_pre", classes="mode_checkbox")
+                                yield Static("Pre-Buy - Prediction-based at T-15s", classes="mode_desc")
+                            with Horizontal(classes="buymode_row"):
+                                yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", classes="mode_checkbox")
+                                yield Static("Hybrid - Pre-buys on strong leads", classes="mode_desc")
+                            with Horizontal(classes="buymode_row"):
+                                yield Checkbox(label="ADV", value=False, id="cb_mom_adv", classes="mode_checkbox")
+                                yield Static("Advanced - Dynamic ATR tiers", classes="mode_desc")
+                    
+                    # Advanced Settings Button
+                    with Horizontal(id="modal_mom_adv_btn", classes="button_row"):
+                        yield Button("⚙️ CONFIGURE ADVANCED", id="btn_mom_adv", variant="warning", classes="adv_button")
             elif self.algo_id == "NIT":
                 with Horizontal(id="modal_nit_row1"):
                     yield Label("Time Cutoff (s):", id="lbl_nit_cutoff")
@@ -419,33 +437,51 @@ class AlgoInfoModal(ModalScreen):
             grid = self.query_one("#modal_mom_buymode_grid")
             grid.styles.height = "auto"
             grid.styles.align = ("center", "middle")
-            grid.styles.margin = (1, 0, 0, 0)
-            grid.styles.padding = (0, 0)
+            # Style the new layout elements
+            for section in self.query(".mode_section, .threshold_section, .buymode_section"):
+                section.styles.margin = (1, 0)
+                section.styles.padding = (1, 1)
             
-            self.query_one("#lbl_mom_buymode").styles.text_align = "center"
-            self.query_one("#lbl_mom_buymode").styles.width = "100%"
-            self.query_one("#lbl_mom_buymode").styles.margin = (0, 0, 0, 0)
-
-            for row in self.query(".buy_mode_row"):
-                row.styles.height = "auto"
-                row.styles.align = ("center", "middle")
-                row.styles.width = "100%"
-                row.styles.margin = (0, 0)
-
+            # Style explanation box
+            exp_box = self.query_one("#modal_mode_explanation")
+            exp_box.styles.background = "#002233"
+            exp_box.styles.border = ("solid", "#004466")
+            exp_box.styles.padding = (1, 1)
+            exp_box.styles.margin = (1, 0)
+            exp_box.styles.border_radius = 4
+            
+            # Style rows
+            for row in self.query(".spaced_row"):
+                row.styles.margin = (0.5, 0)
+                row.styles.align = ("left", "middle")
+            
+            # Style inputs
+            self.query_one("#sel_mom_mode").styles.width = 20
+            self.query_one("#inp_mom_duration").styles.width = 6
+            self.query_one("#inp_mom_threshold").styles.width = 8
+            
+            # Style buy mode rows
+            for row in self.query(".buymode_row"):
+                row.styles.margin = (0.3, 0)
+                row.styles.padding = (0.2, 0)
+                row.styles.align = ("left", "middle")
+            
+            # Style checkboxes
             for cbid in ["#cb_mom_std", "#cb_mom_pre", "#cb_mom_hybrid", "#cb_mom_adv"]:
                 cb = self.query_one(cbid)
-                cb.styles.width = 15
-                cb.styles.margin = (0, 1)
+                cb.styles.margin = (0, 1, 0, 0)
+            
+            # Style descriptions
+            for desc in self.query(".mode_desc"):
+                desc.styles.color = "#888888"
+                desc.styles.text_style = "italic"
+                desc.styles.margin = (0, 0, 0, 1)
 
+            # Style the advanced button
             abt = self.query_one("#modal_mom_adv_btn")
             abt.styles.align = ("center", "middle")
             abt.styles.width = "100%"
             abt.styles.margin = (1, 0, 0, 0)
-
-            self.query_one("#sel_mom_mode").styles.width = 20
-            self.query_one("#inp_mom_duration").styles.width = 6
-            self.query_one("#lbl_mom_duration").styles.margin = (1, 0, 0, 1)
-            self.query_one("#inp_mom_threshold").styles.width = 8
 
             if self.main_app:
                 scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
