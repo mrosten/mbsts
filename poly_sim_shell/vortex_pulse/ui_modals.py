@@ -451,7 +451,7 @@ class AlgoInfoModal(ModalScreen):
             
             # Style rows
             for row in self.query(".spaced_row"):
-                row.styles.margin = (0.5, 0)
+                row.styles.margin = (1, 0)
                 row.styles.align = ("left", "middle")
             
             # Style inputs
@@ -461,8 +461,8 @@ class AlgoInfoModal(ModalScreen):
             
             # Style buy mode rows
             for row in self.query(".buymode_row"):
-                row.styles.margin = (0.3, 0)
-                row.styles.padding = (0.2, 0)
+                row.styles.margin = (1, 0)
+                row.styles.padding = (1, 0)
                 row.styles.align = ("left", "middle")
             
             # Style checkboxes
