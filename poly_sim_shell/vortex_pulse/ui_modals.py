@@ -268,7 +268,7 @@ class AlgoInfoModal(ModalScreen):
                 yield Static("Multiplier applied to bet size when this scanner triggers. Higher values = larger positions. Default: 1.0x", classes="help_text")
                 with Horizontal():
                     yield Label("Weight Multiplier (x):", id="lbl_algo_weight")
-                    yield Input(placeholder="1.0", id="inp_algo_weight", tooltip="Values: 0.1x (minimal) to 3.0x (aggressive)")
+                    yield Input(placeholder="1.0", id="inp_algo_weight")
             
             # Additional settings for specific algorithms
             if self.algo_id == "MOS":
@@ -294,7 +294,7 @@ class AlgoInfoModal(ModalScreen):
                     yield Static("Configure entry timing and threshold behavior for momentum-based trading.", classes="help_text")
                     
                     with Horizontal(id="modal_mom_row1"):
-                        yield Label("Trading Mode:", id="lbl_mom_mode", tooltip="How the algorithm decides when to enter trades")
+                        yield Label("Trading Mode:", id="lbl_mom_mode")
                         
                         # Define modes based on algorithm
                         if self.algo_id == "MM2":
@@ -308,7 +308,7 @@ class AlgoInfoModal(ModalScreen):
                         initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
                         
                         yield Select(modes, value=initial_mode, id="sel_mom_mode")
-                        yield Label("Wait Time (s):", id="lbl_mom_duration", tooltip="How long to wait before making decision")
+                        yield Label("Wait Time (s):", id="lbl_mom_duration")
                         yield Input(placeholder="10", id="inp_mom_duration")
                     
                 with Vertical(id="modal_mode_explanation", classes="info_box"):
@@ -319,17 +319,17 @@ class AlgoInfoModal(ModalScreen):
                     yield Static("Price thresholds that trigger buy signals. Higher values = more selective entries.", classes="help_text")
                     
                     with Horizontal(id="modal_mom_threshold"):
-                        yield Label("Price Threshold (¢):", id="lbl_mom_threshold", tooltip="Cent level that triggers entry (51-70¢ range)")
+                        yield Label("Price Threshold (¢):", id="lbl_mom_threshold")
                         yield Input(placeholder="60", id="inp_mom_threshold")
                         
                     with Vertical(id="modal_mom_buymode_grid"):
                         yield Label("Buy Mode:", id="lbl_mom_buymode")
                         with Horizontal(classes="buy_mode_row"):
-                            yield Checkbox(label="STN",  value=True,  id="cb_mom_std", tooltip="Standard Momentum — Threshold/time signals after window opens.")
-                            yield Checkbox(label="PBN", value=False, id="cb_mom_pre", tooltip="Pre-Buy Next — Prediction-based entry at T-15s using velocity and RSI.")
+                            yield Checkbox(label="STN",  value=True,  id="cb_mom_std")
+                            yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
                         with Horizontal(classes="buy_mode_row"):
-                            yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", tooltip="Hybrid Mode — Pre-buys on strong leads, otherwise waits for STN.")
-                            yield Checkbox(label="ADV", value=False, id="cb_mom_adv", tooltip="Advanced/ATR — Uses dynamic ATR tiers to shift thresholds and behavior.")
+                            yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
+                            yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
                     with Horizontal(id="modal_mom_adv_btn"):
                         yield Button("CONFIGURE ADV", id="btn_mom_adv", variant="warning")
             elif self.algo_id == "NIT":
@@ -781,21 +781,17 @@ class MOMExpertModal(ModalScreen):
                     yield Label("1. Pre-Buy Mode Overrides", classes="exp_sec_title")
                     yield Static("Pre-buy fires at T-15s when ATR ≥ floor (Section 4).", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
-                        yield Checkbox(label="PBN on Stable (Aggro)", value=self.s["auto_pbn_stable"], id="exp_over_pbn",
-                                       tooltip="Force Pre-Buy mode when ATR is in the Stable (calm) tier.")
-                        yield Checkbox(label="STN on Chaos (Safe)", value=self.s["auto_stn_chaos"], id="exp_over_stn",
-                                       tooltip="Fall back to Standard mode (no pre-buy) when ATR is in the Chaos tier.")
+                        yield Checkbox(label="PBN on Stable (Aggro)", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
+                        yield Checkbox(label="STN on Chaos (Safe)", value=self.s["auto_stn_chaos"], id="exp_over_stn")
 
                 with Vertical(classes="exp_section"):
                     yield Label("2. ATR Tier Boundaries ($)", classes="exp_sec_title")
                     yield Static("BTC 5m ATR thresholds that define Stable / Neutral / Chaos regime.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Stable Ceiling ($):")
-                        yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low",
-                                    tooltip="ATR below this = Stable (calm). Threshold lowered by Stable Offset.")
+                        yield Input(placeholder="20", value=str(self.s["atr_low"]), id="exp_atr_low")
                         yield Label("Chaos Floor ($):")
-                        yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high",
-                                    tooltip="ATR above this = Chaos (volatile). Mode override may apply.")
+                        yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
 
                 with Vertical(classes="exp_section"):
                     yield Label("3. Entry Threshold Offsets (¢)", classes="exp_sec_title")
@@ -811,8 +807,7 @@ class MOMExpertModal(ModalScreen):
                     yield Static("Pre-buy is blocked if ATR < floor. Trend bonus widens needed lead.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Min ATR Floor ($):")
-                        yield Input(placeholder="25", value=str(self.s.get("atr_floor", 25)), id="exp_atr_floor",
-                                    tooltip="Pre-buy only executes if ATR is at or above this value.")
+                        yield Input(placeholder="25", value=str(self.s.get("atr_floor", 25)), id="exp_atr_floor")
                         yield Label("Trend Lead Bonus (¢):")
                         yield Input(placeholder="2", value=str(int(self.s.get("trend_penalty", 0.02) * 100)), id="exp_trend_penalty")
                     with Horizontal(classes="exp_row"):
@@ -824,11 +819,9 @@ class MOMExpertModal(ModalScreen):
                     yield Static("Final-second protection. Blocks trades if bid is too close to 50¢.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Shield Time (T- s):")
-                        yield Input(placeholder="45", value=str(self.s.get("shield_time", 45)), id="exp_shield_time",
-                                    tooltip="Activates at this many seconds into the window (e.g. 285s = T-15s).")
+                        yield Input(placeholder="45", value=str(self.s.get("shield_time", 45)), id="exp_shield_time")
                         yield Label("Shield Reach (¢):")
-                        yield Input(placeholder="5", value=str(self.s.get("shield_reach", 5)), id="exp_shield_reach",
-                                    tooltip="Blocks if |bid - 50¢| is less than this value.")
+                        yield Input(placeholder="5", value=str(self.s.get("shield_reach", 5)), id="exp_shield_reach")
 
                 with Vertical(classes="exp_section"):
                     yield Label("6. Custom Exits (optional)", classes="exp_sec_title")
