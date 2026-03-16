@@ -47,6 +47,7 @@ try:
         WindowCandleProfiler, VPOCAnalyzer, SettlementDriftPredictor,
         SentimentDivergenceScanner, StrategyInversionScanner
     )
+    from .ftp_manager import FTPManager
 except ImportError:
     # Running directly from vortex_pulse directory
     from config import TradingConfig, POLYGON_RPC_LIST, CHAINLINK_BTC_FEED, CHAINLINK_ABI
@@ -84,6 +85,7 @@ except ImportError:
         WindowCandleProfiler, VPOCAnalyzer, SettlementDriftPredictor,
         SentimentDivergenceScanner, StrategyInversionScanner
     )
+    from ftp_manager import FTPManager
 
 
 class PulseLeanChart(Static):
@@ -563,7 +565,6 @@ class PulseApp(TradeEngineMixin, App):
         self.trade_executor.config = self.config # Pass config to executor
         
         # FTP Sync System
-        from .ftp_manager import FTPManager
         self.ftp_manager = FTPManager(logger_func=lambda m, level="INFO": self.safe_call(self.log_msg, m, level=level))
         if session_id:
             self.ftp_manager.set_session(f"session_{session_id}")
