@@ -220,29 +220,21 @@ def apply_global_skeptic_filter(self, side, price, name="Scanner"):
 - **Skeptic Odds:** Input field for odds conflict premium (default 0.05¢)
 - **Skeptic Guess:** Input field for guess conflict premium (default 0.03¢)
 
-### 5.3 Enhanced MOM/MM2 System
+### 5.3 Enhanced MM2 Intelligence (Redesigned)
 
-**Mode Selection with Select Widgets:**
-- **TIME Mode:** Classic leader-pick after duration (default 10s)
-- **PRICE Mode:** Immediate trigger on cent threshold (default 60¢)
-- **DURATION Mode:** Threshold hold for sustained period
-- **VECTOR Mode (MM2):** Unified scoring analysis
-
-**Dynamic Mode Explanations:**
-Real-time explanations update when mode changes:
-```
-TIME Mode: Classic leader-pick. Waits for the duration (default 10s) and then bets the side that is leading in cents.
-PRICE Mode: Immediate trigger. Bets as soon as either side hits the specified cent threshold (e.g. 60¢).
-DURATION Mode: Threshold hold. Bets if a side stays above the cent threshold for the full duration.
-VECTOR Mode (MM2): Unified scoring. Analyzes Price Lead, BTC Velocity, 1H Trend, Sentiment, and RSI simultaneously.
-```
+**Redesigned MM2 Configuration Modal (v5.9.13)**
+The Momentum-2 scanner now features a dedicated, premium configuration interface that organizes its extensive parameter set into logical sections:
+- **Alpha Parameters:** Weight, Threshold, Duration, and Logic Mode (VECTOR/TIME/PRICE/DURATION).
+- **Execution Regimes:** Standard (STN), Pre-Buy (PBN), Hybrid (HYB), and Advanced (ADV).
+- **Sub-Modal Architecture:** Quick-access links to ATR Expert, Sentiment/Trend Scaling, and Diagnostic Tests to keep the main view clean.
+- **Real-Time persistence:** All changes are instantly serialized to `pulse_settings.json`.
 
 **MM2 VECTOR Scoring Engine:**
-- **Price Lead:** Current price advantage
-- **BTC Velocity:** 60-second price momentum 
-- **1H Trend:** Macro trend alignment
-- **Sentiment:** RSI positioning
-- **RSI:** Overbought/oversold conditions
+- **Price Lead:** Current price advantage (configurable decisive lead)
+- **BTC Velocity:** Time-aware price momentum (increased weight at window end)
+- **1H Trend:** Heavy weighting on macro trend alignment
+- **Sentiment:** Polymarket odds bias integration
+- **RSI:** Overbought/oversold divergence detection
 
 ### 5.4 BriefingScanner - Automated Window Analysis
 
@@ -735,6 +727,8 @@ The original monolithic `app.py` (2,556 lines) was split into three focused modu
 - **`ui_modals.py`** (59,874 bytes) — All modal classes and screens (GlobalSettings, AlgoInfo, MOMExpert, etc.)
 
 ### Recent Git History
+- **v5.9.13** - **Major MM2 Redesign:** Dedicated Intelligence Modal with sub-modal architecture, premium UI, and regime-based configuration.
+- **v5.9.12** - **SSI Enhancements:** Added weight settings and loss-streak threshold persistence for Strategy Inversion Scanner.
 - **v5.9.5** - Major feature release: Advanced scanner configuration, global skepticism, BriefingScanner
 - **0cd0dd0** - Fix modal bugs and standardize log paths
 - **29c82c5** - Major refactor: Split monolithic app.py into 3 modules

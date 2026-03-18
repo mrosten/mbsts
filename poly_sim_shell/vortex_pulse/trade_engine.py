@@ -166,6 +166,7 @@ class TradeEngineMixin:
                 conv_mult = conv_cfg.get("penalty", 0.50)
             
             if conv_mult != 1.0:
+                original_pre_conv = final_bs
                 final_bs *= conv_mult
                 log_tag = "conv_logged"
                 if info is not None:
@@ -176,6 +177,19 @@ class TradeEngineMixin:
                 else:
                     tag = "BOOST" if conv_mult > 1.0 else "PENALTY"
                     self.log_msg(f"CONVICTION {tag}: {conv_mult}x (Odds:{odds_score:+.1f}) -> ${final_bs:.2f}", level="SYS")
+
+        # 3. [NEW] Nuance-Floor Enforcement (v5.9.12)
+        # If nuance (penalties/scaling) dropped the bet below $1 but the base was valid (>= $1),
+        # floor it back to $1.00 so it actually executes on PolyMarket.
+        if 0 < final_bs < 1.00 and bs >= 1.00:
+            final_bs = 1.00
+            log_tag = "nuance_floor_logged"
+            if info is not None:
+                if not info.get(log_tag):
+                    self.log_msg(f"[cyan]NUANCE-FLOOR[/]: {name} clamped to $1.00 (from ${final_bs:.2f})", level="SYS")
+                    info[log_tag] = True
+            else:
+                self.log_msg(f"[cyan]NUANCE-FLOOR[/]: {name} clamped to $1.00 (from ${final_bs:.2f})", level="SYS")
         
         return True, final_bs, skepticism_penalty
 
@@ -2135,16 +2149,26 @@ class TradeEngineMixin:
             if self.risk_manager.risk_bankroll > self.risk_manager.target_bankroll:
                 self.risk_manager.risk_bankroll = self.risk_manager.target_bankroll
 
-        # 3. Always cap by actual wallet balance (live balance updates via API)
-        if is_live:
-            self.live_broker.update_balance()
-            main_bal = self.live_broker.balance
+        # Final Cap by current wallet/main balance (local view)
         if self.risk_manager.risk_bankroll > main_bal:
             self.risk_manager.risk_bankroll = main_bal
             if is_live and self.risk_manager.target_bankroll > main_bal:
                 self.risk_manager.target_bankroll = main_bal
-           
+        
+        # Immediate UI update for snappiness (v5.9.12)
+        # This ensures the user sees the B.R. and balance update "right away"
         self.update_balance_ui()
+           
+        # 3. VERIFY with actual wallet balance (live balance updates via API)
+        if is_live:
+            self.live_broker.update_balance()
+            main_bal = self.live_broker.balance
+            if self.risk_manager.risk_bankroll > main_bal:
+                self.risk_manager.risk_bankroll = main_bal
+                if self.risk_manager.target_bankroll > main_bal:
+                    self.risk_manager.target_bankroll = main_bal
+            # Secondary update with verified API data
+            self.update_balance_ui()
 
     async def trigger_buy(self, side):
         if hasattr(self, "_last_manual_buy") and time.time() - self._last_manual_buy < 2.0:

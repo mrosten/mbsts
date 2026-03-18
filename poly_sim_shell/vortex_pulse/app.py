@@ -36,7 +36,8 @@ try:
         COBSettingsModal, MESSettingsModal, NPASettingsModal,
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
-        BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal
+        BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
+        MM2SettingsModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -74,7 +75,8 @@ except ImportError:
         COBSettingsModal, MESSettingsModal, NPASettingsModal,
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
-        BRISettingsModal, ZSCSettingsModal
+        BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
+        MM2SettingsModal
     )
     from ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -545,7 +547,8 @@ class PulseApp(TradeEngineMixin, App):
                 "DIV": lambda: DIVSettingsModal(self),
                 "SSI": lambda: SSISettingsModal(self),
                 "SSC": lambda: SSCSettingsModal(self),
-                "ADT": lambda: ADTSettingsModal(self)
+                "ADT": lambda: ADTSettingsModal(self),
+                "MM2": lambda: MM2SettingsModal(self)
             }
 
             if code in modal_factory:

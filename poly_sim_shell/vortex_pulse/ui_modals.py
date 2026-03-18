@@ -4296,3 +4296,286 @@ class ADTSettingsModal(ModalScreen):
     @on(Button.Pressed, "#btn_adt_cancel")
     def cancel_and_close(self):
         self.dismiss()
+
+
+class MM2SettingsModal(ModalScreen):
+    """
+    Redesigned, premium configuration modal for MM2 (Momentum-2).
+    Uses a structured layout with sub-modal links for advanced options.
+    """
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+
+    def __init__(self, main_app):
+        super().__init__()
+        self.main_app = main_app
+        self.scanner = self.main_app.scanners.get("MM2")
+        self.algo_id = "MM2"
+
+    def compose(self) -> ComposeResult:
+        # Default fallback values for composition
+        try:
+            cur_w = str(self.main_app.scanner_weights.get("MM2", 1.0))
+            cur_t = str(int(getattr(self.scanner, "threshold", 0.6) * 100))
+            cur_d = str(getattr(self.scanner, "duration", 10))
+            cur_m = getattr(self.scanner, "mode", "VECTOR")
+        except:
+            cur_w, cur_t, cur_d, cur_m = "1.0", "60", "10", "VECTOR"
+
+        with Vertical(id="mm2_modal_container"):
+            yield Static("Momentum-2 Intelligence", id="mm2_title")
+            yield Static("Unified Scoring & Time-Aware Dynamics", id="mm2_subtitle")
+
+            with Vertical(id="mm2_scroll_area"):
+                # 1. Core Config Section
+                with Vertical(classes="mm2_section"):
+                    yield Static("[bold #00ffff]1. ALPHA PARAMETERS[/]", classes="mm2_sec_title")
+                    with Horizontal(classes="mm2_row"):
+                        yield Label("Weight (x):", classes="mm2_lbl")
+                        yield Input(value=cur_w, placeholder="1.0", id="inp_mm2_weight")
+                        yield Label("Threshold (¢):", classes="mm2_lbl")
+                        yield Input(value=cur_t, placeholder="60", id="inp_mm2_threshold")
+                    with Horizontal(classes="mm2_row"):
+                        yield Label("Duration (s):", classes="mm2_lbl")
+                        yield Input(value=cur_d, placeholder="10", id="inp_mm2_duration")
+                        yield Label("Logic Mode:", classes="mm2_lbl")
+                        yield Select([
+                            ("VECTOR (Scored)", "VECTOR"),
+                            ("TIME (Leader)", "TIME"),
+                            ("PRICE (Immediate)", "PRICE"),
+                            ("DURATION (Hold)", "DURATION")
+                        ], id="sel_mm2_mode", value=cur_m)
+
+                # 2. Buy Mode Selection
+                with Vertical(classes="mm2_section"):
+                    yield Static("[bold #00ff88]2. EXECUTION REGIME[/]", classes="mm2_sec_title")
+                    with Horizontal(classes="mm2_radio_row"):
+                        yield RadioSet(
+                            RadioButton("Standard (STN)", id="rb_mm2_stn"),
+                            RadioButton("Pre-Buy (PBN)", id="rb_mm2_pre"),
+                            RadioButton("Hybrid (HYB)", id="rb_mm2_hyb"),
+                            RadioButton("Advanced (ADV)", id="rb_mm2_adv"),
+                            id="rs_mm2_buy_mode"
+                        )
+                    yield Static("Selects how buy signals are triggered (Predictive vs Reactive).", classes="mm2_help_text")
+
+                # 3. Advanced Intelligence Hub
+                with Vertical(classes="mm2_section"):
+                    yield Static("[bold #ffaa00]3. INTELLIGENCE HUB[/]", classes="mm2_sec_title")
+                    with Horizontal(classes="mm2_btn_row"):
+                        yield Button("⚙️ VOLATILITY / ATR EXPERT", id="btn_mm2_expert", variant="warning")
+                    with Horizontal(classes="mm2_btn_row"):
+                        yield Button("📊 SENTIMENT / TREND SCALE", id="btn_mm2_scaling", variant="primary")
+                    yield Static("Configure ATR tiers, Whale Shield, and conviction scaling.", classes="mm2_help_text")
+
+                # 4. Diagnostics
+                with Vertical(classes="mm2_section"):
+                    yield Static("[bold #ff0000]4. DIAGNOSTICS[/]", classes="mm2_sec_title")
+                    with Horizontal(classes="mm2_btn_row"):
+                        yield Button("🚀 RUN REAL-TIME PBN TEST", id="btn_mm2_test", variant="error")
+
+            with Horizontal(id="mm2_footer"):
+                yield Button("CLOSE & PERSIST", id="btn_mm2_save", variant="primary")
+
+    def on_mount(self):
+        self._apply_styles()
+        self._load_values()
+
+    def _apply_styles(self):
+        self.styles.align = ("center", "middle")
+        self.styles.background = "rgba(0,0,0,0.8)"
+
+        container = self.query_one("#mm2_modal_container")
+        container.styles.width = 70
+        container.styles.height = "auto"
+        container.styles.max_height = "90vh"
+        container.styles.background = "#0a0a0a"
+        container.styles.border = ("thick", "#00ffff")
+        container.styles.padding = (1, 2)
+
+        self.query_one("#mm2_title").styles.text_align = "center"
+        self.query_one("#mm2_title").styles.color = "#00ffff"
+        self.query_one("#mm2_title").styles.text_style = "bold"
+        self.query_one("#mm2_title").styles.width = "100%"
+
+        self.query_one("#mm2_subtitle").styles.text_align = "center"
+        self.query_one("#mm2_subtitle").styles.color = "#666666"
+        self.query_one("#mm2_subtitle").styles.italic = True
+        self.query_one("#mm2_subtitle").styles.width = "100%"
+        self.query_one("#mm2_subtitle").styles.margin = (0, 0, 1, 0)
+
+        scroll = self.query_one("#mm2_scroll_area")
+        scroll.styles.height = "auto"
+        scroll.styles.width = "100%"
+        scroll.styles.overflow_y = "auto"
+
+        for sec in self.query(".mm2_section"):
+            sec.styles.margin = (0, 0, 1, 0)
+            sec.styles.padding = (0, 1)
+            sec.styles.background = "#141414"
+            sec.styles.border = ("ascii", "#333333")
+            sec.styles.height = "auto"
+            sec.styles.width = "100%"
+
+        for title in self.query(".mm2_sec_title"):
+            title.styles.margin = (0, 0, 1, 0)
+            title.styles.width = "100%"
+
+        for row in self.query(".mm2_row"):
+            row.styles.height = "auto"
+            row.styles.min_height = 3
+            row.styles.align = ("center", "middle")
+            row.styles.width = "100%"
+
+        for lbl in self.query(".mm2_lbl"):
+            lbl.styles.width = 15
+            lbl.styles.color = "#888888"
+
+        for inp in self.query("Input"):
+            inp.styles.width = 10
+            inp.styles.margin_right = 1
+
+        self.query_one("#sel_mm2_mode").styles.width = 24
+
+        radio_row = self.query_one(".mm2_radio_row")
+        radio_row.styles.height = "auto"
+        radio_row.styles.min_height = 3
+        radio_row.styles.align = ("center", "middle")
+        radio_row.styles.width = "100%"
+        
+        rs = self.query_one("#rs_mm2_buy_mode")
+        rs.styles.layout = "horizontal"
+        rs.styles.height = "auto"
+        rs.styles.border = "none"
+        rs.styles.background = "transparent"
+
+        for rb in rs.query(RadioButton):
+            rb.styles.width = "auto"
+            rb.styles.margin = (0, 1)
+
+        for h in self.query(".mm2_help_text"):
+            h.styles.color = "#444444"
+            h.styles.italic = True
+            h.styles.margin = (1, 0)
+            h.styles.text_align = "center"
+            h.styles.width = "100%"
+
+        for brow in self.query(".mm2_btn_row"):
+            brow.styles.height = "auto"
+            brow.styles.min_height = 3
+            brow.styles.margin = (0, 0, 1, 0)
+            brow.styles.align = ("center", "middle")
+            brow.styles.width = "100%"
+            for btn in brow.query(Button):
+                btn.styles.width = 45
+
+        footer = self.query_one("#mm2_footer")
+        footer.styles.margin_top = 1
+        footer.styles.align = ("center", "middle")
+        footer.styles.width = "100%"
+        self.query_one("#btn_mm2_save").styles.width = 40
+
+    def _load_values(self):
+        if not self.main_app: return
+        try:
+            # Load Weights
+            w = self.main_app.scanner_weights.get("MM2", 1.0)
+            self.query_one("#inp_mm2_weight").value = str(w)
+
+            # Load Core Scanner Params
+            if self.scanner:
+                self.query_one("#inp_mm2_threshold").value = str(int(getattr(self.scanner, "threshold", 0.6) * 100))
+                self.query_one("#inp_mm2_duration").value = str(getattr(self.scanner, "duration", 10))
+                self.query_one("#sel_mm2_mode").value = getattr(self.scanner, "mode", "VECTOR")
+
+            # Load Buy Mode
+            bm = getattr(self.main_app, "mom_buy_mode", "STD")
+            rs = self.query_one("#rs_mm2_buy_mode")
+            if bm == "STD": rs.query_one("#rb_mm2_stn").value = True
+            elif bm == "PRE": rs.query_one("#rb_mm2_pre").value = True
+            elif bm == "HYBRID": rs.query_one("#rb_mm2_hyb").value = True
+            elif bm == "ADV": rs.query_one("#rb_mm2_adv").value = True
+        except Exception as e:
+            if self.main_app:
+                self.main_app.log_msg(f"Error loading MM2 values: {e}")
+
+    @on(Button.Pressed, "#btn_mm2_expert")
+    def open_expert(self):
+        self.main_app.push_screen(MOMExpertModal(self.main_app, algo_id="MM2"))
+
+    @on(Button.Pressed, "#btn_mm2_scaling")
+    def open_scaling(self):
+        # Using existing conviction scaling modal if available
+        from .ui_modals import ConvictionScalingModal
+        self.main_app.push_screen(ConvictionScalingModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_mm2_test")
+    def run_test(self):
+        # Redirect to a diagnostic bridge or run inline (similar to MOMExpertModal test)
+        self.main_app.log_msg("🧪 MM2 Diagnostic Test initiated...", level="ADMIN")
+        # For now, we can just push the MOMExpertModal which has the test button, 
+        # or implement a specific one here.
+        self.open_expert() # Expert modal has the mature test logic
+
+    @on(Button.Pressed, "#btn_mm2_save")
+    def save_and_close(self):
+        if not self.main_app: 
+            self.dismiss()
+            return
+            
+        changes = []
+        try:
+            # Save Weight
+            old_w = self.main_app.scanner_weights.get("MM2", 1.0)
+            new_w = float(self.query_one("#inp_mm2_weight").value)
+            if old_w != new_w:
+                self.main_app.scanner_weights["MM2"] = new_w
+                changes.append(f"Weight: {new_w}x")
+
+            # Save Threshold
+            old_t = int(getattr(self.scanner, "threshold", 0.6) * 100)
+            new_t = int(self.query_one("#inp_mm2_threshold").value)
+            if old_t != new_t:
+                self.scanner.threshold = new_t / 100.0
+                self.scanner.base_threshold = new_t / 100.0
+                changes.append(f"Thresh: {new_t}¢")
+
+            # Save Duration
+            old_d = getattr(self.scanner, "duration", 10)
+            new_d = int(self.query_one("#inp_mm2_duration").value)
+            if old_d != new_d:
+                self.scanner.duration = new_d
+                changes.append(f"Dur: {new_d}s")
+
+            # Save Mode
+            old_m = getattr(self.scanner, "mode", "VECTOR")
+            new_m = self.query_one("#sel_mm2_mode").value
+            if old_m != new_m:
+                self.scanner.mode = new_m
+                changes.append(f"Mode: {new_m}")
+
+            # Save Buy Mode
+            old_bm = self.main_app.mom_buy_mode
+            rs = self.query_one("#rs_mm2_buy_mode")
+            if rs.query_one("#rb_mm2_stn").value: new_bm = "STD"
+            elif rs.query_one("#rb_mm2_pre").value: new_bm = "PRE"
+            elif rs.query_one("#rb_mm2_hyb").value: new_bm = "HYBRID"
+            elif rs.query_one("#rb_mm2_adv").value: new_bm = "ADV"
+            else: new_bm = "STD"
+
+            if old_bm != new_bm:
+                self.main_app.mom_buy_mode = new_bm
+                changes.append(f"Regime: {new_bm}")
+
+            if changes:
+                self.main_app.save_settings()
+                self.main_app.log_msg(f"⚙️ MM2 Intelligence Updated: {', '.join(changes)}", level="ADMIN")
+                
+                # Internal summary dump (matches MOM logic)
+                self.main_app.log_msg(f"[bold cyan]📋 MM2 Active Profile:[/]", level="ADMIN")
+                self.main_app.log_msg(f"  • Mode: {new_m} | Regime: {new_bm}", level="ADMIN")
+                self.main_app.log_msg(f"  • Threshold: {new_t}¢ | Duration: {new_d}s", level="ADMIN")
+
+        except Exception as e:
+            self.main_app.log_msg(f"[red]Error saving MM2 settings: {e}[/]")
+
+        self.dismiss()
