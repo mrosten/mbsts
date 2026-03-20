@@ -501,7 +501,8 @@ class MarketDataManager:
             curr_t = time.time()
             if curr_t - getattr(self, "last_vol_update", 0) > 5:
                 try:
-                    b_depth = requests.get("https://api.binance.com/api/v3/depth", params={"symbol": "BTCUSDT", "limit": 1000}, timeout=1.5).json()
+                    # Use larger limit (5000) for BTC to ensure we reach the open price even during high volatility
+                    b_depth = requests.get("https://api.binance.com/api/v3/depth", params={"symbol": "BTCUSDT", "limit": 5000}, timeout=2.0).json()
                     open_p = self.market_data.get("btc_open", 0)
                     if open_p > 0:
                         self.market_data["vol_up"] = sum(float(b[1]) for b in b_depth.get("bids", []) if float(b[0]) >= open_p)

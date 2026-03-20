@@ -1,20 +1,25 @@
 import os
+import threading
 import csv
 import time
+import json
 from datetime import datetime
 
 from textual.screen import ModalScreen
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, Container
+from textual.containers import Horizontal, Vertical, Container, VerticalScroll
 from textual.widgets import Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, Select, Collapsible
 from textual import on
 
 # Handle imports for both package and direct execution
 try:
     from .scanners import ALGO_INFO
+    from .darwin_agent import DarwinAgent, DARWIN_OBSERVATIONS, DARWIN_EXPERIMENT_LOG, DARWIN_CURRENT_ALGO
 except ImportError:
     # Running directly from vortex_pulse directory
     from scanners import ALGO_INFO
+    from darwin_agent import DarwinAgent, DARWIN_OBSERVATIONS, DARWIN_EXPERIMENT_LOG, DARWIN_CURRENT_ALGO
+from textual.widgets import Markdown, TextArea, RichLog
 
 
 class GlobalSettingsModal(ModalScreen):
@@ -852,6 +857,12 @@ class MOMExpertModal(ModalScreen):
                     with Horizontal(classes="exp_row"):
                         yield Label("Decisive Lead (¢):")
                         yield Input(placeholder="2", value=str(int(self.s.get("decisive_diff", 0.02) * 100)), id="exp_decisive_diff")
+                    
+                    yield Static("--- [NEW] Optional Odds-Based Pre-Buy (v5.9.16) ---", classes="exp_sec_desc")
+                    with Horizontal(classes="exp_row"):
+                        yield Checkbox(label="Enable Odds PBN", value=self.s.get("pbn_odds_enabled", False), id="exp_pbn_odds_enabled")
+                        yield Label("Odds Thresh (¢):")
+                        yield Input(placeholder="2.0", value=str(self.s.get("pbn_odds_thresh", 2.0)), id="exp_pbn_odds_thresh")
 
                 with Collapsible(title="5. Whale Shield Protection", id="exp_coll_5", classes="exp_section"):
                     yield Static("Final-second protection. Blocks trades if bid is too close to 50¢.", classes="exp_sec_desc")
@@ -1069,6 +1080,8 @@ class MOMExpertModal(ModalScreen):
             self.query_one("#exp_atr_floor").value = "25"
             self.query_one("#exp_trend_penalty").value = "2"
             self.query_one("#exp_decisive_diff").value = "2"
+            self.query_one("#exp_pbn_odds_enabled").value = False
+            self.query_one("#exp_pbn_odds_thresh").value = "2.0"
             self.main_app.log_msg("[bold cyan]UI Presets:[/] Loaded [DEFAULT] MOM profile.")
         elif bid == "btn_preset_vol":
             self.query_one("#exp_atr_low").value = "25"
@@ -1128,6 +1141,8 @@ class MOMExpertModal(ModalScreen):
             self.s["decisive_diff"] = float(self.query_one("#exp_decisive_diff").value) / 100.0
             self.s["shield_time"] = int(self.query_one("#exp_shield_time").value)
             self.s["shield_reach"] = int(self.query_one("#exp_shield_reach").value)
+            self.s["pbn_odds_enabled"] = self.query_one("#exp_pbn_odds_enabled").value
+            self.s["pbn_odds_thresh"] = float(self.query_one("#exp_pbn_odds_thresh").value)
         except: pass
         try:
             if self.mom:
@@ -4039,17 +4054,8 @@ class SSCSettingsModal(ModalScreen):
                 yield Button("❌ Cancel", id="btn_ssc_cancel")
 
     def on_mount(self) -> None:
-        # Styling
         self._apply_styles()
-        
-        # Load current values
-        self._load_values()
-        
-        # Styling
-        self._apply_styles()
-        
-        # Load current values
-        self._load_values()
+        self.call_after_refresh(self._load_values)
     
     def _apply_styles(self):
         title = self.query_one(".modal_title")
@@ -4132,6 +4138,231 @@ class SSCSettingsModal(ModalScreen):
     def cancel_and_close(self):
         self.dismiss()
 
+
+class DarwinSettingsModal(ModalScreen):
+    """A dedicated status and control modal for the DARWIN AI agent."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.darwin = getattr(main_app, "darwin", None)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="modal_container"):
+            with Horizontal(id="modal_header"):
+                yield Static("[bold #00ffff]🧬 DARWIN AI STATUS & REASONING[/]", id="modal_title")
+                yield Button("TEST CONNECTION", id="btn_darwin_test", variant="primary")
+
+            if not self.darwin:
+                yield Label("[red]Error: DarwinAgent instance not found in PulseApp.[/]")
+            else:
+                # 1. Performance Overview
+                with Collapsible(title="📈 VIRTUAL PERFORMANCE (Experimenter Mode)", id="gp_perf", classes="settings_group"):
+                    wr = (self.darwin.virtual_wins / self.darwin.virtual_trades * 100) if self.darwin.virtual_trades > 0 else 0
+                    pnl_color = "#00ff00" if self.darwin.virtual_pnl >= 0 else "#ff0000"
+                    
+                    with Horizontal(classes="setting_row"):
+                        yield Label("Current Mode:", classes="setting_label")
+                        yield Label(f"[cyan]{self.darwin.mode}[/]", classes="setting_value")
+                    with Horizontal(classes="setting_row"):
+                        yield Label("Virtual P&L:", classes="setting_label")
+                        yield Label(f"[{pnl_color}]${self.darwin.virtual_pnl:.2f}[/]", classes="setting_value")
+                    with Horizontal(classes="setting_row"):
+                        yield Label("Win Rate:", classes="setting_label")
+                        yield Label(f"{wr:.1f}% ({self.darwin.virtual_wins}/{self.darwin.virtual_trades} trades)", classes="setting_value")
+
+                # 2. Latest Insights (Observations.md)
+                with Collapsible(title="🧠 LATEST INSIGHTS & HYPOTHESES", id="gp_insights", classes="settings_group"):
+                    obs_text = ""
+                    if DARWIN_OBSERVATIONS.exists():
+                        try:
+                            obs_text = DARWIN_OBSERVATIONS.read_text(encoding="utf-8")
+                        except: obs_text = "Error reading observations.md"
+                    
+                    if not obs_text:
+                        yield Label("[dim italic]No observations recorded yet.[/]")
+                    else:
+                        yield Markdown(obs_text, id="darwin_insights_md")
+
+                # 3. Reasoning Log (Experiment Log)
+                with Collapsible(title="📜 REASONING & EXPERIMENT LOG", id="gp_log", classes="settings_group"):
+                    log_data = []
+                    if DARWIN_EXPERIMENT_LOG.exists():
+                        try:
+                            log_data = json.loads(DARWIN_EXPERIMENT_LOG.read_text(encoding="utf-8"))
+                        except: pass
+                    
+                    if not log_data:
+                        yield Label("[dim italic]No experiment logs found.[/]")
+                    else:
+                        # Show last 5 experiments in reverse order
+                        for entry in reversed(log_data[-5:]):
+                            timestamp = entry.get("timestamp", "N/A")
+                            hyp = entry.get("hypothesis", "...")
+                            obs = entry.get("observation", "")
+                            script = entry.get("script_run", "No action")
+                            yield Static(f"[bold #aaaaaa]{timestamp}[/]\n[cyan]Hypothesis:[/] {hyp}\n[dim]{obs}[/]\n[bold #00ff00]Action:[/] {script}\n", classes="log_entry")
+
+                # 4. Active Algorithm Code
+                with Collapsible(title="💻 ACTIVE ALGORITHM CODE", id="gp_code", classes="settings_group"):
+                    code_text = ""
+                    if DARWIN_CURRENT_ALGO.exists():
+                        try:
+                            code_text = DARWIN_CURRENT_ALGO.read_text(encoding="utf-8")
+                        except: code_text = "Error reading current_algo.py"
+                    
+                    if not code_text:
+                        yield Label("[dim italic]No algorithm code discovered yet (V2 only).[/]")
+                    else:
+                        from textual.widgets import TextArea
+                        yield TextArea(code_text, language="python", read_only=True, id="darwin_code_viewer")
+
+                # 5. Darwin Chat (Playful Interaction)
+                with Collapsible(title="💬 CHAT WITH DARWIN", id="gp_chat", classes="settings_group"):
+                    yield Static("[dim italic]Ask Darwin about its hypothesis or current strategy.[/]", id="lbl_chat_hint")
+                    with Vertical(id="chat_display_area"):
+                        yield RichLog(id="darwin_chat_log", wrap=True, highlight=True, markup=True)
+                    with Horizontal(id="chat_input_row"):
+                        yield Input(placeholder="Type message to Darwin...", id="inp_darwin_chat")
+                        yield Button("SEND", id="btn_darwin_chat_send", variant="primary")
+
+            with Horizontal(id="modal_footer"):
+                yield Button("CLOSE", id="btn_darwin_close", variant="error")
+
+    @on(Button.Pressed, "#btn_darwin_test")
+    def test_darwin_connection(self):
+        """Handler for the 'TEST CONNECTION' button."""
+        if self.darwin:
+            btn = self.query_one("#btn_darwin_test")
+            btn.label = "TESTING..."
+            btn.disabled = True
+            
+            # Diagnostic call
+            result = self.darwin.test_connection()
+            self.main_app.notify(result, title="DARWIN Connection Test", severity="info" if "Success" in result else "error")
+            
+            btn.label = "TEST CONNECTION"
+            btn.disabled = False
+
+    @on(Button.Pressed, "#btn_darwin_close")
+    def action_close_button(self):
+        self.dismiss()
+
+    @on(Button.Pressed, "#btn_darwin_chat_send")
+    @on(Input.Submitted, "#inp_darwin_chat")
+    def on_chat_submit(self):
+        inp = self.query_one("#inp_darwin_chat")
+        msg = inp.value.strip()
+        if not msg or not self.darwin:
+            return
+
+        chat_log = self.query_one("#darwin_chat_log")
+        chat_log.write(f"[bold #00ffff]YOU:[/] {msg}")
+        chat_log.write(f"[italic #888888]Darwin is thinking...[/]")
+        inp.value = ""
+        
+        async def run_chat():
+            # Run in thread pool to avoid blocking the main loop
+            try:
+                # Add a timeout warning if it takes too long
+                timeout_warning = False
+                
+                def get_response():
+                    nonlocal timeout_warning
+                    try:
+                        return self.darwin.on_chat_submit(msg)
+                    except Exception as e:
+                        return f"Error: {e}"
+
+                # Using a worker for better Textual integration
+                response = await self.run_worker(get_response, thread=True).wait()
+                
+                if response:
+                    chat_log.write(f"[bold #ff00ff]DARWIN:[/] {response}\n")
+                else:
+                    chat_log.write(f"[red]Darwin remained silent.[/]\n")
+            except Exception as e:
+                chat_log.write(f"[red]Chat System Error: {e}[/]\n")
+            
+        self.run_worker(run_chat())
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        container = self.query_one("#modal_container")
+        container.styles.background = "#1a1a1a"
+        container.styles.border = ("thick", "#ff00ff")
+        container.styles.padding = (1, 2)
+        container.styles.width = 80 
+        container.styles.height = "80%"
+        
+        self.query_one("#modal_title").styles.text_align = "left"
+        self.query_one("#modal_title").styles.width = "1fr"
+        self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
+        
+        # Test Button Styling
+        try:
+            mt = self.query_one("#modal_header")
+            mt.styles.height = 3
+            mt.styles.align = ("left", "middle")
+            
+            test_btn = self.query_one("#btn_darwin_test")
+            test_btn.styles.min_width = 20
+            test_btn.styles.height = 1
+            test_btn.styles.border = "none"
+            test_btn.styles.margin = (0, 0, 0, 2)
+        except: pass
+        
+        if self.darwin:
+            # Insights Markdown Styling
+            try:
+                md = self.query_one("#darwin_insights_md")
+                md.styles.height = 12
+                md.styles.border = ("solid", "#333333")
+                md.styles.background = "#222222"
+                md.styles.padding = (0, 1)
+            except: pass
+
+            # Code Viewer Styling
+            try:
+                cv = self.query_one("#darwin_code_viewer")
+                cv.styles.height = 15
+                cv.styles.border = ("solid", "#333333")
+                cv.styles.margin = (1, 0)
+            except: pass
+            
+            # Chat Styling
+            try:
+                chat_area = self.query_one("#chat_display_area")
+                chat_area.styles.height = 10
+                chat_area.styles.border = ("solid", "#333333")
+                chat_area.styles.background = "#0d0d0d"
+                chat_area.styles.margin = (0, 0, 1, 0)
+                
+                chat_log = self.query_one("#darwin_chat_log")
+                chat_log.styles.height = "1fr"
+                chat_log.styles.scrollbar_gutter = "stable"
+                chat_log.styles.scrollbar_size = 1             # Thinner scrollbars
+                chat_log.styles.overflow_x = "hidden"         # Prevent horizontal scrollbars from covering text
+                chat_log.styles.padding = (0, 1, 1, 1)       # Top Right Bottom Left (Added bottom padding)
+                
+                input_row = self.query_one("#chat_input_row")
+                input_row.styles.height = 3
+                input_row.styles.align = ("center", "middle")
+                
+                inp = self.query_one("#inp_darwin_chat")
+                inp.styles.width = "1fr"
+                
+                btn = self.query_one("#btn_darwin_chat_send")
+                btn.styles.width = 10
+                btn.styles.margin_left = 1
+            except: pass
+
+    @on(Button.Pressed, "#btn_modal_close")
+    def action_close(self):
+        self.dismiss()
+
+
 class ADTSettingsModal(ModalScreen):
     """Asymmetric Double Test Scanner Settings"""
     
@@ -4175,17 +4406,8 @@ class ADTSettingsModal(ModalScreen):
                 yield Button("❌ Cancel", id="btn_adt_cancel")
 
     def on_mount(self) -> None:
-        # Styling
         self._apply_styles()
-        
-        # Load current values
-        self._load_values()
-        
-        # Styling
-        self._apply_styles()
-        
-        # Load current values
-        self._load_values()
+        self.call_after_refresh(self._load_values)
     
     def _apply_styles(self):
         title = self.query_one(".modal_title")

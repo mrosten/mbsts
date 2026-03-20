@@ -541,6 +541,17 @@ class Momentum2Scanner(BaseScanner):
         
         # PBN Phase (T-15s)
         if elapsed >= (window_seconds - 15) and not self.pre_buy_triggered and self.buy_mode in ["PRE", "HYBRID", "ADV"]:
+            # --- [NEW] Optional Odds-Based Pre-Buy (v5.9.16) ---
+            pbn_odds_enabled = self.adv_settings.get("pbn_odds_enabled", False)
+            pbn_odds_thresh = self.adv_settings.get("pbn_odds_thresh", 2.0)
+            
+            if pbn_odds_enabled and abs(odds_score) >= pbn_odds_thresh:
+                side = "UP" if odds_score > 0 else "DOWN"
+                self.triggered_signal = f"PRE_BUY_{side}|MOM-2 OddsGap {abs(odds_score):+.1f}¢"
+                self.pre_buy_triggered = True
+                return self.triggered_signal
+            # --------------------------------------------------
+
             # Capture Analysis for UI/Logs
             self.pbn_analysis = {
                 "factors": factors,

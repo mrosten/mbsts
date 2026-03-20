@@ -1,4 +1,9 @@
 import time
+from dotenv import load_dotenv
+
+# Load .env variables
+load_dotenv()
+
 import asyncio
 import json
 import os
@@ -26,6 +31,7 @@ try:
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
         VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
     )
+    from .darwin_agent import DarwinAgent
     from .ui_modals import (
         GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
         BankrollExhaustedModal, MOMExpertModal, ResearchLogger, CCOExpertModal,
@@ -37,7 +43,7 @@ try:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal
+        MM2SettingsModal, DarwinSettingsModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -65,6 +71,7 @@ except ImportError:
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
         VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
     )
+    from darwin_agent import DarwinAgent
     from ui_modals import (
         GlobalSettingsModal, AlgoInfoModal, BullFlagSettingsModal,
         BankrollExhaustedModal, MOMExpertModal, ResearchLogger, CCOExpertModal,
@@ -76,7 +83,7 @@ except ImportError:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal
+        MM2SettingsModal, DarwinSettingsModal
     )
     from ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -581,7 +588,14 @@ class PulseApp(TradeEngineMixin, App):
     }
     .algo_item { width: 100%; height: 1; layout: horizontal; align: left middle; margin-bottom: 0; }
     .algo_item Label { width: 1fr; }
+    #btn_dar_info { min-width: 3; width: 3; height: 1; border: none; background: #333333; color: #00ffff; margin: 0; padding: 0; }
+    #btn_dar_info:hover { background: #444444; color: #ffffff; }
     """
+
+    @on(Button.Pressed, "#btn_dar_info")
+    @on(Button.Pressed, "#btn_darwin_hub")
+    def on_dar_info_press(self):
+        self.push_screen(DarwinSettingsModal(main_app=self))
 
     @on(Checkbox.Changed)
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
@@ -775,6 +789,10 @@ class PulseApp(TradeEngineMixin, App):
             "ADT": AsymmetricDoubleTestScanner(self.config)
         }
         
+        # Initialize DARWIN AI Agent (v5.9.16)
+        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg)
+        self.scanners["Darwin"] = self.darwin
+
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
         self.logged_trend_wid = None # Latch for trend log deduplication
         self.window_bets = {} 
@@ -784,6 +802,10 @@ class PulseApp(TradeEngineMixin, App):
         self.mid_window_lockout = False
         self.saved_sim_bankroll = None
         self.app_start_time = time.time()
+        
+        # Initialize DARWIN AI Agent (v5.9.16)
+        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg)
+        self.scanners["Darwin"] = self.darwin
         
         # Next-Strike Audit State
         self.audit_pending_info = None
@@ -822,7 +844,8 @@ class PulseApp(TradeEngineMixin, App):
             "stable_offset": -5, "chaos_offset": 10,
             "auto_stn_chaos": True, "auto_pbn_stable": False,
             "shield_time": 45, "shield_reach": 5,
-            "atr_floor": 25.0, "trend_penalty": 0.02, "decisive_diff": 0.02
+            "atr_floor": 25.0, "trend_penalty": 0.02, "decisive_diff": 0.02,
+            "pbn_odds_enabled": False, "pbn_odds_thresh": 2.0
         }
         self.mm2_adv_settings = self.mom_adv_settings.copy()
         self.nit_settings = {
@@ -1056,9 +1079,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 f.write("<th>Resolution</th>")
                 f.write("<th>Pulse Result</th>")
                 f.write("<th>Sync Status</th>")
-                f.write("<th>Invested ($)</th>")
-                f.write("<th>Payout ($)</th>")
-                f.write("<th>PnL ($)</th>")
+                f.write("<th>Action</th>")
+                f.write("<th>Result</th>")
+                f.write("<th>Profit/Loss</th>")
                 f.write("<th>Balance ($)</th>")
                 f.write("<th>Graph</th>")
                 f.write("</tr></thead>")
@@ -1126,6 +1149,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     Label("DN OWNED: $0/$0", id="lbl_owned_dn"),
                     id="exposure_mini_box"
                 ),
+                Label("🧬 AI: IDLE", id="p_darwin", classes="price_sub"),
                 id="card_btc", classes="price_card"
             ),
             Vertical(
@@ -1206,8 +1230,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 Button("SELL UP", id="btn_sell_up", classes="btn_sell_up"), 
                 Button("BUY DN", id="btn_buy_down", classes="btn_buy_down"),
                 Button("SELL DN", id="btn_sell_down", classes="btn_sell_down"),
-                Button("pbu", id="btn_pre_up", classes="btn_pre", tooltip="Manually queue a Pre-Buy UP for next window"),
-                Button("pbd", id="btn_pre_down", classes="btn_pre", tooltip="Manually queue a Pre-Buy DOWN for next window"),
+                Button("pbu", id="btn_pre_up", classes="btn_pre"),
+                Button("pbd", id="btn_pre_down", classes="btn_pre"),
                 id="btn_container"
             ),
             PulseLeanChart(id="pulse_lean_chart"),
@@ -1278,25 +1302,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     with Horizontal(classes="algo_item"):
                         yield Checkbox(value=False, id="cb_ssi")
                         yield Label("SSI", id="lbl_ssi")
+                    with Horizontal(classes="algo_item"):
+                        yield Checkbox(value=True, id="cb_dar")
+                        yield Label("DAR", id="lbl_dar")
+                        yield Button("?", id="btn_dar_info", variant="default")
         yield Horizontal(
             Checkbox("TP/SL", value=True, id="cb_tp_active"),
-            Checkbox("Tranche Exits", value=False, id="cb_tranche", tooltip="Track Take Profits by individual sequence bets."),
+            Checkbox("Tranche Exits", value=False, id="cb_tranche"),
             Checkbox("Strong Only", value=False, id="cb_strong"),
             Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
-            Checkbox("Whale Protect", value=False, id="cb_whale", tooltip="Emergency Exit: Sell all if price is tight near window end."),
-            Checkbox("Bounce Entry", value=False, id="cb_bounce", tooltip="Wait for price to dip below entry level then recover before executing."),
+            Checkbox("Whale Protect", value=False, id="cb_whale"),
+            Checkbox("Bounce Entry", value=False, id="cb_bounce"),
             id="settings_row",
             classes="live_row"
         )
         yield Horizontal(
-            Input(placeholder="90c @ 1:30", id="inp_time_tp", tooltip="Time-based TP: Price@Time (e.g., 90c@90 = 90¢ when ≤90s remaining)"),
-            Checkbox("Time TP", value=False, id="cb_time_tp", tooltip="Enable time-based take profit (e.g., sell at 90¢ when ≤90s left)"),
+            Input(placeholder="90c @ 1:30", id="inp_time_tp"),
+            Checkbox("Time TP", value=False, id="cb_time_tp"),
             id="time_tp_row",
             classes="live_row"
         )
         yield Horizontal(
             Checkbox("LIVE MODE", value=False, id="cb_live"),
             Input(placeholder="Command: e.g., lo=false", id="inp_cmd"),
+            Button("🧬 AI HUB", id="btn_darwin_hub", variant="warning"),
             Button("⚙ Settings", id="btn_settings"),
             id="live_row",
             classes="live_row"
@@ -1409,6 +1438,24 @@ document.addEventListener('DOMContentLoaded', function() {
                         
             elif cmd == "analyze-pre":
                 self.analyze_pre_buy_conditions()
+            elif cmd.startswith("darwin:"):
+                sub = cmd[7:].strip().lower()
+                if sub == "v1":
+                    self.darwin.mode = self.darwin.MODE_V1
+                    self.log_msg("[bold cyan]🧬 DARWIN:[/] Switched to [green]V1 Observer[/] mode.")
+                elif sub == "v2":
+                    self.darwin.mode = self.darwin.MODE_V2
+                    self.log_msg("[bold cyan]🧬 DARWIN:[/] Switched to [yellow]V2 Experimenter[/] mode.")
+                elif sub == "status":
+                    wr = (self.darwin.virtual_wins / self.darwin.virtual_trades * 100) if self.darwin.virtual_trades else 0
+                    self.log_msg(f"[bold cyan]🧬 DARWIN STATUS:[/]")
+                    self.log_msg(f"  • Mode: {self.darwin.mode}")
+                    self.log_msg(f"  • V-PnL: {self.darwin.virtual_pnl:+.2f}")
+                    self.log_msg(f"  • Win Rate: {wr:.1f}% ({self.darwin.virtual_wins}/{self.darwin.virtual_trades})")
+                    if self.darwin.mode == self.darwin.MODE_V2:
+                        self.log_msg(f"  • Active Code: {len(self.darwin.current_algo_code)} chars")
+                else:
+                    self.log_msg("[red]Unknown darwin command. Use darwin:v1, darwin:v2, or darwin:status[/]")
             elif cmd.startswith("/hide ") or cmd.startswith("/only "):
                 parts = cmd.split(" ", 1)
                 mode = parts[0][1:].upper() # HIDE or ONLY

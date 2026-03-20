@@ -170,7 +170,7 @@ class FTPManager:
             except:
                 items = ftp.nlst()
                 
-            sessions = sorted([os.path.basename(i) for i in items if "session_" in i], reverse=True)
+            sessions = [os.path.basename(i) for i in items if "session_" in i]
         except Exception as e:
             self._log(f"Failed to list remote directories: {e}", level="ERROR")
             if local_ftp: ftp.quit()
@@ -194,14 +194,30 @@ class FTPManager:
                 pass # Use defaults if metadata missing
             
             meta["id"] = s_id
-            try:
-                meta["pretty_date"] = datetime.strptime(s_id.replace("session_", ""), "%Y%m%d_%H%M%S").strftime("%b %d, %Y - %H:%M:%S")
-            except:
-                meta["pretty_date"] = s_id
-                
             session_data_list.append(meta)
             total_pnl += meta.get("pnl", 0.0)
             total_trades += meta.get("trades", 0)
+        
+        now = datetime.now()
+        for sd in session_data_list:
+            s_id = sd["id"]
+            try:
+                session_time = datetime.strptime(s_id.replace("session_", ""), "%Y%m%d_%H%M%S")
+                sd["pretty_date"] = session_time.strftime("%b %d, %Y - %H:%M:%S")
+                if sd.get("status") == "ACTIVE" and (now - session_time).total_seconds() > 3600: # 1 hour
+                    sd["status"] = "OFFLINE"
+            except:
+                sd["pretty_date"] = s_id
+
+        # --- SORTING ---
+        # 1. ACTIVE sessions first
+        # 2. Then by session date (newest first)
+        def sort_key(item):
+            is_active = 1 if item.get("status") == "ACTIVE" else 0
+            # item['id'] is session_20260320_094325, so strings sort chronologically
+            return (is_active, item.get("id", ""))
+            
+        session_data_list.sort(key=sort_key, reverse=True)
 
         # 3. Build Premium Master Index
         links_html = ""

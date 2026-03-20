@@ -255,7 +255,7 @@ class TradeEngineMixin:
                 "Mesa": "#cb_mes", "MeanReversion": "#cb_mea", "GrindSnap": "#cb_gri", "VolCheck": "#cb_vol",
                 "Moshe": "#cb_mos", "ZScore": "#cb_zsc", "Nitro": "#cb_nit", "VolSnap": "#cb_vsn", "HDO": "#cb_hdo", "Briefing": "#cb_bri",
                 "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div", "SSI": "#cb_ssi",
-                "SSC": "#cb_ssc", "ADT": "#cb_adt"
+                "SSC": "#cb_ssc", "ADT": "#cb_adt", "Darwin": "#cb_dar"
             }
             
             if not self.risk_initialized:
@@ -372,6 +372,9 @@ class TradeEngineMixin:
             # Fetch Kraken Open Price instantly to avoid API lag from other services
             cur = await asyncio.to_thread(self.market_data_manager.fetch_current_price)
             opn = await asyncio.to_thread(self.market_data_manager.update_history, cur, ts_start, elapsed)
+            
+            # [FIX] Sync btc_open IMMEDIATELY so fetch_polymarket (in gather below) has the correct price
+            self.market_data_manager.market_data["btc_open"] = opn
 
             # --- [NEW] Connection Resumption Logic ---
             if self.market_data_manager.just_reconnected:
@@ -609,15 +612,15 @@ class TradeEngineMixin:
                                     f.write(f"<td>{timestamp_str}</td>")
                                     f.write(f"<td><a href='{pm_url}' target='_blank'>{audit_slug}</a></td>")
                                     f.write(f"<td>${p2b_start:,.2f}</td>") # Bot Strike
-                                    f.write(f"<td>${p2b_next:,.2f} ({audit_src})</td>") # Poly Strike
                                     f.write(f"<td>{p_delta:+.2f}</td>") # Strike Drift
                                     f.write(f"<td>${buf.get('close_price', 0):,.2f}</td>") # Settlement Price
-                                    f.write(f"<td><span class='{official_winner}'>{official_winner}</span></td>") # Resolution
                                     f.write(f"<td><span class='{buf['pulse_result']}'>{buf['pulse_result']}</span></td>") # Pulse Result
                                     f.write(f"<td>{sync_status}</td>")
-                                    f.write(f"<td>${buf.get('invested', 0):,.2f}</td>")
-                                    f.write(f"<td>${buf.get('revenue', 0):,.2f}</td>")
-                                    f.write(f"<td>{logged_pnl:+.2f}</td>")
+                                    f.write(f"<td>{buf.get('action', 'N/A')}</td>")
+                                    f.write(f"<td>{buf.get('result', 'N/A')}</td>")
+                                    pnl_val = buf.get('pnl', 0)
+                                    pnl_color = "green" if pnl_val > 0 else "red" if pnl_val < 0 else "white"
+                                    f.write(f"<td style='color: {pnl_color}'>${pnl_val:+.2f}</td>")
                                     f.write(f"<td>${main_bal:,.2f}</td>") # Simulated/Live Balance
                                     graph_fn = buf.get("graph_filename", "")
                                     if graph_fn:
@@ -627,7 +630,7 @@ class TradeEngineMixin:
                                     f.write(f"</tr>\n")
                                     
                                     # Add algorithm signals paragraph as a separate row below
-                                    f.write(f"<tr class='algorithm-signals'><td colspan='12'>{algorithms_text}</td></tr>\n")
+                                    f.write(f"<tr class='algorithm-signals'><td colspan='10'>{algorithms_text}</td></tr>\n")
                                     
                                     # Parallel FTP Upload
                                     if self.log_settings.get("verification_html", True):
@@ -642,6 +645,29 @@ class TradeEngineMixin:
                                             interval=f"{self.config.MARKET_FREQ}M"
                                         )
                                     except: pass
+
+                                    # [DARWIN] Window End Analysis (v5.9.16)
+                                    try:
+                                        if hasattr(self, "darwin"):
+                                            darwin_ctx = {
+                                                "window_id": audit_slug,
+                                                "winner": official_winner,
+                                                "pnl": buf.get("pnl", 0.0),
+                                                "invested": buf.get("invested", 0.0),
+                                                "scanners_fired": list(buf.get("tick_signals", {}).keys()),
+                                                "btc_open": buf.get("strike_o", 0.0),
+                                                "btc_close": p2b_next,
+                                                "btc_move_pct": (p2b_next - buf.get("strike_o", 0.0)) / buf.get("strike_o", 1.0) if buf.get("strike_o", 0.0) > 0 else 0,
+                                                "atr": getattr(self, "market_data", {}).get("atr", 0.0),
+                                                "trend_1h": self.market_data_manager.trend_1h,
+                                                "odds_score": getattr(self, "market_data", {}).get("odds_score", 0.0),
+                                                "up_price_open": buf.get("open_price", 0.5),
+                                                "up_price_close": buf.get("close_price", 0.5),
+                                                "tilt_next": getattr(self, "_pending_next_tilt", None)
+                                            }
+                                            self.darwin.on_window_end(darwin_ctx)
+                                    except Exception as de:
+                                        self.log_msg(f"[dim]🧬 DARWIN Context Error: {de}[/]", level="SYS")
                             except Exception as e:
                                 self.log_msg(f"[red]HTML Log Error: {e}[/]", level="ERROR")
                         else:
@@ -671,8 +697,7 @@ class TradeEngineMixin:
                 "up_ask": d["poly"]["up_ask"], "down_ask": d["poly"]["down_ask"],
                 "up_id": d["poly"]["up_id"], "down_id": d["poly"]["down_id"]
             })
-            # Sync btc_open into MarketDataManager so next volume refresh can filter around it
-            self.market_data_manager.market_data["btc_open"] = d["opn"]
+            # Sync other market data into MarketDataManager
             
             # Push to Lean Chart
             try: 
@@ -1327,8 +1352,8 @@ class TradeEngineMixin:
             # Must include pre_buy_shares since pre-buy positions in window_bets
             # sit in broker.pre_buy_shares until the next window promotes them.
             if not self.query_one("#cb_live").value: # SIM Mode Only
-                s_up = self.sim_broker.shares.get("UP", 0.0) + self.sim_broker.pre_buy_shares.get("UP", 0.0)
-                s_dn = self.sim_broker.shares.get("DOWN", 0.0) + self.sim_broker.pre_buy_shares.get("DOWN", 0.0)
+                s_up = self.sim_broker.shares.get("UP", 0.0)
+                s_dn = self.sim_broker.shares.get("DOWN", 0.0)
                 has_drift = abs(s_up - exp_up_win) > 0.01 or abs(s_dn - exp_dn_win) > 0.01
                 
                 if has_drift:
@@ -1350,6 +1375,12 @@ class TradeEngineMixin:
                 return f"{v_btc:.1f}B"
             self.query_one("#lbl_vol_up").update(f"V-UP: {fmt_v(v_up, cur_btc)}")
             self.query_one("#lbl_vol_dn").update(f"V-DN: {fmt_v(v_dn, cur_btc)}")
+
+            # [DARWIN] UI Status Update
+            if hasattr(self, "darwin"):
+                d_mode = "OBS" if self.darwin.mode == self.darwin.MODE_V1 else "EXP"
+                d_sig = getattr(self.darwin, "_last_signal", "WAIT").replace("BUY_", "")
+                self.query_one("#p_darwin").update(f"🧬 AI ({d_mode}): {d_sig}")
 
         except Exception as e: self.log_msg(f"[red]Loop Err: {e}[/]")
 
@@ -2389,6 +2420,39 @@ class TradeEngineMixin:
                     self.risk_manager.target_bankroll = main_bal
             # Secondary update with verified API data
             self.update_balance_ui()
+            
+        # 4. [NEW] DARWIN AI Observation Trigger (v5.9.16)
+        # Pass full context to DARWIN at end of window for reasoning/evolution
+        try:
+            if getattr(self, "darwin", None):
+                btc_o = self.market_data.get("btc_open", 0)
+                btc_p = self.market_data.get("btc_price", 0)
+                move_pct = ((btc_p / btc_o) - 1.0) * 100 if btc_o > 0 else 0
+                
+                scanners_fired = []
+                for info in self.window_bets.values():
+                    algo = info.get("algorithm")
+                    if algo and algo not in scanners_fired:
+                        scanners_fired.append(algo)
+                
+                # 'winner' is already defined above in this method
+                darwin_ctx = {
+                    "window_id": self.market_data.get("start_ts", 0),
+                    "winner": winner if 'winner' in locals() else "N/A",
+                    "btc_move_pct": move_pct,
+                    "atr": getattr(self.market_data_manager, "atr_5m", 0.0),
+                    "trend_1h": getattr(self.market_data_manager, "trend_1h", "N/A"),
+                    "odds_score": self.market_data.get("odds_score", 0.0),
+                    "up_price_open": self.market_data.get("up_price_open", 0.5),
+                    "up_price_close": self.market_data.get("up_price", 0.5), # Final price at settlement
+                    "tilt_next": getattr(self, "_pending_next_tilt", None),
+                    "scanners_fired": scanners_fired,
+                    "pnl": net_pnl if 'net_pnl' in locals() else 0.0
+                }
+                # Run in background thread to avoid blocking pump loop
+                threading.Thread(target=self.darwin.on_window_end, args=(darwin_ctx,), daemon=True).start()
+        except Exception as e:
+            self.log_msg(f"[red]Error triggering DARWIN: {e}[/]", level="ERROR")
 
     async def trigger_buy(self, side):
         if hasattr(self, "_last_manual_buy") and time.time() - self._last_manual_buy < 2.0:
