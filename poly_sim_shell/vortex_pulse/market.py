@@ -486,8 +486,8 @@ class MarketDataManager:
             
             def get_p(tid, side):
                 try: 
-                    return float(requests.get("https://clob.polymarket.com/price", params={"token_id":tid,"side":side}, timeout=1.5).json().get("price",0))
-                except: return 0
+                    return float(requests.get("https://clob.polymarket.com/price", params={"token_id":tid,"side":side}, timeout=1.5).json().get("price",None))
+                except: return None
             
             # Remove nested ThreadPoolExecutor to prevent thread-join hangs on exit
             up_ask = get_p(up_id, "buy")
@@ -518,8 +518,8 @@ class MarketDataManager:
         
         # Best Estimate of 'Current Price'
         def _best(b, a):
-            if b > 0 and a > 0: return (b+a)/2
-            return a or b or 0.5
+            if b is not None and a is not None: return (b+a)/2
+            return a if a is not None else b if b is not None else 0.5
 
         # Final P2B and Resolution Extraction
         p2b = m.get("priceToBeat")

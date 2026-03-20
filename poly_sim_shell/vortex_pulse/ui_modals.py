@@ -40,6 +40,9 @@ class GlobalSettingsModal(ModalScreen):
                 with Horizontal(classes="setting_row"):
                     yield Label("Full Wallet Sync:", classes="setting_label")
                     yield Checkbox(id="cb_sync_risk")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Official Audit:", classes="setting_label")
+                    yield Checkbox(id="cb_audit_enabled")
             
             with Collapsible(title="Trading & Risk Caps", id="gp_trading", classes="settings_group"):
                 with Horizontal(classes="setting_row"):
@@ -68,7 +71,36 @@ class GlobalSettingsModal(ModalScreen):
                 with Horizontal(classes="button_row"):
                     yield Button("VOLATILITY SCALING", id="btn_vol_scaling", variant="default")
                     yield Button("VALUE RE-ENTRY (RD2)", id="btn_value_reentry", variant="default")
+
+            with Collapsible(title="DB DATA LOGGING (Shared)", id="gp_db_logging", classes="settings_group"):
+                with Horizontal(classes="setting_row"):
+                    yield Label("Unified Event Log:", classes="setting_label")
+                    yield Checkbox(id="cb_db_windows")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Alpha Ledger:", classes="setting_label")
+                    yield Checkbox(id="cb_db_alpha")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Darwin AI Vault:", classes="setting_label")
+                    yield Checkbox(id="cb_db_darwin")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Granular Tick Archive:", classes="setting_label")
+                    yield Checkbox(id="cb_db_ticks")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Contextual Metadata:", classes="setting_label")
+                    yield Checkbox(id="cb_db_context")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Tick Freq (s):", classes="setting_label")
+                    yield Input(placeholder="1", id="inp_tick_freq", classes="setting_input")
             
+            with Collapsible(title="Darwin AI Mode", id="gp_darwin", classes="settings_group"):
+                with Horizontal(classes="setting_row"):
+                    yield Label("Operating Mode:", classes="setting_label")
+                    yield RadioSet(
+                        RadioButton("Observer (V1)", id="rb_v1"),
+                        RadioButton("Experimenter (V2)", id="rb_v2"),
+                        id="rs_darwin_mode"
+                    )
+
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
 
@@ -123,6 +155,21 @@ class GlobalSettingsModal(ModalScreen):
             if hasattr(self.main_app, "config"):
                 self.query_one("#sel_market_freq").value = self.main_app.config.MARKET_FREQ
 
+        # Load DB toggles
+        if self.main_app:
+            self.query_one("#cb_db_windows").value = getattr(self.main_app, "db_log_windows", False)
+            self.query_one("#cb_db_alpha").value = getattr(self.main_app, "db_log_alpha", False)
+            self.query_one("#cb_db_darwin").value = getattr(self.main_app, "db_log_darwin", False)
+            self.query_one("#cb_db_ticks").value = getattr(self.main_app, "db_log_ticks", False)
+            self.query_one("#cb_db_context").value = getattr(self.main_app, "db_log_context", False)
+            self.query_one("#inp_tick_freq").value = str(getattr(self.main_app, "db_tick_freq", 1))
+            self.query_one("#cb_audit_enabled").value = getattr(self.main_app, "official_audit_enabled", True)
+            
+            # Darwin Mode
+            mode = self.main_app.config.DARWIN_MODE
+            if mode == "v2": self.query_one("#rb_v2").value = True
+            else: self.query_one("#rb_v1").value = True
+
         # Style button rows
         for row in self.query(".button_row"):
             row.styles.height = 3
@@ -174,6 +221,28 @@ class GlobalSettingsModal(ModalScreen):
                 self.main_app.auto_sync_risk = self.query_one("#cb_sync_risk").value
                 self.main_app.exec_safety_mode = self.query_one("#sel_exec_safety").value
                 self.main_app.total_risk_cap = float(self.query_one("#inp_risk_cap").value)
+                
+                # Save DB toggles
+                self.main_app.db_log_windows = self.query_one("#cb_db_windows").value
+                self.main_app.db_log_alpha   = self.query_one("#cb_db_alpha").value
+                self.main_app.db_log_darwin  = self.query_one("#cb_db_darwin").value
+                self.main_app.db_log_ticks   = self.query_one("#cb_db_ticks").value
+                self.main_app.db_log_context = self.query_one("#cb_db_context").value
+                
+                try: self.main_app.db_tick_freq = int(self.query_one("#inp_tick_freq").value)
+                except: pass
+                
+                self.main_app.official_audit_enabled = self.query_one("#cb_audit_enabled").value
+                
+                # Darwin Mode
+                rs = self.query_one("#rs_darwin_mode")
+                if rs.pressed_button:
+                    new_mode = "v2" if rs.pressed_button.id == "rb_v2" else "v1"
+                    if self.main_app.config.DARWIN_MODE != new_mode:
+                        self.main_app.config.DARWIN_MODE = new_mode
+                        if hasattr(self.main_app, "darwin"):
+                            self.main_app.darwin.mode = new_mode
+                            self.main_app.log_msg(f"🧬 Darwin AI Mode switched to [bold cyan]{new_mode.upper()}[/]")
                 
                 # Check for frequency change
                 if hasattr(self.main_app, "config"):

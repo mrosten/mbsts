@@ -22,6 +22,7 @@ try:
     from .risk import RiskManager, AlgorithmPortfolio
     from .broker import TradeExecutor
     from .scanners import ALGO_INFO
+    from history_manager import HistoryManager
     from .scanners import (
         NPatternScanner, FakeoutScanner, MomentumScanner, RsiScanner, TrapCandleScanner,
         MidGameScanner, LateReversalScanner, StaircaseBreakoutScanner, PostPumpScanner,
@@ -804,7 +805,7 @@ class PulseApp(TradeEngineMixin, App):
         self.app_start_time = time.time()
         
         # Initialize DARWIN AI Agent (v5.9.16)
-        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg)
+        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg, app=self)
         self.scanners["Darwin"] = self.darwin
         
         # Next-Strike Audit State
@@ -836,6 +837,23 @@ class PulseApp(TradeEngineMixin, App):
         # Adjustable global settings
         self.csv_log_freq = 15
         self.last_log_dump = 0
+        
+        # [NEW] SQLite Shared History Toggles (v5.9.16)
+        try:
+            self.history = HistoryManager(self.config.DB_PATH)
+            self.has_history = True
+        except:
+            self.has_history = False
+            
+        self.db_log_windows = False
+        self.db_log_alpha   = False
+        self.db_log_darwin  = False
+        self.db_log_ticks   = False
+        self.db_log_context = False
+        
+        # [NEW] Additional Control Settings (v5.9.16)
+        self.official_audit_enabled = True
+        self.db_tick_freq = 1
         
         # Persistent algorithm weights
         # Momentum Advanced Settings (v5.9)
@@ -989,6 +1007,11 @@ class PulseApp(TradeEngineMixin, App):
                     if "shield_time" in saved: self.shield_time = int(saved["shield_time"])
                     if "shield_reach" in saved: self.shield_reach = int(saved["shield_reach"])
                     if "market_freq" in saved: self.config.MARKET_FREQ = int(saved["market_freq"])
+                    if "official_audit_enabled" in saved: self.official_audit_enabled = bool(saved["official_audit_enabled"])
+                    if "db_tick_freq" in saved: self.db_tick_freq = int(saved["db_tick_freq"])
+                    if "darwin_mode" in saved:
+                        self.config.DARWIN_MODE = str(saved["darwin_mode"])
+                        self.darwin.mode = self.config.DARWIN_MODE
         except Exception: pass
 
         # Respect user-specified log directory from SimBroker (which is now session-specific)
@@ -1330,7 +1353,7 @@ document.addEventListener('DOMContentLoaded', function() {
             id="live_row",
             classes="live_row"
         )
-        yield RichLog(id="log_window", highlight=True, markup=True)
+        yield RichLog(id="log_window", highlight=True, markup=True, wrap=True)
 
     @on(Input.Submitted)
     def on_input_submitted(self, event: Input.Submitted):
@@ -1790,6 +1813,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     try: self.query_one("#rb_fixed").value = True
                     except: pass
 
+                # Restore DB toggles
+                self.db_log_windows = bool(s.get("db_log_windows", False))
+                self.db_log_alpha   = bool(s.get("db_log_alpha", False))
+                self.db_log_darwin  = bool(s.get("db_log_darwin", False))
+                self.db_log_ticks   = bool(s.get("db_log_ticks", False))
+                self.db_log_context = bool(s.get("db_log_context", False))
+
                 # self.log_msg("[dim]Settings restored from disk.[/]")
         except Exception as e:
             self.log_msg(f"[yellow]Could not restore settings: {e}[/]")
@@ -2107,7 +2137,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 "log_settings": self.log_settings,  # Persist log toggles
                 "volatility_scaling": self.volatility_scaling,
                 "conviction_scaling":  self.conviction_scaling,
-                "value_reentry": self.value_reentry
+                "value_reentry": self.value_reentry,
+                "db_log_windows": self.db_log_windows,
+                "db_log_alpha":   self.db_log_alpha,
+                "db_log_darwin":  self.db_log_darwin,
+                "db_log_ticks":   self.db_log_ticks,
+                "db_log_context": self.db_log_context,
+                "official_audit_enabled": self.official_audit_enabled,
+                "db_tick_freq": self.db_tick_freq,
+                "darwin_mode": self.config.DARWIN_MODE
             }
             
             # [SANITY] Try to get bet_mode from UI if possible (it's not a standard value/checkbox)

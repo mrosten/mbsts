@@ -14,6 +14,16 @@ except ImportError:
     from config import TradingConfig
     from market import calculate_rsi, calculate_bb, calculate_atr
 
+# Import the shared history manager from the parent poly_sim_shell directory
+try:
+    import sys
+    _p = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _p not in sys.path: sys.path.append(_p)
+    from history_manager import HistoryManager
+    HAS_HISTORY = True
+except ImportError:
+    HAS_HISTORY = False
+
 
 class TradeEngineMixin:
     """
@@ -676,7 +686,10 @@ class TradeEngineMixin:
                         if getattr(self, "app_active", False):
                             self.log_msg(f"[red]Audit Process Error: {e}[/]", level="ERROR")
 
-                asyncio.create_task(_perform_official_audit())
+                if getattr(self, "official_audit_enabled", True):
+                    asyncio.create_task(_perform_official_audit())
+                else:
+                    self.log_msg("[dim]Official Audit Skipped (Disabled in Settings)[/]", level="SYS")
 
             # [NEW] Capture current window strike if not set (for first window after boot)
             if not self.market_data.get("window_strike") and poly:
@@ -1008,7 +1021,7 @@ class TradeEngineMixin:
                 "down_ask": d["poly"]["down_ask"],
                 "atr_5m": getattr(self.market_data_manager, "atr_5m", 0),
                 "trend_1h": self.market_data_manager.trend_1h,
-                "odds_score": round((d["poly"]["up_bid"] - d["poly"]["down_bid"]) * 100, 1),
+                "odds_score": round((d["poly"]["up_bid"] - d["poly"]["down_bid"]) * 100, 1) if d["poly"]["up_bid"] is not None and d["poly"]["down_bid"] is not None else 0,
                 "rsi_1m": rsi,
                 "velocity": (d["cur"] - getattr(self.mom_analytics, "btc_pre_60s", 0)) if getattr(self.mom_analytics, "btc_pre_60s", None) is not None else 0,
                 "window_analytics": self.mom_analytics,
@@ -1083,11 +1096,23 @@ class TradeEngineMixin:
                     continue
                         
                 if "BET_" in str(res):
-                    log_tag = f"TRIGGERED_LOG_{name}"
-                    if log_tag not in self.skipped_logs:
-                        self.log_msg(f"TRIGGERED {name} | {res}", level="SCAN")
                         self.skipped_logs.add(log_tag)
                     
+            # --- [NEW] SQLite Granular Ticker Hook (Prop 4) ---
+            if getattr(self, "db_log_ticks", False) and hasattr(self, "history") and self.history:
+                # [FIX] Enforce user-defined tick frequency (v5.9.16)
+                if elapsed % getattr(self, "db_tick_freq", 1) == 0:
+                    try:
+                    self.history.record_tick(
+                        ts=int(now.timestamp()),
+                        btc_price=cur,
+                        up_price=d["poly"]["up_price"],
+                        down_price=d["poly"]["down_price"],
+                        up_bid=d["poly"]["up_bid"],
+                        down_bid=d["poly"]["down_bid"]
+                    )
+                except: pass
+            # --------------------------------------------------
                     sd = "UP" if "UP" in str(res) else "DOWN"
                     # Robust Duplicate Check: Match algorithm name and side
                     already_have = any(
@@ -1287,7 +1312,12 @@ class TradeEngineMixin:
                 self.market_data['btc_dyn_rng'] = max(_prices) - min(_prices)
 
             # Polymarket implied-probability skew (cents, positive = UP-favoured)
-            self.market_data['odds_score'] = round((self.market_data['up_bid'] - self.market_data['down_bid']) * 100, 1)
+            u_bid = self.market_data.get('up_bid')
+            d_bid = self.market_data.get('down_bid')
+            if u_bid is not None and d_bid is not None:
+                self.market_data['odds_score'] = round((u_bid - d_bid) * 100, 1)
+            else:
+                self.market_data['odds_score'] = 0
 
             # Trend strings from market_data_manager
             self.market_data['trend_1h'] = self.market_data_manager.trend_1h
@@ -1863,7 +1893,7 @@ class TradeEngineMixin:
                         "down_ask": dn_ask,
                         "atr_5m": getattr(self.market_data_manager, "atr_5m", None) or self.market_data.get("atr_5m", 0),
                         "trend_1h": self.market_data_manager.trend_1h,
-                        "odds_score": round((self.market_data.get("up_bid", 0) - self.market_data.get("down_bid", 0)) * 100, 1),
+                        "odds_score": round((self.market_data.get("up_bid", 0) - self.market_data.get("down_bid", 0)) * 100, 1) if self.market_data.get("up_bid") is not None and self.market_data.get("down_bid") is not None else 0,
                         "rsi_1m": rsi_1m,
                         "velocity": velocity,
                         "window_analytics": self.mom_analytics
@@ -2276,6 +2306,35 @@ class TradeEngineMixin:
                 "DOWN": sum(info.get("cost", 0)/info.get("entry", 0.5) for info in self.window_bets.values() if info.get("side") == "DOWN")
             }
         }
+        
+        # --- [NEW] SQLite Multi-Mode Logging Hooks (Props 1, 2, 5) ---
+        if hasattr(self, "history") and self.history:
+            try:
+                # Prop 1: Unified Event Log
+                if getattr(self, "db_log_windows", False):
+                    self.history.record_window(self.audit_buffer)
+                
+                # Prop 2: Alpha Ledger
+                if getattr(self, "db_log_alpha", False):
+                    for name, b in self.window_bets.items():
+                        if not b.get("closed"): continue
+                        self.history.record_alpha_trade(b)
+                
+                # Prop 5: Contextual Metadata Graph
+                if getattr(self, "db_log_context", False):
+                    ctx_data = {
+                        "slug": self.audit_buffer.get("slug"),
+                        "rsi": getattr(self, "market_data", {}).get("rsi", 50.0),
+                        "atr": getattr(self.market_data_manager, "atr_5m", 0),
+                        "trend": self.market_data_manager.trend_1h,
+                        "vol_up": self.market_data.get("vol_up", 0),
+                        "vol_dn": self.market_data.get("vol_dn", 0),
+                        "odds_entry": round((self.audit_buffer.get("open_price", 0.5) - (1.0 - self.audit_buffer.get("open_price", 0.5))) * 100, 1)
+                    }
+                    self.history.record_context(ctx_data)
+            except Exception as db_e:
+                 self.log_msg(f"[dim]DB Hook Error: {db_e}[/]", level="SYS")
+        # -------------------------------------------------------------
         
         
         # [FIXED] Removed redundant _add_risk_revenue(payout) call as it is already handled 

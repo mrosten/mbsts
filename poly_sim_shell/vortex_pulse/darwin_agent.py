@@ -147,9 +147,12 @@ class DarwinAgent:
         "Do NOT use external modules like 'pandas', 'numpy', 'scipy', etc. They are NOT installed."
     )
 
-    def __init__(self, mode: str = MODE_V1, log_fn=None):
+    def __init__(self, mode: str = MODE_V1, log_fn=None, app=None):
         _ensure_darwin_dirs()
-        self.mode = mode
+        self.app = app
+        self._mode = self.MODE_V1 # Initial default
+        self.mode = mode # Use setter for mapping
+        
         self.log_fn = log_fn or (lambda msg, **kw: print(f"[DARWIN] {msg}"))
         self.experiment_log = load_experiment_log()
         self.current_algo_code = load_current_algo()
@@ -175,6 +178,16 @@ class DarwinAgent:
             f"API: {'✅' if self._model else '❌ (check .env)'}",
             level="ADMIN"
         )
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, val):
+        if val == "v2": self._mode = self.MODE_V2
+        elif val == "v1": self._mode = self.MODE_V1
+        else: self._mode = val
 
     def test_connection(self):
         """Test the Gemini API connection manually."""
@@ -456,6 +469,13 @@ IMPORTANT: Use the JSON literal null (no quotes) for optional fields if not used
         }
         self.experiment_log.append(experiment)
         save_experiment_log(self.experiment_log)
+
+        # [NEW] SQLite Darwin Vault Hook (Prop 3)
+        if self.app and getattr(self.app, "db_log_darwin", False) and getattr(self.app, "history", None):
+            try:
+                self.app.history.record_darwin_vault(experiment)
+            except:
+                pass
 
         # Append to observations.md
         try:
