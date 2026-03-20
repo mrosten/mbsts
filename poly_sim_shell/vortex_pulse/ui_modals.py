@@ -98,11 +98,13 @@ class GlobalSettingsModal(ModalScreen):
                     yield RadioSet(
                         RadioButton("Observer (V1)", id="rb_v1"),
                         RadioButton("Experimenter (V2)", id="rb_v2"),
+                        RadioButton("Director (V3)", id="rb_v3", value=True),
                         id="rs_darwin_mode"
                     )
 
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
+                yield Button("CANCEL", id="btn_modal_cancel")
 
     def on_mount(self):
         self.styles.align = ("center", "middle")
@@ -209,6 +211,10 @@ class GlobalSettingsModal(ModalScreen):
     def open_value_reentry(self):
         if self.main_app:
             self.main_app.push_screen(ValueReentryModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_modal_cancel")
+    def action_cancel(self):
+        self.dismiss(False)
 
     @on(Button.Pressed, "#btn_modal_close")
     def close_modal(self):
@@ -4362,7 +4368,7 @@ class DarwinSettingsModal(ModalScreen):
         container.styles.background = "#1a1a1a"
         container.styles.border = ("thick", "#ff00ff")
         container.styles.padding = (1, 2)
-        container.styles.width = 80 
+        container.styles.width = 100
         container.styles.height = "80%"
         
         self.query_one("#modal_title").styles.text_align = "left"
@@ -4409,11 +4415,12 @@ class DarwinSettingsModal(ModalScreen):
                 chat_area.styles.margin = (0, 0, 1, 0)
                 
                 chat_log = self.query_one("#darwin_chat_log")
+                chat_log.styles.width = "100%"
                 chat_log.styles.height = "1fr"
                 chat_log.styles.scrollbar_gutter = "stable"
                 chat_log.styles.scrollbar_size = 1             # Thinner scrollbars
                 chat_log.styles.overflow_x = "hidden"         # Prevent horizontal scrollbars from covering text
-                chat_log.styles.padding = (0, 1, 1, 1)       # Top Right Bottom Left (Added bottom padding)
+                chat_log.styles.padding = (0, 3, 1, 1)       # Top Right Bottom Left (Increased right padding)
                 
                 input_row = self.query_one("#chat_input_row")
                 input_row.styles.height = 3
@@ -5030,3 +5037,94 @@ class ValueReentryModal(ModalScreen):
             except Exception as e:
                 self.main_app.log_msg(f"[red]Error saving Re-entry settings: {e}[/]")
         self.dismiss()
+
+
+class LogFilterModal(ModalScreen):
+    """A modal for managing console log categories and filtering modes."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.tags = ["SYS", "SCAN", "EXEC", "RSLT", "ERR", "INF", "MARKET", "VOLAT", "BIAS", "STATS"]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #00ffff]Console Log Filters[/]", id="modal_title")
+            
+            with Vertical(classes="settings_group", id="log_mode_group"):
+                yield Label("[bold]Filtering Mode:[/]")
+                with RadioSet(id="rs_log_mode"):
+                    yield RadioButton("Show All (No Filter)", id="rb_log_all", value=(self.main_app.log_display_mode == "ALL"))
+                    yield RadioButton("Hide Selected Tags", id="rb_log_hide", value=(self.main_app.log_display_mode == "HIDE"))
+                    yield RadioButton("Only Show Selected Tags", id="rb_log_only", value=(self.main_app.log_display_mode == "ONLY"))
+
+            yield Label("[bold]Select Categories:[/]")
+            with Container(id="log_tag_grid"):
+                for tag in self.tags:
+                    is_checked = tag in self.main_app.log_display_filter
+                    yield Checkbox(tag, id=f"cb_log_{tag.lower()}", value=is_checked)
+
+            with Horizontal(id="modal_buttons"):
+                yield Button("Apply", id="btn_save_logs", variant="primary")
+                yield Button("Cancel", id="btn_cancel_logs")
+
+    def on_mount(self) -> None:
+        self.styles.align = ("center", "middle")
+        
+        container = self.query_one("#modal_container")
+        container.styles.background = "#1a1a1a"
+        container.styles.border = ("thick", "#00ffff")
+        container.styles.padding = (1, 2)
+        container.styles.width = 50
+        container.styles.height = "auto"
+        container.styles.align = ("center", "middle")
+        
+        title = self.query_one("#modal_title")
+        title.styles.text_align = "center"
+        title.styles.width = "100%"
+        title.styles.margin = (0, 0, 1, 0)
+        
+        mode_group = self.query_one("#log_mode_group")
+        mode_group.styles.margin = (0, 0, 1, 0)
+        mode_group.styles.border = ("solid", "#333333")
+        mode_group.styles.padding = 1
+        
+        tag_grid = self.query_one("#log_tag_grid")
+        tag_grid.styles.height = "auto"
+        tag_grid.styles.border = ("solid", "#333333")
+        tag_grid.styles.padding = 1
+        
+        buttons = self.query_one("#modal_buttons")
+        buttons.styles.margin = (1, 0, 0, 0)
+        buttons.styles.align = ("center", "middle")
+        buttons.styles.width = "100%"
+
+    @on(Button.Pressed, "#btn_save_logs")
+    def action_save(self) -> None:
+        try:
+            # Update Mode
+            rs = self.query_one("#rs_log_mode")
+            if rs.pressed_button:
+                if rs.pressed_button.id == "rb_log_all": self.main_app.log_display_mode = "ALL"
+                elif rs.pressed_button.id == "rb_log_hide": self.main_app.log_display_mode = "HIDE"
+                elif rs.pressed_button.id == "rb_log_only": self.main_app.log_display_mode = "ONLY"
+
+            # Update Filter Set
+            new_filter = set()
+            for tag in self.tags:
+                if self.query_one(f"#cb_log_{tag.lower()}").value:
+                    new_filter.add(tag)
+            
+            self.main_app.log_display_filter = new_filter
+            self.main_app.save_settings()
+            
+            mode_str = self.main_app.log_display_mode
+            count = len(new_filter)
+            self.main_app.log_msg(f"[bold cyan]LOG FILTERS APPLIED[/]: Mode={mode_str}, Tags={count}", level="SYS")
+            self.dismiss(True)
+        except Exception as e:
+            self.main_app.log_msg(f"[red]Filter Save Error: {e}[/]")
+
+    @on(Button.Pressed, "#btn_cancel_logs")
+    def action_cancel(self) -> None:
+        self.dismiss(False)

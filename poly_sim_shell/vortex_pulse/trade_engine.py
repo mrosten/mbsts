@@ -244,6 +244,97 @@ class TradeEngineMixin:
         
         return True, final_bs, skepticism_penalty
 
+    # ===========================================================================
+    # DARWIN ORCHESTRATION HELPERS (Phase 2)
+    # ===========================================================================
+    def _assemble_darwin_system_config(self):
+        """Gather current bot settings for Darwin to analyze/adjust."""
+        scanner_to_cb = {
+            "MOM": "#cb_mom", "MM2": "#cb_mm2", "NIT": "#cb_nit", "CCO": "#cb_cco",
+            "BRI": "#cb_bri", "HDO": "#cb_hdo", "MOS": "#cb_mos", "STA": "#cb_sta",
+            "LAT": "#cb_lat", "STE": "#cb_ste", "GRI": "#cb_gri", "NPA": "#cb_npa",
+            "FAK": "#cb_fak", "ZSC": "#cb_zsc", "VSN": "#cb_vsn", "MEA": "#cb_mea",
+            "RSI": "#cb_rsi", "TRA": "#cb_tra", "MES": "#cb_mes", "POS": "#cb_pos",
+            "COB": "#cb_cob", "SLI": "#cb_sli", "VOL": "#cb_vol", "LIQ": "#cb_liq",
+            "SSC": "#cb_ssc", "ADT": "#cb_adt", "MID": "#cb_mid", "MIN": "#cb_min",
+            "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div",
+            "SSI": "#cb_ssi"
+        }
+        
+        active_scanners = []
+        try:
+            for sc_id, cb_id in scanner_to_cb.items():
+                try:
+                    if self.query_one(cb_id, Checkbox).value:
+                        active_scanners.append(sc_id)
+                except: pass
+                    
+            bet_size = float(self.query_one("#inp_amount").value)
+            tp_pct = float(self.query_one("#inp_tp").value) / 100.0
+            sl_pct = float(self.query_one("#inp_sl").value) / 100.0
+        except:
+            bet_size, tp_pct, sl_pct = 1.0, 0.95, 0.40
+
+        return {
+            "active_scanners": active_scanners,
+            "bet_size": bet_size,
+            "tp_pct": tp_pct,
+            "sl_pct": sl_pct,
+            "risk_cap": getattr(self, "total_risk_cap", 30.0),
+            "penalty_pct": getattr(self, "penalty_percentage", 0.20),
+            "darwin_mode": getattr(self.config, "DARWIN_MODE", "v1")
+        }
+
+    def _apply_darwin_system_actions(self, actions: list):
+        """Process suggested changes from Darwin's Command Bridge."""
+        if not isinstance(actions, list): return
+        
+        scanner_to_cb = {
+            "MOM": "#cb_mom", "MM2": "#cb_mm2", "NIT": "#cb_nit", "CCO": "#cb_cco",
+            "BRI": "#cb_bri", "HDO": "#cb_hdo", "MOS": "#cb_mos", "STA": "#cb_sta",
+            "LAT": "#cb_lat", "STE": "#cb_ste", "GRI": "#cb_gri", "NPA": "#cb_npa",
+            "FAK": "#cb_fak", "ZSC": "#cb_zsc", "VSN": "#cb_vsn", "MEA": "#cb_mea",
+            "RSI": "#cb_rsi", "TRA": "#cb_tra", "MES": "#cb_mes", "POS": "#cb_pos",
+            "COB": "#cb_cob", "SLI": "#cb_sli", "VOL": "#cb_vol", "LIQ": "#cb_liq",
+            "SSC": "#cb_ssc", "ADT": "#cb_adt", "MID": "#cb_mid", "MIN": "#cb_min",
+            "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div",
+            "SSI": "#cb_ssi"
+        }
+
+        
+        for act in actions:
+            a_type = act.get("type")
+            if a_type == "set_scanner":
+                sid = act.get("id", "").upper()
+                active = act.get("active", True)
+                cb_id = scanner_to_cb.get(sid)
+                if cb_id:
+                    def _do_cb():
+                        try:
+                            self.query_one(cb_id, Checkbox).value = active
+                        except: pass
+                    self.safe_call(_do_cb)
+                    self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Set {sid} to {'ACTIVE' if active else 'OFF'}", level="ADMIN")
+            
+            elif a_type == "set_risk":
+                def _do_risk():
+                    try:
+                        if "bet_size" in act:
+                            self.query_one("#inp_amount").value = f"{float(act['bet_size']):.2f}"
+                        if "tp_pct" in act:
+                            self.query_one("#inp_tp").value = f"{float(act['tp_pct'])*100:.0f}"
+                            self.committed_tp = float(act['tp_pct'])
+                        if "sl_pct" in act:
+                            self.query_one("#inp_sl").value = f"{float(act['sl_pct'])*100:.0f}"
+                            self.committed_sl = float(act['sl_pct'])
+                        if "total_risk_cap" in act:
+                            self.total_risk_cap = float(act['total_risk_cap'])
+                        self.save_settings()
+                    except: pass
+                self.safe_call(_do_risk)
+                self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Adjusted Risk Parameters", level="ADMIN")
+
+
     async def fetch_market_loop(self):
         if not getattr(self, "app_active", False): return
         if self.halted: return  # Bot frozen — bankroll exhausted
@@ -397,8 +488,8 @@ class TradeEngineMixin:
                 
                 # Elegant Resume Statement with Guess (if possible)
                 try:
-                    up_p = self.market_data.get("up_price", 0.5) * 100
-                    dn_p = self.market_data.get("down_price", 0.5) * 100
+                    up_p = (self.market_data.get("up_price") or 0.5) * 100
+                    dn_p = (self.market_data.get("down_price") or 0.5) * 100
                     guess = "UP" if up_p > dn_p else "DOWN"
                     self.log_msg(f"RESUME: Guess=[bold cyan]{guess}[/] (UP={up_p:.1f}¢ | DN={dn_p:.1f}¢)", level="SCAN")
                 except: pass
@@ -437,8 +528,18 @@ class TradeEngineMixin:
                 # 0. Settlement already triggered at rollover (lines 212-216)
                 self.audit_completed = False # Reset audit latch for new window
                 
-                # 1. Capture current window strike (will be compared at T+30 in NEXT window's audit)
-                self.market_data["window_strike"] = poly.get("p2b") if poly else None
+                # 1. Capture current window strike and fresh bids/asks for the briefing
+                if poly:
+                    self.market_data["window_strike"] = poly.get("p2b")
+                    self.market_data["up_bid"] = poly.get("up_bid", 0.5)
+                    self.market_data["down_bid"] = poly.get("down_bid", 0.5)
+                    self.market_data["up_ask"] = poly.get("up_ask", 0.51)
+                    self.market_data["down_ask"] = poly.get("down_ask", 0.51)
+                    # Re-calculate odds_score immediately so generate_window_briefing is fresh
+                    u, d = self.market_data["up_bid"], self.market_data["down_bid"]
+                    self.market_data["odds_score"] = round((u - d) * 100, 1)
+                else:
+                    self.market_data["window_strike"] = None
                 
                 # 2. Immediate Header (v5.9.8)
                 self.generate_window_briefing()
@@ -471,7 +572,7 @@ class TradeEngineMixin:
                     # TODO: Implement PnL correction logic here
 
             # 4. Background Audit at T+10-15s (User requested: 10-15 seconds into next window)
-            if 10 <= elapsed <= 15 and not getattr(self, "audit_completed", False) and getattr(self, "audit_buffer", None):
+            if 10 <= elapsed <= 15 and getattr(self, "official_audit_enabled", True) and not getattr(self, "audit_completed", False) and getattr(self, "audit_buffer", None):
                 self.audit_completed = True # Latch immediately to prevent double-fire
                 buf = self.audit_buffer
                 self.audit_buffer = None 
@@ -1049,6 +1150,21 @@ class TradeEngineMixin:
                 "btc_pct_delta": (d["cur"] - d["opn"]) / d["opn"] if d["opn"] > 0 else 0
             }
 
+            # --- [NEW] SQLite Granular Ticker Hook (Prop 4) ---
+            if getattr(self, "db_log_ticks", False) and hasattr(self, "history") and self.history:
+                if elapsed % getattr(self, "db_tick_freq", 1) == 0:
+                    try:
+                        self.history.record_tick(
+                            ts=int(now.timestamp()),
+                            btc_price=cur,
+                            up_price=d["poly"]["up_price"],
+                            down_price=d["poly"]["down_price"],
+                            up_bid=d["poly"]["up_bid"],
+                            down_bid=d["poly"]["down_bid"]
+                        )
+                    except: pass
+            # --------------------------------------------------
+
             # 1. Process All Scanners to find signals
             total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
             for name, sc in self.scanners.items():
@@ -1096,23 +1212,6 @@ class TradeEngineMixin:
                     continue
                         
                 if "BET_" in str(res):
-                        self.skipped_logs.add(log_tag)
-                    
-            # --- [NEW] SQLite Granular Ticker Hook (Prop 4) ---
-            if getattr(self, "db_log_ticks", False) and hasattr(self, "history") and self.history:
-                # [FIX] Enforce user-defined tick frequency (v5.9.16)
-                if elapsed % getattr(self, "db_tick_freq", 1) == 0:
-                    try:
-                    self.history.record_tick(
-                        ts=int(now.timestamp()),
-                        btc_price=cur,
-                        up_price=d["poly"]["up_price"],
-                        down_price=d["poly"]["down_price"],
-                        up_bid=d["poly"]["up_bid"],
-                        down_bid=d["poly"]["down_bid"]
-                    )
-                except: pass
-            # --------------------------------------------------
                     sd = "UP" if "UP" in str(res) else "DOWN"
                     # Robust Duplicate Check: Match algorithm name and side
                     already_have = any(
@@ -1353,8 +1452,8 @@ class TradeEngineMixin:
             await self._check_hdo()
             await self._check_whale_shield()
             self.update_balance_ui(); self.update_sell_buttons()
-            self.query_one("#p_up").update(f"{self.market_data['up_ask']*100:.1f}¢")
-            self.query_one("#p_down").update(f"{self.market_data['down_ask']*100:.1f}¢")
+            self.query_one("#p_up").update(f"{(self.market_data.get('up_ask') or 0.5)*100:.1f}¢")
+            self.query_one("#p_down").update(f"{(self.market_data.get('down_ask') or 0.5)*100:.1f}¢")
             self.query_one("#p_btc").update(f"${self.market_data['btc_price']:,.2f}")
             self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_1h}")
             self.query_one("#p_atr").update(f"ATR 5m: ${self.market_data_manager.atr_5m:.2f}")
@@ -2506,7 +2605,8 @@ class TradeEngineMixin:
                     "up_price_close": self.market_data.get("up_price", 0.5), # Final price at settlement
                     "tilt_next": getattr(self, "_pending_next_tilt", None),
                     "scanners_fired": scanners_fired,
-                    "pnl": net_pnl if 'net_pnl' in locals() else 0.0
+                    "pnl": net_pnl if 'net_pnl' in locals() else 0.0,
+                    "system_config": self._assemble_darwin_system_config()
                 }
                 # Run in background thread to avoid blocking pump loop
                 threading.Thread(target=self.darwin.on_window_end, args=(darwin_ctx,), daemon=True).start()

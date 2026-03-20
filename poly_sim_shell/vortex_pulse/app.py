@@ -44,7 +44,7 @@ try:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal, DarwinSettingsModal
+        MM2SettingsModal, DarwinSettingsModal, LogFilterModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -84,7 +84,7 @@ except ImportError:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal, DarwinSettingsModal
+        MM2SettingsModal, DarwinSettingsModal, LogFilterModal
     )
     from ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -636,6 +636,12 @@ class PulseApp(TradeEngineMixin, App):
                 self.log_msg(f"LOGGING {'ENABLED' if event.value else 'DISABLED'}: {settings_key.upper()}", level="SYS")
                 if not getattr(self, "is_initializing", False):
                     self.save_settings()
+        
+        elif cb_id == "cb_audit_enabled":
+            self.official_audit_enabled = event.value
+            if not getattr(self, "is_initializing", False):
+                self.save_settings()
+                self.log_msg(f"WINDDOW AUDIT {'ENABLED' if event.value else 'DISABLED'}", level="SYS")
 
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
@@ -1012,6 +1018,8 @@ class PulseApp(TradeEngineMixin, App):
                     if "darwin_mode" in saved:
                         self.config.DARWIN_MODE = str(saved["darwin_mode"])
                         self.darwin.mode = self.config.DARWIN_MODE
+                    if "log_display_mode" in saved: self.log_display_mode = str(saved["log_display_mode"])
+                    if "log_display_filter" in saved: self.log_display_filter = set(saved["log_display_filter"])
         except Exception: pass
 
         # Respect user-specified log directory from SimBroker (which is now session-specific)
@@ -1336,6 +1344,7 @@ document.addEventListener('DOMContentLoaded', function() {
             Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
             Checkbox("Whale Protect", value=False, id="cb_whale"),
             Checkbox("Bounce Entry", value=False, id="cb_bounce"),
+            Checkbox("Audit", value=self.official_audit_enabled, id="cb_audit_enabled"),
             id="settings_row",
             classes="live_row"
         )
@@ -1349,6 +1358,7 @@ document.addEventListener('DOMContentLoaded', function() {
             Checkbox("LIVE MODE", value=False, id="cb_live"),
             Input(placeholder="Command: e.g., lo=false", id="inp_cmd"),
             Button("🧬 AI HUB", id="btn_darwin_hub", variant="warning"),
+            Button("📜 Logs", id="btn_logs"),
             Button("⚙ Settings", id="btn_settings"),
             id="live_row",
             classes="live_row"
@@ -2092,6 +2102,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 "cb_hdo":        _cb("#cb_hdo", False),
                 "cb_one_trade":  _cb("#cb_one_trade", False),
                 "cb_bounce":     _cb("#cb_bounce", False),
+                "official_audit_enabled": _cb("#cb_audit_enabled", True),
                 "sl_plus_mode":  self.sl_plus_mode,
                 "grow_riskbankroll": getattr(self, "grow_riskbankroll", False),
                 "mom_buy_mode":  self.mom_buy_mode,
@@ -2145,6 +2156,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 "db_log_context": self.db_log_context,
                 "official_audit_enabled": self.official_audit_enabled,
                 "db_tick_freq": self.db_tick_freq,
+                "log_display_mode": self.log_display_mode,
+                "log_display_filter": list(self.log_display_filter),
                 "darwin_mode": self.config.DARWIN_MODE
             }
             
@@ -2461,6 +2474,8 @@ document.addEventListener('DOMContentLoaded', function() {
         bid = event.button.id
         if bid == "btn_settings":
             self.push_screen(GlobalSettingsModal(self))
+        elif bid == "btn_logs":
+            self.push_screen(LogFilterModal(self))
         elif bid == "btn_pre_up" or bid == "btn_pre_down":
             side = "UP" if "up" in bid else "DOWN"
             self.log_msg(f"[bold cyan]Admin:[/] Executing immediate Pre-Buy {side} for the next window...")
