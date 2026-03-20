@@ -98,6 +98,8 @@ class PulseLeanChart(Static):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.history = []
+        self.trigger_events = [] # [(elapsed, value, side, scanner_name)]
+        self.tilt_events = []    # [(elapsed, direction, magnitude)] — 52/48 tilt markers
         self.duration = 300 # Default to 5m
 
     def push_value(self, elapsed, value):
@@ -106,8 +108,22 @@ class PulseLeanChart(Static):
         self.history.append((elapsed, value))
         self.refresh()
 
+    def push_trigger(self, elapsed, value, side, scanner_name):
+        self.trigger_events.append((elapsed, value, side, scanner_name))
+        self.refresh()
+
+    def push_tilt(self, elapsed, direction, magnitude):
+        """Record a 52/48+ market tilt at the given elapsed time.
+        direction: 'UP' or 'DOWN'
+        magnitude: the dominant side's price in cents (e.g. 53)
+        """
+        self.tilt_events.append((elapsed, direction, magnitude))
+        self.refresh()
+
     def reset(self):
         self.history = []
+        self.trigger_events = []
+        self.tilt_events = []
         self.refresh()
 
     def render(self):
@@ -134,57 +150,71 @@ class PulseLeanChart(Static):
                 grid[mid_cy][cx] = (c_bits | (1 << dot_bit_map[mid_dr][dc]), p_bits)
 
         # 2. Plot Price History (Left-to-Right mapping)
-        if not self.history: return grid
-
-        # Ensure we always anchor the line to the left edge (px=0) if we have data
-        # If we started mid-window, we'll draw a horizontal line from the start
+        duration = getattr(self.app.config, "WINDOW_SECONDS", self.duration)
         points = self.history
         if points and points[0][0] > 0:
             points = [(0, points[0][1])] + points
 
         prev_px, prev_py = None, None
-        
-        # Determine the duration for the mapping
-        duration = getattr(self.app.config, "WINDOW_SECONDS", self.duration)
-        
         for elapsed, val in points:
-            # Map elapsed time to X-coordinate (0 to pixel_w)
             px = int((elapsed / duration) * (pixel_w - 1))
             px = max(0, min(px, pixel_w - 1))
-            
-            # Map price value to Y-coordinate (pixel_h to 0)
             py = int((1.0 - val) * (pixel_h - 1))
             py = max(0, min(py, pixel_h - 1))
             
             if prev_px is not None:
-                # Bresenham-ish simple line between points
-                dx = px - prev_px
-                dy = py - prev_py
+                dx, dy = px - prev_px, py - prev_py
                 steps = max(abs(dx), abs(dy))
                 for s in range(steps + 1):
-                    # Interpolate
                     interp_x = prev_px + int(s * dx / steps) if steps > 0 else px
                     interp_y = prev_py + int(s * dy / steps) if steps > 0 else py
-                    
                     cy, dr = interp_y // 4, interp_y % 4
                     cx, dc = interp_x // 2, interp_x % 2
                     if 0 <= cy < h and 0 <= cx < w:
                         c_bits, p_bits = grid[cy][cx]
                         grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
             else:
-                # Single dot for the first point
                 cy, dr = py // 4, py % 4
                 cx, dc = px // 2, px % 2
                 if 0 <= cy < h and 0 <= cx < w:
                     c_bits, p_bits = grid[cy][cx]
                     grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
-            
             prev_px, prev_py = px, py
-            
-        # 3. Build Rich Text output
+
+        # 3. Mark Trigger Pips for Console (v5.9.13)
+        # Store (x, y, style) for each trigger to overlay after the braille grid is built
+        console_triggers = {}
+        for elapsed, val, side, scanner in self.trigger_events:
+            cx = int((elapsed / duration) * (w - 1))
+            cy = int((1.0 - val) * (h - 1))
+            cx = max(0, min(cx, w - 1))
+            cy = max(0, min(cy, h - 1))
+            style = "bold #00ff00" if "UP" in side else "bold #ff0000"
+            console_triggers[(cx, cy)] = ("●", style)
+
+        # 3b. Mark Tilt Indicators — vertical stripe of arrows at tilt time
+        tilt_cols = {}  # cx -> (char, style)
+        for elapsed, direction, magnitude in self.tilt_events:
+            cx = int((elapsed / duration) * (w - 1))
+            cx = max(0, min(cx, w - 1))
+            char = "▲" if direction == "UP" else "▼"
+            style = "bold #00ffff" if direction == "UP" else "bold #ff00ff"
+            tilt_cols[cx] = (char, style)
+
+        # 4. Build Rich Text output
         output = Text()
         for y in range(h):
             for x in range(w):
+                if (x, y) in console_triggers:
+                    char, style = console_triggers[(x, y)]
+                    output.append(char, style=style)
+                    continue
+                # Tilt column: draw on every row
+                if x in tilt_cols:
+                    char, style = tilt_cols[x]
+                    output.append(char, style=style)
+                    continue
+
                 c_bits, p_bits = grid[y][x]
                 if p_bits > 0:
                     char = chr(0x2800 + (c_bits | p_bits))
@@ -198,6 +228,85 @@ class PulseLeanChart(Static):
                 output.append("\n")
                 
         return output
+
+    def save_graph_svg(self, path):
+        """Generates a high-quality SVG with Hover Tooltips (v5.9.13)."""
+        try:
+            img_w, img_h = 300, 150
+            pad = 20
+            duration = getattr(self.app.config, "WINDOW_SECONDS", 300)
+            
+            svg = [f'<svg width="{img_w + pad*2}" height="{img_h + pad*2}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">']
+            # Inline CSS for hover tooltips on trade dots
+            svg.append('<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>')
+            # Background
+            svg.append(f'<rect width="{img_w + pad*2}" height="{img_h + pad*2}" fill="#121212" />')
+            
+            # Grid Lines
+            for i in [2, 4, 5, 6, 8]:
+                y_val = i / 10.0
+                y_px = pad + int((1.0 - y_val) * (img_h - 1))
+                color = "#3C3C3C" if i == 5 else "#232323"
+                svg.append(f'<line x1="{pad}" y1="{y_px}" x2="{img_w + pad}" y2="{y_px}" stroke="{color}" stroke-width="1" />')
+            
+            mid_px = pad + int(0.5 * (img_w - 1))
+            svg.append(f'<line x1="{mid_px}" y1="{pad}" x2="{mid_px}" y2="{img_h + pad}" stroke="#232323" stroke-width="1" />')
+
+            # Price Line
+            points = self.history
+            if points:
+                if points[0][0] > 0: points = [(0, points[0][1])] + points
+                polyline_pts = []
+                for elapsed, val in points:
+                    x = pad + int((elapsed / duration) * (img_w - 1))
+                    y = pad + int((1.0 - val) * (img_h - 1))
+                    polyline_pts.append(f"{x},{y}")
+                svg.append(f'<polyline points="{" ".join(polyline_pts)}" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />')
+
+            # Tilt Indicators (52/48+) — vertical dashed lines with direction badge
+            for elapsed, direction, magnitude in self.tilt_events:
+                tx = pad + int((elapsed / duration) * (img_w - 1))
+                tilt_color = "#00FFFF" if direction == "UP" else "#FF00FF"
+                tilt_char = "▲" if direction == "UP" else "▼"
+                tilt_label = f"{tilt_char}{direction} {magnitude}¢"
+                svg.append(f'<line x1="{tx}" y1="{pad}" x2="{tx}" y2="{img_h + pad}" stroke="{tilt_color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">')
+                svg.append(f'  <title>Next window tilt: {tilt_label}</title>')
+                svg.append(f'</line>')
+                # Small badge at top of line
+                badge_x = min(tx + 2, img_w + pad - 50)
+                svg.append(f'<rect x="{badge_x - 1}" y="{pad}" width="{len(tilt_label)*6+4}" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="{tilt_color}" stroke-width="1"/>')
+                svg.append(f'<text x="{badge_x+1}" y="{pad + 9}" font-size="8" fill="{tilt_color}" font-family="monospace" font-weight="bold">{tilt_label}</text>')
+
+            # Trigger Pips (The "Smart Pips")
+            for i, (elapsed, val, side, scanner) in enumerate(self.trigger_events):
+                x = pad + int((elapsed / duration) * (img_w - 1))
+                y = pad + int((1.0 - val) * (img_h - 1))
+                color = "#00FF00" if "UP" in side else "#FF0000"
+                label = f"{scanner}: {side} @ {int(val*100)}¢"
+                # Tooltip box dimensions
+                tx = min(x + 6, img_w + pad - 80)  # keep tooltip inside SVG
+                ty = max(y - 18, pad)
+                tooltip_id = f"tip_{i}"
+                # The circle dot — native title for Firefox/basic hover
+                svg.append(f'<g class="trade-dot">')
+                svg.append(f'  <circle cx="{x}" cy="{y}" r="5" fill="{color}" stroke="#FFFFFF" stroke-width="1">')
+                svg.append(f'    <title>{label}</title>')
+                svg.append(f'  </circle>')
+                # Floating tooltip label shown on group hover
+                svg.append(f'  <g class="dot-tip" id="{tooltip_id}" opacity="0" style="pointer-events:none">')
+                svg.append(f'    <rect x="{tx-2}" y="{ty-10}" width="{len(label)*6+8}" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="{color}" stroke-width="1"/>')
+                svg.append(f'    <text x="{tx+2}" y="{ty}" font-size="9" fill="{color}" font-family="monospace">{label}</text>')
+                svg.append(f'  </g>')
+                svg.append(f'</g>')
+
+            svg.append('</svg>')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(svg))
+            return True
+        except Exception as e:
+            if hasattr(self, "app"): self.app.log_msg(f"SVG Save Error: {e}", level="ERROR")
+            return False
 
     def save_graph_image(self, path):
         """Rasterizes the internal history into a PNG image using Pillow."""
@@ -623,6 +732,8 @@ class PulseApp(TradeEngineMixin, App):
             "momentum_csv": True,
             "verification_html": True
         }
+        self.log_display_filter = set()
+        self.log_display_mode = "ALL"  # Modes: ALL, HIDE, ONLY
         
         # [REFACTORED LOG SETUP] - Moved to end of __init__ to handle session subfolders correctly.
         pass
@@ -756,6 +867,25 @@ class PulseApp(TradeEngineMixin, App):
             "penalty": 0.50
         }
         
+        # [NEW] Volatility-Based Sizing Scaling (v5.9.13)
+        self.volatility_scaling = {
+            "enabled": False,
+            "floor": 15.0,     # Below this, size is 0% (Hard Cutoff)
+            "ceiling": 40.0    # Above this, size is 100% (Plateau)
+        }
+        self.window_vol_mult = 1.0
+        self.window_vol_halt = False
+        
+        # [NEW] Value Re-entry (Round 2) Settings (v5.9.15)
+        self.value_reentry = {
+            "enabled": False,
+            "reset_lvl": 0.52,          # Max price (for UP) to count as "Neutral Reset"
+            "reconfirm_move": 0.02,     # Min bounce in ¢ to re-trigger
+            "reconfirm_time": 10,       # Window in seconds for the bounce move
+            "size_mult": 0.30,          # Reduced size for the second entry (30% default)
+            "gap": 0.05                 # Min ¢ difference from first entry
+        }
+        
         # Global Skepticism Premium Settings
         self.global_skeptic_odds = 0.05
         self.global_skeptic_guess = 0.03
@@ -819,22 +949,23 @@ class PulseApp(TradeEngineMixin, App):
                     if "mm2_adv_settings" in saved:
                         self.mm2_adv_settings.update(saved["mm2_adv_settings"])
 
-                    if "algo_enabled" in saved:
-                        # Will be applied during on_mount
-                        self.saved_algo_enabled = saved["algo_enabled"]
-                    self.auto_sync_risk = saved.get("auto_sync_risk", False)
-                    self.exec_safety_mode = saved.get("exec_safety_mode", "global_lock")
-                    self.total_risk_cap = float(saved.get("total_risk_cap", 30.0))
-                    self.shield_time = int(saved.get("shield_time", 45))
-                    self.shield_reach = int(saved.get("shield_reach", 5))
-                    if "trend_efficiency" in saved:
-                        self.trend_efficiency.update(saved["trend_efficiency"])
-                    if "conviction_scaling" in saved:
-                        self.conviction_scaling.update(saved["conviction_scaling"])
-                    if "market_freq" in saved:
-                        self.config.MARKET_FREQ = int(saved["market_freq"])
-                    if "log_settings" in saved:
-                        self.log_settings.update(saved["log_settings"])
+                    def _safe_update(attr, key):
+                        if key in saved:
+                            try: getattr(self, attr).update(saved[key])
+                            except: pass
+
+                    _safe_update("trend_efficiency", "trend_efficiency")
+                    _safe_update("conviction_scaling", "conviction_scaling")
+                    _safe_update("volatility_scaling", "volatility_scaling")
+                    _safe_update("value_reentry", "value_reentry")
+                    _safe_update("log_settings", "log_settings")
+
+                    if "auto_sync_risk" in saved: self.auto_sync_risk = bool(saved["auto_sync_risk"])
+                    if "exec_safety_mode" in saved: self.exec_safety_mode = str(saved["exec_safety_mode"])
+                    if "total_risk_cap" in saved: self.total_risk_cap = float(saved["total_risk_cap"])
+                    if "shield_time" in saved: self.shield_time = int(saved["shield_time"])
+                    if "shield_reach" in saved: self.shield_reach = int(saved["shield_reach"])
+                    if "market_freq" in saved: self.config.MARKET_FREQ = int(saved["market_freq"])
         except Exception: pass
 
         # Respect user-specified log directory from SimBroker (which is now session-specific)
@@ -861,6 +992,32 @@ class PulseApp(TradeEngineMixin, App):
         # 2. HTML Log
         self.html_log_file = os.path.join(log_dir, base_name_only + "_verification.html")
         if self.log_settings["verification_html"]:
+            # Build the JS snippet that inlines SVGs after page load so <title> tooltips work
+            svg_inline_js = """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('img.graph-img').forEach(function(img) {
+    var src = img.getAttribute('src');
+    if (!src || !src.endsWith('.svg')) return;
+    fetch(src)
+      .then(function(r) { return r.text(); })
+      .then(function(svgText) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'svg-wrapper';
+        wrapper.innerHTML = svgText;
+        var svgEl = wrapper.querySelector('svg');
+        if (svgEl) {
+          svgEl.setAttribute('class', 'graph-svg');
+          svgEl.style.cursor = 'pointer';
+          svgEl.addEventListener('click', function() { window.open(src); });
+          img.parentNode.replaceChild(wrapper, img);
+        }
+      })
+      .catch(function() {}); // Silently ignore fetch errors (e.g. file:// protocol)
+  });
+});
+</script>
+"""
             with open(self.html_log_file, "w", encoding="utf-8") as f:
                 f.write("<html><head><title>Vortex Pulse Verification Log</title>")
                 f.write("<style>body{font-family:sans-serif;background:#111;color:#eee;padding:20px;}")
@@ -871,13 +1028,22 @@ class PulseApp(TradeEngineMixin, App):
                 f.write("a{color:#00ffff;text-decoration:none;}a:hover{text-decoration:underline;}")
                 f.write(".UP{color:#00ff00;font-weight:bold;}.DOWN{color:#ff0000;font-weight:bold;}")
                 f.write(".discrepancy{background:#4d0000 !important;}")
-                f.write(".graph-img{max-width:200px;border:1px solid #444;transition:transform 0.2s;cursor:zoom-in;}")
-                f.write(".graph-img:hover{transform:scale(2.5);z-index:100;position:relative;}")
+                f.write(".graph-img{width:100%;max-width:350px;height:auto;border:1px solid #444;background:#121212;transition:transform 0.2s;}")
+                f.write(".graph-img:hover{transform:scale(1.8);z-index:100;position:relative;border-color:#00ffff;}")
                 f.write(".no-data{background:#2a2a2a;color:#888;padding:20px;text-align:center;border-radius:8px;margin:20px 0;}")
                 f.write(".algorithm-signals{background:#1a1a1a;border-bottom:2px solid #333;}")
                 f.write(".algorithm-signals td{padding:8px 10px;font-size:0.9em;color:#bbb;}")
                 f.write(".algorithm-signals strong{color:#00ffff;}")
-                f.write("</style></head><body>")
+                # SVG inline styles: makes the inlined svg scale and show tooltips properly
+                f.write(".svg-wrapper{display:inline-block;max-width:350px;width:100%;transition:transform 0.2s;position:relative;}")
+                f.write(".svg-wrapper:hover{transform:scale(1.8);z-index:100;}")
+                f.write(".graph-svg{width:100%;height:auto;border:1px solid #444;background:#121212;display:block;}")
+                f.write(".graph-svg:hover{border-color:#00ffff;}")
+                # Style for SVG circle tooltips so they appear on title hover
+                f.write(".graph-svg circle{cursor:crosshair;}")
+                f.write("</style>")
+                f.write(svg_inline_js)
+                f.write("</head><body>")
                 f.write("<h1>Vortex Pulse - Manual Verification Log</h1>")
                 f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
                 f.write("<table><thead><tr>")
@@ -890,6 +1056,8 @@ class PulseApp(TradeEngineMixin, App):
                 f.write("<th>Resolution</th>")
                 f.write("<th>Pulse Result</th>")
                 f.write("<th>Sync Status</th>")
+                f.write("<th>Invested ($)</th>")
+                f.write("<th>Payout ($)</th>")
                 f.write("<th>PnL ($)</th>")
                 f.write("<th>Balance ($)</th>")
                 f.write("<th>Graph</th>")
@@ -1241,6 +1409,28 @@ class PulseApp(TradeEngineMixin, App):
                         
             elif cmd == "analyze-pre":
                 self.analyze_pre_buy_conditions()
+            elif cmd.startswith("/hide ") or cmd.startswith("/only "):
+                parts = cmd.split(" ", 1)
+                mode = parts[0][1:].upper() # HIDE or ONLY
+                # Map common user terms to internal short labels
+                mapping = {
+                    "ADMIN": "SYS", "SYSTEM": "SYS", "SCANNER": "SCAN", "SCANNERS": "SCAN",
+                    "TRADE": "EXEC", "TRADES": "EXEC", "MONEY": "RSLT", "RESULT": "RSLT",
+                    "RESULTS": "RSLT", "ERROR": "ERR", "ERRORS": "ERR", "INFO": "INF",
+                    "VOL": "VOLAT", "VOLATILITY": "VOLAT", "SKEPTIC": "SYS"
+                }
+                raw_levels = [l.strip().upper() for l in parts[1].split(",")]
+                mapped_levels = [mapping.get(l, l) for l in raw_levels]
+                
+                self.log_display_filter = set(mapped_levels)
+                self.log_display_mode = mode
+                self.log_msg(f"LOG FILTER: {mode} mode active for {', '.join(mapped_levels)}", level="SYS")
+                
+            elif cmd == "/show all" or cmd == "/showall" or cmd == "/unfilter":
+                self.log_display_mode = "ALL"
+                self.log_display_filter = set()
+                self.log_msg("LOG FILTER: Showing ALL logs (Filter Disabled)", level="SYS")
+                
             elif cmd == "?":
                 self.push_screen(CommandHelpModal())
             elif cmd.startswith("risk_pct="):
@@ -1457,6 +1647,8 @@ class PulseApp(TradeEngineMixin, App):
                 # Assign to variables for engine access
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
                 self.global_skeptic_guess = float(s.get("inp_skeptic_guess", 0.03))
+                if "volatility_scaling" in s:
+                    self.volatility_scaling.update(s["volatility_scaling"])
                 self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
                 # self.total_risk_cap already handled above
                 self.exec_safety_mode = s.get("exec_safety_mode", "global_lock")
@@ -1572,6 +1764,8 @@ class PulseApp(TradeEngineMixin, App):
         
         if hasattr(self, "market_data_manager"):
             self.market_data_manager.stop()
+
+        self.save_settings()
 
         # Mark session as SETTLED on web dash
         try:
@@ -1709,11 +1903,22 @@ class PulseApp(TradeEngineMixin, App):
         elif short_lv == "STATS":   display_msg = f"[bold white]{prefix}{msg}[/]"
         else:                       display_msg = f"{prefix}{msg}" # Default INFO style
 
-        try:
-            self.query_one(RichLog).write(display_msg)
-        except:
-            # During shutdown or if UI is not ready, skip RichLog but still mirror to file
+        # [NEW] Display Filter Logic (Option 2)
+        should_display = True
+        if self.log_display_mode == "HIDE":
+            if short_lv in self.log_display_filter: should_display = False
+        elif self.log_display_mode == "ONLY":
+            if short_lv not in self.log_display_filter: should_display = False
+        
+        if not should_display:
+            # We still fall through to file logging below, but skip the RichLog write
             pass
+        else:
+            try:
+                self.query_one(RichLog).write(display_msg)
+            except:
+                # During shutdown or if UI is not ready, skip RichLog
+                pass
         
         # Mirror to console log file for persistence (pure ASCII scrubbing)
         import re
@@ -1787,10 +1992,14 @@ class PulseApp(TradeEngineMixin, App):
                 try: return self.query_one(wid).value
                 except: return default
 
+            def _si(wid, default=0):
+                try: return int(self.query_one(wid).value)
+                except: return default
+
             data = {
                 "scanner_weights": self.scanner_weights,
-                "shield_time": int(_v("#inp_shield_time", 45)),
-                "shield_reach": int(_v("#inp_shield_reach", 5)),
+                "shield_time": _si("#inp_shield_time", 45),
+                "shield_reach": _si("#inp_shield_reach", 5),
                 "total_risk_cap": getattr(self, "total_risk_cap", 30.0),
                 "inp_risk_alloc": _v("#inp_risk_alloc", "0.0"),
                 "inp_amount":    _v("#inp_amount",    "1.00"),
@@ -1848,7 +2057,10 @@ class PulseApp(TradeEngineMixin, App):
                 "exec_safety_mode": self.exec_safety_mode,
                 "trend_efficiency": self.trend_efficiency,
                 "market_freq": self.config.MARKET_FREQ,
-                "log_settings": self.log_settings  # Persist log toggles
+                "log_settings": self.log_settings,  # Persist log toggles
+                "volatility_scaling": self.volatility_scaling,
+                "conviction_scaling":  self.conviction_scaling,
+                "value_reentry": self.value_reentry
             }
             
             # [SANITY] Try to get bet_mode from UI if possible (it's not a standard value/checkbox)
@@ -1908,11 +2120,6 @@ class PulseApp(TradeEngineMixin, App):
             if getattr(self, "app_active", False):
                 self.safe_call(self.log_msg, f"[bold red]Live Wallet Init Error:[/] {e}", level="ERROR")
 
-    def on_unmount(self):
-        """Cleanup on app exit."""
-        self.app_active = False 
-        self.finalize_html_log()
-        self.save_settings()
 
     def finalize_html_log(self):
         # Use a latch to ensure we only write the closing tags once
@@ -1966,12 +2173,18 @@ class PulseApp(TradeEngineMixin, App):
         md = self.market_data
         is_live = self.query_one("#cb_live").value
         btn_su = self.query_one("#btn_sell_up"); btn_sd = self.query_one("#btn_sell_down")
+        
+        # Calculate counts for labels
+        up_cnt = len([i for i in self.window_bets.values() if i.get("side") == "UP" and not i.get("closed")])
+        dn_cnt = len([i for i in self.window_bets.values() if i.get("side") == "DOWN" and not i.get("closed")])
+
         if is_live:
-            btn_su.label = "SELL UP (LIVE)"; btn_sd.label = "SELL DN (LIVE)"
+            btn_su.label = f"SELL UP ({up_cnt} LIVE)" if up_cnt > 0 else "SELL UP"
+            btn_sd.label = f"SELL DN ({dn_cnt} LIVE)" if dn_cnt > 0 else "SELL DN"
         else:
             su = self.sim_broker.shares["UP"]; sd = self.sim_broker.shares["DOWN"]
-            btn_su.label = f"SELL UP\n(${su * md['up_bid']:.2f})" if su > 0 else "SELL UP"
-            btn_sd.label = f"SELL DN\n(${sd * md['down_bid']:.2f})" if sd > 0 else "SELL DN"
+            btn_su.label = f"SELL UP ({up_cnt})\n(${su * md['up_bid']:.2f})" if su > 0 else "SELL UP"
+            btn_sd.label = f"SELL DN ({dn_cnt})\n(${sd * md['down_bid']:.2f})" if sd > 0 else "SELL DN"
 
     # --- Trade engine methods are inherited from TradeEngineMixin ---
     # fetch_market_loop, _check_tpsl, _run_last_second_exit, update_timer,

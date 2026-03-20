@@ -6,7 +6,7 @@ from datetime import datetime
 from textual.screen import ModalScreen
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, Container
-from textual.widgets import Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, Select
+from textual.widgets import Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, Select, Collapsible
 from textual import on
 
 # Handle imports for both package and direct execution
@@ -27,31 +27,43 @@ class GlobalSettingsModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
             yield Static("[bold #00ffff]Global Settings[/]", id="modal_title")
-            with Horizontal(id="modal_csv_freq"):
-                yield Label("CSV Log Freq (s):", id="lbl_csv_freq")
-                yield Input(placeholder="15", id="inp_csv_freq")
-            with Horizontal(id="modal_sync_risk"):
-                yield Label("Full Wallet Sync:", id="lbl_sync_risk")
-                yield Checkbox(id="cb_sync_risk")
-            with Horizontal(id="modal_exec_safety"):
-                yield Label("Safety Mode:", id="lbl_exec_safety")
-                yield Select([
-                    ("Global Lock", "global_lock"),
-                    ("Side Lock", "side_lock"),
-                    ("Unrestricted", "unrestricted"),
-                    ("Risk Cap", "risk_cap"),
-                    ("Dynamic", "dynamic"),
-                    ("Original (v5bu6)", "original")
-                ], id="sel_exec_safety", value="global_lock")
-            with Horizontal(id="modal_market_freq"):
-                yield Label("Market Freq (m):", id="lbl_market_freq")
-                yield Select([("5 Min", 5), ("15 Min", 15)], id="sel_market_freq", value=5)
-            with Horizontal(id="modal_risk_cap"):
-                yield Label("Total Risk Cap ($):", id="lbl_risk_cap")
-                yield Input(placeholder="30.00", id="inp_risk_cap")
-            with Horizontal(id="modal_trend_eff"):
-                yield Button("TREND EFFICIENCY", id="btn_trend_eff", variant="warning")
-                yield Button("CONVICTION SCALING", id="btn_conviction_scaling", variant="success")
+            
+            with Collapsible(title="System & Logging", id="gp_system", classes="settings_group"):
+                with Horizontal(classes="setting_row"):
+                    yield Label("CSV Log Freq (s):", classes="setting_label")
+                    yield Input(placeholder="15", id="inp_csv_freq", classes="setting_input")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Full Wallet Sync:", classes="setting_label")
+                    yield Checkbox(id="cb_sync_risk")
+            
+            with Collapsible(title="Trading & Risk Caps", id="gp_trading", classes="settings_group"):
+                with Horizontal(classes="setting_row"):
+                    yield Label("Safety Mode:", classes="setting_label")
+                    yield Select([
+                        ("Global Lock", "global_lock"),
+                        ("Side Lock", "side_lock"),
+                        ("Unrestricted", "unrestricted"),
+                        ("Risk Cap", "risk_cap"),
+                        ("Dynamic", "dynamic"),
+                        ("Original (v5bu6)", "original")
+                    ], id="sel_exec_safety", value="global_lock", classes="setting_select")
+                
+                with Horizontal(classes="setting_row"):
+                    yield Label("Market Freq (m):", classes="setting_label")
+                    yield Select([("5 Min", 5), ("15 Min", 15)], id="sel_market_freq", value=5, classes="setting_select")
+                
+                with Horizontal(classes="setting_row"):
+                    yield Label("Total Risk Cap ($):", classes="setting_label")
+                    yield Input(placeholder="30.00", id="inp_risk_cap", classes="setting_input")
+
+            with Collapsible(title="Advanced Strategy Modules", id="gp_advanced", classes="sub_modal_group"):
+                with Horizontal(classes="button_row"):
+                    yield Button("TREND EFFICIENCY", id="btn_trend_eff", variant="warning")
+                    yield Button("CONVICTION", id="btn_conviction_scaling", variant="success")
+                with Horizontal(classes="button_row"):
+                    yield Button("VOLATILITY SCALING", id="btn_vol_scaling", variant="default")
+                    yield Button("VALUE RE-ENTRY (RD2)", id="btn_value_reentry", variant="default")
+            
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_modal_close", variant="primary")
 
@@ -59,10 +71,10 @@ class GlobalSettingsModal(ModalScreen):
         self.styles.align = ("center", "middle")
         
         container = self.query_one("#modal_container")
-        container.styles.background = "#222222"
+        container.styles.background = "#1a1a1a"
         container.styles.border = ("thick", "#00ffff")
         container.styles.padding = (1, 2)
-        container.styles.width = 40
+        container.styles.width = 54
         container.styles.height = "auto"
         container.styles.align = ("center", "middle")
         
@@ -70,21 +82,34 @@ class GlobalSettingsModal(ModalScreen):
         self.query_one("#modal_title").styles.text_align = "center"
         self.query_one("#modal_title").styles.width = "100%"
         
-        row = self.query_one("#modal_csv_freq")
-        row.styles.height = 3
-        row.styles.align = ("center", "middle")
-        row.styles.margin = (0, 0, 2, 0)
-        
-        self.query_one("#inp_csv_freq").styles.width = 10
-        self.query_one("#lbl_csv_freq").styles.margin = (1, 1, 0, 0)
+        # Style collapsibles
+        for c in self.query("Collapsible"):
+            c.styles.margin = (0, 0, 1, 0)
+            # Remove default collapsible borders if they are too noisy
+            # c.styles.border = ("solid", "#333333")
+            
+        # Style rows and labels
+        for row in self.query(".setting_row"):
+            row.styles.height = 3
+            row.styles.align = ("left", "middle")
+            row.styles.width = "100%"
+            row.styles.margin = (0, 0)
+            
+        for label in self.query(".setting_label"):
+            label.styles.width = 24
+            label.styles.content_align = ("left", "middle")
+            label.styles.margin = (0, 1, 0, 1) # Removed top margin for better vertical centering
+            
+        # Style inputs and selects
+        for widget in self.query(".setting_input, .setting_select"):
+            widget.styles.width = 20
+            widget.styles.height = 3 # Increased from 1 to fix Select rendering issues
+            
+        self.query_one("#inp_csv_freq").styles.width = 8
+        self.query_one("#inp_risk_cap").styles.width = 12
         
         if self.main_app and hasattr(self.main_app, "csv_log_freq"):
             self.query_one("#inp_csv_freq").value = str(self.main_app.csv_log_freq)
-        
-        row_sync = self.query_one("#modal_sync_risk")
-        row_sync.styles.height = 3
-        row_sync.styles.align = ("center", "middle")
-        self.query_one("#lbl_sync_risk").styles.margin = (1, 1, 0, 0)
         
         if self.main_app:
             self.query_one("#cb_sync_risk").value = getattr(self.main_app, "auto_sync_risk", False)
@@ -93,37 +118,22 @@ class GlobalSettingsModal(ModalScreen):
             if hasattr(self.main_app, "config"):
                 self.query_one("#sel_market_freq").value = self.main_app.config.MARKET_FREQ
 
-        # Size and style for the new rows
-        for row_id in ["#modal_exec_safety", "#modal_risk_cap"]:
-            row = self.query_one(row_id)
+        # Style button rows
+        for row in self.query(".button_row"):
             row.styles.height = 3
             row.styles.align = ("center", "middle")
-            row.styles.margin = (0, 0, 1, 0)
-        
-        self.query_one("#lbl_exec_safety").styles.margin = (1, 1, 0, 0)
-        self.query_one("#sel_exec_safety").styles.width = 20
-        self.query_one("#lbl_risk_cap").styles.margin = (1, 1, 0, 0)
-        self.query_one("#inp_risk_cap").styles.width = 10
-
-        row_freq = self.query_one("#modal_market_freq")
-        row_freq.styles.height = 3
-        row_freq.styles.align = ("center", "middle")
-        self.query_one("#lbl_market_freq").styles.margin = (1, 1, 0, 0)
-        self.query_one("#sel_market_freq").styles.width = 15
-
-        row_eff = self.query_one("#modal_trend_eff")
-        row_eff.styles.height = 3
-        row_eff.styles.align = ("center", "middle")
-        row_eff.styles.margin = (0, 0, 1, 0)
-        self.query_one("#btn_trend_eff").styles.width = 20
-        self.query_one("#btn_trend_eff").styles.margin = (0, 1)
-        self.query_one("#btn_conviction_scaling").styles.width = 20
-        self.query_one("#btn_conviction_scaling").styles.margin = (0, 1)
+            row.styles.width = "100%"
+            
+        self.query_one("#btn_trend_eff").styles.width = 22
+        self.query_one("#btn_conviction_scaling").styles.width = 22
+        self.query_one("#btn_vol_scaling").styles.width = 22
+        self.query_one("#btn_value_reentry").styles.width = 22
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
         footer.styles.align = ("center", "middle")
         footer.styles.width = "100%"
+        footer.styles.margin = (1, 0, 0, 0)
 
     def action_dismiss(self):
         self.close_modal()
@@ -137,6 +147,16 @@ class GlobalSettingsModal(ModalScreen):
     def open_conviction_scaling(self):
         if self.main_app:
             self.main_app.push_screen(ConvictionScalingModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_vol_scaling")
+    def open_vol_scaling(self):
+        if self.main_app:
+            self.main_app.push_screen(VolatilityScalingModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_value_reentry")
+    def open_value_reentry(self):
+        if self.main_app:
+            self.main_app.push_screen(ValueReentryModal(self.main_app))
 
     @on(Button.Pressed, "#btn_modal_close")
     def close_modal(self):
@@ -288,68 +308,53 @@ class AlgoInfoModal(ModalScreen):
                     yield Input(placeholder="Time 3", id="inp_mos_t3")
                     yield Input(placeholder="Diff 3", id="inp_mos_d3")
             elif self.algo_id in ["MOM", "MM2"]:
-                # Enhanced MOM/MM2 settings section with better spacing
                 with Vertical(id="modal_momentum_settings", classes="setting_section"):
                     yield Static(f"[bold #00ff88]{self.algo_id} Strategy[/]", classes="section_title")
                     yield Static("Configure entry timing and threshold behavior for momentum-based trading.", classes="help_text")
                     
-                    # Trading Mode Section
-                    with Vertical(classes="mode_section"):
-                        yield Static("🎯 Trading Mode", classes="subsection_title")
-                        with Horizontal(id="modal_mom_row1", classes="spaced_row"):
-                            yield Label("Mode:", id="lbl_mom_mode", classes="field_label")
-                            
-                            # Define modes based on algorithm
-                            if self.algo_id == "MM2":
-                                modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
-                            else:
-                                modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
-                            
-                            # Initial value based on scanner
-                            scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
-                            mom = self.main_app.scanners.get(scanner_key)
-                            initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
-                            
-                            yield Select(modes, value=initial_mode, id="sel_mom_mode", classes="mode_select")
-                        
-                        # Mode explanation box
-                        with Vertical(id="modal_mode_explanation", classes="explanation_box"):
-                            yield Static("", id="lbl_mode_explanation", classes="mode_info_box")
+                    # --- Trading Mode ---
+                    yield Static("[bold #aaaaaa]🎯 Trading Mode[/]", classes="subsection_title")
+                    with Horizontal(id="modal_mom_row1", classes="spaced_row"):
+                        yield Label("Mode:", classes="field_label")
+                        if self.algo_id == "MM2":
+                            modes = [("VECTOR", "VECTOR"), ("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                        else:
+                            modes = [("TIME", "TIME"), ("PRICE", "PRICE"), ("DURATION", "DURATION")]
+                        scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
+                        mom = self.main_app.scanners.get(scanner_key)
+                        initial_mode = getattr(mom, "mode", "TIME" if self.algo_id == "MOM" else "VECTOR")
+                        yield Select(modes, value=initial_mode, id="sel_mom_mode", classes="mode_select")
                     
-                    # Threshold Section
-                    with Vertical(classes="threshold_section"):
-                        yield Static("⚡ Entry Thresholds", classes="subsection_title")
-                        yield Static("Price thresholds that trigger buy signals. Higher values = more selective entries.", classes="help_text")
-                        
-                        with Horizontal(id="modal_mom_threshold", classes="spaced_row"):
-                            yield Label("Threshold (¢):", id="lbl_mom_threshold", classes="field_label")
-                            yield Input(placeholder="60", id="inp_mom_threshold", classes="threshold_input")
-                        
-                        # Wait time for TIME mode
-                        with Horizontal(id="modal_mom_wait_time", classes="spaced_row"):
-                            yield Label("Wait Time (s):", id="lbl_mom_duration", classes="field_label")
-                            yield Input(placeholder="10", id="inp_mom_duration", classes="time_input")
+                    with Vertical(id="modal_mode_explanation"):
+                        yield Static("", id="lbl_mode_explanation")
                     
-                    # Buy Mode Section
-                    with Vertical(classes="buymode_section"):
-                        yield Static("💰 Buy Mode Options", classes="subsection_title")
-                        with Vertical(id="modal_mom_buymode_grid", classes="buymode_grid"):
-                            with Horizontal(classes="buymode_row"):
-                                yield Checkbox(label="STN", value=True, id="cb_mom_std", classes="mode_checkbox")
-                                yield Static("Standard - Threshold/time signals", classes="mode_desc")
-                            with Horizontal(classes="buymode_row"):
-                                yield Checkbox(label="PBN", value=False, id="cb_mom_pre", classes="mode_checkbox")
-                                yield Static("Pre-Buy - Prediction-based at T-15s", classes="mode_desc")
-                            with Horizontal(classes="buymode_row"):
-                                yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid", classes="mode_checkbox")
-                                yield Static("Hybrid - Pre-buys on strong leads", classes="mode_desc")
-                            with Horizontal(classes="buymode_row"):
-                                yield Checkbox(label="ADV", value=False, id="cb_mom_adv", classes="mode_checkbox")
-                                yield Static("Advanced - Dynamic ATR tiers", classes="mode_desc")
+                    # --- Entry Thresholds ---
+                    yield Static("[bold #aaaaaa]⚡ Entry Thresholds[/]", classes="subsection_title")
+                    with Horizontal(id="modal_mom_threshold", classes="spaced_row"):
+                        yield Label("Threshold (¢):", classes="field_label")
+                        yield Input(placeholder="60", id="inp_mom_threshold")
+                    with Horizontal(id="modal_mom_wait_time", classes="spaced_row"):
+                        yield Label("Wait Time (s):", classes="field_label")
+                        yield Input(placeholder="10", id="inp_mom_duration")
                     
-                    # Advanced Settings Button
-                    with Horizontal(id="modal_mom_adv_btn", classes="button_row"):
-                        yield Button("⚙️ CONFIGURE ADVANCED", id="btn_mom_adv", variant="warning", classes="adv_button")
+                    # --- Buy Mode ---
+                    yield Static("[bold #aaaaaa]💰 Buy Mode[/]", classes="subsection_title")
+                    with Horizontal(classes="buymode_row"):
+                        yield Checkbox(label="STN", value=True, id="cb_mom_std")
+                        yield Static("Standard - Threshold/time signals", classes="mode_desc")
+                    with Horizontal(classes="buymode_row"):
+                        yield Checkbox(label="PBN", value=False, id="cb_mom_pre")
+                        yield Static("Pre-Buy - Prediction at T-15s", classes="mode_desc")
+                    with Horizontal(classes="buymode_row"):
+                        yield Checkbox(label="HBR", value=False, id="cb_mom_hybrid")
+                        yield Static("Hybrid - Pre-buys on strong leads", classes="mode_desc")
+                    with Horizontal(classes="buymode_row"):
+                        yield Checkbox(label="ADV", value=False, id="cb_mom_adv")
+                        yield Static("Advanced - Dynamic ATR tiers", classes="mode_desc")
+                    
+                    # --- Advanced Button ---
+                    with Horizontal(id="modal_mom_adv_btn"):
+                        yield Button("⚙️ CONFIGURE ADVANCED", id="btn_mom_adv", variant="warning")
             elif self.algo_id == "NIT":
                 with Horizontal(id="modal_nit_row1"):
                     yield Label("Time Cutoff (s):", id="lbl_nit_cutoff")
@@ -382,9 +387,11 @@ class AlgoInfoModal(ModalScreen):
         container.styles.background = "#222222"
         container.styles.border = ("thick", "cyan")
         container.styles.padding = (1, 2)
-        container.styles.width = 62
+        container.styles.width = 70
         container.styles.height = "auto"
-        container.styles.max_height = "90vh"
+        container.styles.max_height = "85vh"
+        container.styles.overflow_y = "auto"
+        container.styles.scrollbar_gutter = "stable"
         container.styles.align = ("center", "middle")
         
         self.query_one("#modal_title").styles.margin = (0, 0, 1, 0)
@@ -396,10 +403,11 @@ class AlgoInfoModal(ModalScreen):
         self.query_one("#modal_body").styles.width = "100%"
 
         row_w = self.query_one("#modal_algo_weight")
-        row_w.styles.height = 3
+        row_w.styles.height = "auto"
+        row_w.styles.min_height = 4
         row_w.styles.align = ("center", "middle")
-        row_w.styles.margin = (0, 0, 0, 0)
-        row_w.styles.border = ("ascii", "#333333")
+        row_w.styles.margin = (0, 0, 1, 0)
+        row_w.styles.border = ("ascii", "#444444")
         self.query_one("#inp_algo_weight").styles.width = 10
         
         if self.main_app:
@@ -427,60 +435,61 @@ class AlgoInfoModal(ModalScreen):
                 if hasattr(moshe, "t3"): self.query_one("#inp_mos_t3").value = str(moshe.t3)
                 if hasattr(moshe, "d3"): self.query_one("#inp_mos_d3").value = str(moshe.d3)
         elif self.algo_id in ["MOM", "MM2"]:
-            for row_id in ["#modal_mom_row1", "#modal_mom_threshold"]:
-                row = self.query_one(row_id)
-                row.styles.height = "auto"
-                row.styles.align = ("center", "middle")
-                row.styles.margin = (0, 0, 1, 0)
+            # Style the section container
+            sec = self.query_one("#modal_momentum_settings")
+            sec.styles.border = ("ascii", "#333333")
+            sec.styles.padding = (1, 1)
+            sec.styles.margin = (0, 0, 1, 0)
+            sec.styles.height = "auto"
 
-            # Buy Mode 2x2 Grid Layout (v5.9.2)
-            grid = self.query_one("#modal_mom_buymode_grid")
-            grid.styles.height = "auto"
-            grid.styles.align = ("center", "middle")
-            # Style the new layout elements
-            for section in self.query(".mode_section, .threshold_section, .buymode_section"):
-                section.styles.margin = (1, 0)
-                section.styles.padding = (1, 1)
-            
             # Style explanation box
-            exp_box = self.query_one("#modal_mode_explanation")
-            exp_box.styles.background = "#002233"
-            exp_box.styles.border = ("solid", "#004466")
-            exp_box.styles.padding = (1, 1)
-            exp_box.styles.margin = (1, 0)
-            
+            try:
+                exp_box = self.query_one("#modal_mode_explanation")
+                exp_box.styles.background = "#001a26"
+                exp_box.styles.border = ("solid", "#004466")
+                exp_box.styles.padding = (0, 1)
+                exp_box.styles.margin = (0, 0, 1, 0)
+                exp_box.styles.height = "auto"
+                exp_box.styles.min_height = 5
+                
+                explanation = self.query_one("#lbl_mode_explanation")
+                explanation.styles.width = "100%"
+                explanation.styles.height = "auto"
+                explanation.styles.content_align = ("center", "middle")
+            except: pass
+
             # Style rows
-            for row in self.query(".spaced_row"):
-                row.styles.margin = (1, 0)
+            for row in self.query(".spaced_row, .buymode_row"):
+                row.styles.height = 3
+                row.styles.margin = (0, 0)
                 row.styles.align = ("left", "middle")
             
-            # Style inputs
-            self.query_one("#sel_mom_mode").styles.width = 20
-            self.query_one("#inp_mom_duration").styles.width = 6
+            # Style labels
+            for label in self.query(".field_label"):
+                label.styles.width = 18
+                label.styles.content_align = ("left", "middle")
+            
+            # Size inputs and selects
+            self.query_one("#sel_mom_mode").styles.width = 22
+            self.query_one("#sel_mom_mode").styles.height = 3
+            self.query_one("#inp_mom_duration").styles.width = 8
             self.query_one("#inp_mom_threshold").styles.width = 8
             
-            # Style buy mode rows
-            for row in self.query(".buymode_row"):
-                row.styles.margin = (1, 0)
-                row.styles.padding = (1, 0)
-                row.styles.align = ("left", "middle")
-            
-            # Style checkboxes
+            # Style checkboxes and descriptions
             for cbid in ["#cb_mom_std", "#cb_mom_pre", "#cb_mom_hybrid", "#cb_mom_adv"]:
-                cb = self.query_one(cbid)
-                cb.styles.margin = (0, 1, 0, 0)
-            
-            # Style descriptions
+                try: self.query_one(cbid).styles.margin = (0, 1, 0, 0)
+                except: pass
             for desc in self.query(".mode_desc"):
                 desc.styles.color = "#888888"
                 desc.styles.text_style = "italic"
-                desc.styles.margin = (0, 0, 0, 1)
 
-            # Style the advanced button
-            abt = self.query_one("#modal_mom_adv_btn")
-            abt.styles.align = ("center", "middle")
-            abt.styles.width = "100%"
-            abt.styles.margin = (1, 0, 0, 0)
+            # Advanced button
+            try:
+                self.query_one("#modal_mom_adv_btn").styles.height = 3
+                self.query_one("#modal_mom_adv_btn").styles.align = ("center", "middle")
+                self.query_one("#modal_mom_adv_btn").styles.margin = (1, 0, 0, 0)
+                self.query_one("#btn_mom_adv").styles.width = 26
+            except: pass
 
             if self.main_app:
                 scanner_key = "Momentum" if self.algo_id == "MOM" else "MM2"
@@ -490,7 +499,6 @@ class AlgoInfoModal(ModalScreen):
                     self.query_one("#inp_mom_threshold").value = str(int(getattr(mom, "threshold", 0.6) * 100))
                     self.query_one("#inp_mom_duration").value = str(getattr(mom, "duration", 10))
 
-            # Set Buy Mode checkboxes from app state
             if self.main_app:
                 m = self.main_app.mom_buy_mode
                 try: self.query_one("#cb_mom_std").value = (m == "STD")
@@ -812,15 +820,13 @@ class MOMExpertModal(ModalScreen):
                     yield Button("[VOL SHIELD]", id="btn_preset_vol", variant="success")
                     yield Button("[ULTRA PRE]", id="btn_preset_omega", variant="error")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("1. Pre-Buy Mode Overrides", classes="exp_sec_title")
+                with Collapsible(title="1. Pre-Buy Mode Overrides", id="exp_coll_1", classes="exp_section"):
                     yield Static("Pre-buy fires at T-15s when ATR ≥ floor (Section 4).", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Checkbox(label="PBN on Stable (Aggro)", value=self.s["auto_pbn_stable"], id="exp_over_pbn")
                         yield Checkbox(label="STN on Chaos (Safe)", value=self.s["auto_stn_chaos"], id="exp_over_stn")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("2. ATR Tier Boundaries ($)", classes="exp_sec_title")
+                with Collapsible(title="2. ATR Tier Boundaries ($)", id="exp_coll_2", classes="exp_section"):
                     yield Static("BTC 5m ATR thresholds that define Stable / Neutral / Chaos regime.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Stable Ceiling ($):")
@@ -828,8 +834,7 @@ class MOMExpertModal(ModalScreen):
                         yield Label("Chaos Floor ($):")
                         yield Input(placeholder="40", value=str(self.s["atr_high"]), id="exp_atr_high")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("3. Entry Threshold Offsets (¢)", classes="exp_sec_title")
+                with Collapsible(title="3. Entry Threshold Offsets (¢)", id="exp_coll_3", classes="exp_section"):
                     yield Static("Added to base threshold based on current ATR tier.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Stable Offset (¢):")
@@ -837,8 +842,7 @@ class MOMExpertModal(ModalScreen):
                         yield Label("Chaos Offset (¢):")
                         yield Input(placeholder="10", value=str(self.s["chaos_offset"]), id="exp_off_chaos")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("4. Pre-Buy Gate & Trend Filters", classes="exp_sec_title")
+                with Collapsible(title="4. Pre-Buy Gate & Trend Filters", id="exp_coll_4", classes="exp_section"):
                     yield Static("Pre-buy is blocked if ATR < floor. Trend bonus widens needed lead.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Min ATR Floor ($):")
@@ -849,8 +853,7 @@ class MOMExpertModal(ModalScreen):
                         yield Label("Decisive Lead (¢):")
                         yield Input(placeholder="2", value=str(int(self.s.get("decisive_diff", 0.02) * 100)), id="exp_decisive_diff")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("5. Whale Shield Protection", classes="exp_sec_title")
+                with Collapsible(title="5. Whale Shield Protection", id="exp_coll_5", classes="exp_section"):
                     yield Static("Final-second protection. Blocks trades if bid is too close to 50¢.", classes="exp_sec_desc")
                     with Horizontal(classes="exp_row"):
                         yield Label("Shield Time (T- s):")
@@ -858,8 +861,7 @@ class MOMExpertModal(ModalScreen):
                         yield Label("Shield Reach (¢):")
                         yield Input(placeholder="5", value=str(self.s.get("shield_reach", 5)), id="exp_shield_reach")
 
-                with Vertical(classes="exp_section"):
-                    yield Label("6. Custom Exits (optional)", classes="exp_sec_title")
+                with Collapsible(title="6. Custom Exits (optional)", id="exp_coll_6", classes="exp_section"):
                     with Horizontal(classes="exp_row"):
                         yield Label("Custom TP (¢):")
                         tp_val = str(getattr(self.mom, "custom_tp", "")) if self.mom and getattr(self.mom, "custom_tp", None) else ""
@@ -868,12 +870,17 @@ class MOMExpertModal(ModalScreen):
                         sl_val = str(getattr(self.mom, "custom_sl", "")) if self.mom and getattr(self.mom, "custom_sl", None) else ""
                         yield Input(placeholder="e.g. 40", value=sl_val, id="exp_custom_sl")
 
-                with Vertical(id="mom_test_container"):
-                    yield Button("🚀 TEST PBN NOW", id="btn_mom_test", variant="error")
-                    yield Static("Ready to simulate PBN analysis...", id="lbl_mom_test_status")
+                with Collapsible(title="7. Simulation & Diagnostics", id="exp_coll_7", classes="exp_section"):
+                    yield Static("Manually trigger a PBN calculation using current live data.", classes="exp_sec_desc")
+                    with Vertical(id="mom_test_container"):
+                        yield Button("🚀 RUN LIVE PBN TEST", id="btn_mom_test", variant="error")
+                        yield Static("Ready to simulate PBN analysis...", id="lbl_mom_test_status")
 
-                yield Static("", id="exp_preview")
-                yield Button("SAVE & CLOSE", id="btn_exp_save", variant="primary")
+                with Vertical(id="exp_preview_box"):
+                    yield Static("", id="exp_preview")
+                
+                with Horizontal(id="modal_footer"):
+                    yield Button("SAVE & CLOSE", id="btn_exp_save", variant="primary")
 
     def on_mount(self):
         self.styles.align = ("center", "middle")
@@ -912,17 +919,11 @@ class MOMExpertModal(ModalScreen):
             b.styles.margin = (0, 1)
 
         for sec in self.query(".exp_section"):
-            sec.styles.border = ("ascii", "#333333")
-            sec.styles.padding = (0, 1)
             sec.styles.margin = (0, 0, 1, 0)
             sec.styles.height = "auto"
             sec.styles.width = "100%"
-
-        for title in self.query(".exp_sec_title"):
-            title.styles.color = "#aaaaaa"
-            title.styles.bold = True
-            title.styles.width = "100%"
-            title.styles.text_align = "left"
+            # Make the collapsible headers look like the old titles
+            sec.styles.background = "#1a1a1a"
 
         for desc in self.query(".exp_sec_desc"):
             desc.styles.color = "#555555"
@@ -942,16 +943,26 @@ class MOMExpertModal(ModalScreen):
             cb.styles.width = 25
             cb.styles.margin = (0, 0)
         
+        prev_box = self.query_one("#exp_preview_box")
+        prev_box.styles.background = "#002233"
+        prev_box.styles.border = ("solid", "#0088ff")
+        prev_box.styles.padding = (0, 1)
+        prev_box.styles.margin = (0, 0, 1, 0)
+        prev_box.styles.height = 3
+        prev_box.styles.align = ("center", "middle")
+
         prev = self.query_one("#exp_preview")
         prev.styles.text_align = "center"
         prev.styles.color = "#aaaaaa"
-        prev.styles.height = 3
-        prev.styles.margin = (0, 0)
+        prev.styles.width = "100%"
         
+        footer = self.query_one("#modal_footer")
+        footer.styles.height = 3
+        footer.styles.margin = (1, 0, 0, 0)
+        footer.styles.align = ("center", "middle")
+
         save_btn = self.query_one("#btn_exp_save")
-        save_btn.styles.margin = (1, 0, 0, 0)
         save_btn.styles.width = 25
-        save_btn.styles.align = ("center", "middle")
 
         test_cont = self.query_one("#mom_test_container")
         test_cont.styles.border = ("double", "#ff0000")
@@ -1350,15 +1361,14 @@ class CommandHelpModal(ModalScreen):
             help_text = (
                 "[bold cyan]?            [/] Show this help menu\n"
                 "[bold cyan]analyze-pre  [/] Analyze pre-buy conditions and market sentiment\n"
-                "[bold cyan]fetchpre     [/] Fetch next window UP/DN prices\n"
+                "[bold cyan]/hide SCAN,STATS[/] Hide specific log categories from console\n"
+                "[bold cyan]/only RSLT,EXEC[/] Show ONLY these categories in console\n"
+                "[bold cyan]/show all    [/] Disable all log filters (Show everything)\n"
                 "[bold cyan]freeze=true  [/] Pause all trading immediately\n"
+                "[bold cyan]risk_pct=0.10[/] Set bet size to 10% of risk bankroll\n"
                 "[bold cyan]lo=false     [/] Cancel mid-window lockout\n"
-                "[bold cyan]sl+          [/] Enable Stop-Loss Plus recovery mode\n"
-                "[bold cyan]sl-          [/] Disable Stop-Loss Plus recovery mode\n"
-                "[bold cyan]grow_riskbankroll=true [/] Enable Bankroll Compounding\n"
-                "[bold cyan]grow_riskbankroll=false[/] Disable Bankroll Compounding\n"
-                "[bold cyan]risk_pct=0.10[/] Set bet size to 10% of risk bankroll (1%-100%)\n"
-                "[bold cyan]mom: atr_floor=30[/] Update MOM advanced settings\n"
+                "[bold cyan]sl+ / sl-    [/] Toggle SL+ Recovery Mode\n"
+                "[bold cyan]mom: key=val [/] Update MOM/MM2 advanced settings\n"
             )
             yield Static(help_text, id="cmd_help_body")
             yield Button("CLOSE (ESC)", id="btn_cmd_help_close", variant="primary")
@@ -3767,21 +3777,21 @@ class TrendEfficiencyModal(ModalScreen):
                 # Header
                 with Horizontal(classes="eff_header_row"):
                     yield Label("Trend", classes="eff_col_trend")
-                    yield Label("Mult", classes="eff_col_mult")
+                    yield Label("Size Mult", classes="eff_col_mult")
                     yield Label("Safety Mode", classes="eff_col_lock")
-                    yield Label("CoolX", classes="eff_col_cool")
+                    yield Label("Cool-X", classes="eff_col_cool")
                 
                 for t in self.trends:
                     with Horizontal(id=f"row_{t}", classes="eff_data_row"):
                         yield Label(t, classes="eff_col_trend")
-                        yield Input(id=f"mult_{t}", placeholder="1.0")
+                        yield Input(id=f"mult_{t}", placeholder="1.0", classes="eff_input")
                         yield Select([
                             ("Global", "global_lock"),
                             ("Side", "side_lock"),
                             ("Cap", "risk_cap"),
                             ("Unrest", "unrestricted")
-                        ], id=f"lock_{t}", value="side_lock")
-                        yield Input(id=f"cool_{t}", placeholder="1.0")
+                        ], id=f"lock_{t}", value="side_lock", classes="eff_select")
+                        yield Input(id=f"cool_{t}", placeholder="1.0", classes="eff_input")
 
             with Horizontal(id="modal_footer"):
                 yield Button("SAVE & CLOSE", id="btn_eff_save", variant="primary")
@@ -3813,16 +3823,16 @@ class TrendEfficiencyModal(ModalScreen):
             row.styles.align = ("center", "middle")
 
         for lbl in self.query(".eff_col_trend"):
-            lbl.styles.width = 12
+            lbl.styles.width = 10
             lbl.styles.text_style = "bold"
             lbl.styles.color = "cyan"
 
-        for inp in self.query("Input"):
-            inp.styles.width = 8
+        for inp in self.query(".eff_input"):
+            inp.styles.width = 10
             inp.styles.margin = (0, 1)
 
-        for sel in self.query("Select"):
-            sel.styles.width = 16
+        for sel in self.query(".eff_select"):
+            sel.styles.width = 18
             sel.styles.margin = (0, 1)
 
         # Load values
@@ -3868,31 +3878,31 @@ class ConvictionScalingModal(ModalScreen):
             yield Static("[bold #00ff00]Market Conviction Scaling[/]", id="modal_title")
             yield Static("Scale bets based on market odds strength (odds_score).", id="modal_subtitle")
             
-            with Vertical(id="conviction_payload"):
-                with Horizontal(classes="conv_row"):
-                    yield Label("Enable Conviction Scaling:", classes="conv_lbl")
+            with Vertical(classes="settings_group"):
+                with Horizontal(classes="setting_row"):
+                    yield Label("Enable Conviction Scaling:", classes="setting_label")
                     yield Checkbox(id="cb_conviction_enabled")
                 
-                with Vertical(classes="conv_section"):
-                    yield Label("1. Thresholds (¢)", classes="conv_sec_title")
-                    with Horizontal(classes="conv_row"):
-                        yield Label("Strong Threshold (¢):", classes="conv_lbl_sub")
-                        yield Input(id="inp_conv_high", placeholder="10.0")
-                    with Horizontal(classes="conv_row"):
-                        yield Label("Decisive Threshold (¢):", classes="conv_lbl_sub")
-                        yield Input(id="inp_conv_extreme", placeholder="20.0")
-                
-                with Vertical(classes="conv_section"):
-                    yield Label("2. Multipliers (x)", classes="conv_sec_title")
-                    with Horizontal(classes="conv_row"):
-                        yield Label("Strong Multiplier:", classes="conv_lbl_sub")
-                        yield Input(id="inp_conv_mult_strong", placeholder="1.25")
-                    with Horizontal(classes="conv_row"):
-                        yield Label("Decisive Multiplier:", classes="conv_lbl_sub")
-                        yield Input(id="inp_conv_mult_decisive", placeholder="1.50")
-                    with Horizontal(classes="conv_row"):
-                        yield Label("Weak Odds Penalty:", classes="conv_lbl_sub")
-                        yield Input(id="inp_conv_penalty", placeholder="0.50")
+            with Vertical(classes="settings_group"):
+                yield Static("[dim]1. Alpha Thresholds (¢)[/]", classes="group_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Strong Threshold (¢):", classes="setting_label")
+                    yield Input(id="inp_conv_high", placeholder="10.0", classes="setting_input")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Decisive Threshold (¢):", classes="setting_label")
+                    yield Input(id="inp_conv_extreme", placeholder="20.0", classes="setting_input")
+            
+            with Vertical(classes="settings_group"):
+                yield Static("[dim]2. Position Multipliers (x)[/]", classes="group_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Strong Multiplier:", classes="setting_label")
+                    yield Input(id="inp_conv_mult_strong", placeholder="1.25", classes="setting_input")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Decisive Multiplier:", classes="setting_label")
+                    yield Input(id="inp_conv_mult_decisive", placeholder="1.50", classes="setting_input")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Weak Odds Penalty:", classes="setting_label")
+                    yield Input(id="inp_conv_penalty", placeholder="0.50", classes="setting_input")
                 
             yield Static("[dim]Penalty applies when odds < 3¢. Multipliers apply when scanner matches sentiment.[/]", classes="conv_hint")
             
@@ -3905,7 +3915,7 @@ class ConvictionScalingModal(ModalScreen):
         c.styles.background = "#1a1a1a"
         c.styles.border = ("thick", "#00ff00")
         c.styles.padding = (1, 2)
-        c.styles.width = 50
+        c.styles.width = 54
         c.styles.height = "auto"
         c.styles.align = ("center", "middle")
         
@@ -3916,31 +3926,32 @@ class ConvictionScalingModal(ModalScreen):
         self.query_one("#modal_subtitle").styles.color = "#666666"
         self.query_one("#modal_subtitle").styles.margin = (0, 0, 1, 0)
 
-        for row in self.query(".conv_row"):
-            row.styles.height = 3
-            row.styles.align = ("center", "middle")
-        
-        for sec in self.query(".conv_section"):
-            sec.styles.border = ("ascii", "#333333")
-            sec.styles.margin = (1, 0)
-            sec.styles.padding = (0, 1)
+        for group in self.query(".settings_group"):
+            group.styles.border = ("solid", "#333333")
+            group.styles.margin = (0, 0, 1, 0)
+            group.styles.padding = (1, 0)
 
-        for title in self.query(".conv_sec_title"):
-            title.styles.bold = True
+        for title in self.query(".group_title"):
+            title.styles.margin = (0, 0, 0, 1)
+            title.styles.text_style = "bold italic"
             title.styles.color = "#00ff00"
+
+        for row in self.query(".setting_row"):
+            row.styles.height = 3
+            row.styles.align = ("left", "middle")
         
-        for lbl in self.query(".conv_lbl"):
-            lbl.styles.width = 25
-        for lbl in self.query(".conv_lbl_sub"):
-            lbl.styles.width = 20
+        for lbl in self.query(".setting_label"):
+            lbl.styles.width = 24
+            lbl.styles.margin = (1, 1, 0, 1)
         
-        for inp in self.query("Input"):
+        for inp in self.query(".setting_input"):
             inp.styles.width = 10
         
         hint = self.query_one(".conv_hint")
         hint.styles.text_align = "center"
         hint.styles.width = "100%"
         hint.styles.margin = (1, 0)
+        hint.styles.color = "#888"
 
         # Load current values
         if self.main_app:
@@ -3984,82 +3995,55 @@ class SSCSettingsModal(ModalScreen):
         self.main_app = main_app
     
     def compose(self) -> ComposeResult:
-        yield Container(
-            Static("🌊 SHALLOW SYMMETRICAL CONTINUATION SETTINGS", classes="modal_title"),
-            Static("Detects shallow trends with pullback and symmetrical recovery patterns.", classes="modal_subtitle"),
+        with Container(id="ssc_modal"):
+            yield Static("🌊 SHALLOW SYMMETRICAL CONTINUATION SETTINGS", classes="modal_title")
+            yield Static("Detects shallow trends with pullback and symmetrical recovery patterns.", classes="modal_subtitle")
             
-            Vertical(id="ssc_settings_grid", classes="settings_grid"),
+            with Vertical(id="ssc_settings_grid", classes="settings_grid"):
+                # Trend Detection Settings
+                yield Static("📈 TREND DETECTION", classes="section_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Max Shallow Slope:")
+                    yield Input(placeholder="0.05", id="inp_ssc_max_slope", value="0.05")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Min Shallow Slope:")
+                    yield Input(placeholder="0.01", id="inp_ssc_min_slope", value="0.01")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Max Angle Variance:")
+                    yield Input(placeholder="0.005", id="inp_ssc_angle_variance", value="0.005")
+                
+                # Pullback Settings
+                yield Static("🔄 PULLBACK SETTINGS", classes="section_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Max Pullback Periods:")
+                    yield Input(placeholder="5", id="inp_ssc_pullback_periods", value="5")
+                
+                # Recovery Settings
+                yield Static("✅ RECOVERY SETTINGS", classes="section_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Recovery Tolerance:")
+                    yield Input(placeholder="0.002", id="inp_ssc_recovery_tolerance", value="0.002")
+                
+                # Help Text
+                yield Static(
+                    "📋 HELP:\n"
+                    "• Max/Min Shallow Slope: Range for acceptable shallow trend angles\n"
+                    "• Max Angle Variance: Allowed deviation between initial and continuation slopes\n"
+                    "• Max Pullback Periods: Maximum time allowed for pullback phase\n"
+                    "• Recovery Tolerance: Price tolerance for trendline recovery detection",
+                    classes="help_text"
+                )
             
-            Horizontal(classes="button_row"),
-            id="ssc_modal"
-        )
-    
+            with Horizontal(classes="button_row"):
+                yield Button("💾 Save", id="btn_ssc_save", variant="primary")
+                yield Button("❌ Cancel", id="btn_ssc_cancel")
+
     def on_mount(self) -> None:
-        settings_grid = self.query_one("#ssc_settings_grid")
+        # Styling
+        self._apply_styles()
         
-        # Trend Detection Settings
-        settings_grid.mount(Static("📈 TREND DETECTION", classes="section_title"))
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Max Shallow Slope:"),
-                Input(placeholder="0.05", id="inp_ssc_max_slope", value="0.05"),
-                classes="setting_row"
-            )
-        )
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Min Shallow Slope:"),
-                Input(placeholder="0.01", id="inp_ssc_min_slope", value="0.01"),
-                classes="setting_row"
-            )
-        )
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Max Angle Variance:"),
-                Input(placeholder="0.005", id="inp_ssc_angle_variance", value="0.005"),
-                classes="setting_row"
-            )
-        )
-        
-        # Pullback Settings
-        settings_grid.mount(Static("🔄 PULLBACK SETTINGS", classes="section_title"))
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Max Pullback Periods:"),
-                Input(placeholder="5", id="inp_ssc_pullback_periods", value="5"),
-                classes="setting_row"
-            )
-        )
-        
-        # Recovery Settings
-        settings_grid.mount(Static("✅ RECOVERY SETTINGS", classes="section_title"))
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Recovery Tolerance:"),
-                Input(placeholder="0.002", id="inp_ssc_recovery_tolerance", value="0.002"),
-                classes="setting_row"
-            )
-        )
-        
-        # Help Text
-        settings_grid.mount(Static(
-            "📋 HELP:\n"
-            "• Max/Min Shallow Slope: Range for acceptable shallow trend angles\n"
-            "• Max Angle Variance: Allowed deviation between initial and continuation slopes\n"
-            "• Max Pullback Periods: Maximum time allowed for pullback phase\n"
-            "• Recovery Tolerance: Price tolerance for trendline recovery detection",
-            classes="help_text"
-        ))
-        
-        # Buttons
-        button_row = self.query_one(".button_row")
-        button_row.mount(Button("💾 Save", id="btn_ssc_save", variant="primary"))
-        button_row.mount(Button("❌ Cancel", id="btn_ssc_cancel"))
+        # Load current values
+        self._load_values()
         
         # Styling
         self._apply_styles()
@@ -4156,63 +4140,46 @@ class ADTSettingsModal(ModalScreen):
         self.main_app = main_app
     
     def compose(self) -> ComposeResult:
-        yield Container(
-            Static("⚖️ ASYMMETRIC DOUBLE TEST SETTINGS", classes="modal_title"),
-            Static("Identifies baseline moves with asymmetric double dips/rallies requiring full recovery.", classes="modal_subtitle"),
+        with Container(id="adt_modal"):
+            yield Static("⚖️ ASYMMETRIC DOUBLE TEST SETTINGS", classes="modal_title")
+            yield Static("Identifies baseline moves with asymmetric double dips/rallies requiring full recovery.", classes="modal_subtitle")
             
-            Vertical(id="adt_settings_grid", classes="settings_grid"),
+            with Vertical(id="adt_settings_grid", classes="settings_grid"):
+                # Baseline Settings
+                yield Static("📊 BASELINE SETTINGS", classes="section_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Baseline Tolerance:")
+                    yield Input(placeholder="0.0015", id="inp_adt_baseline_tolerance", value="0.0015")
+                
+                # Asymmetry Settings
+                yield Static("🔀 ASYMMETRY SETTINGS", classes="section_title")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Asymmetry Ratio:")
+                    yield Input(placeholder="1.25", id="inp_adt_asymmetry_ratio", value="1.25")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Min Move Distance:")
+                    yield Input(placeholder="0.005", id="inp_adt_min_move", value="0.005")
+                
+                # Help Text
+                yield Static(
+                    "📋 HELP:\n"
+                    "• Baseline Tolerance: Maximum deviation to register return to baseline\n"
+                    "• Asymmetry Ratio: Secondary move must be at least this ratio larger than first move\n"
+                    "• Min Move Distance: Minimum price movement to filter out market noise\n"
+                    "• Example: Ratio 1.25 means second dip must be 25% deeper than first dip",
+                    classes="help_text"
+                )
             
-            Horizontal(classes="button_row"),
-            id="adt_modal"
-        )
-    
+            with Horizontal(classes="button_row"):
+                yield Button("💾 Save", id="btn_adt_save", variant="primary")
+                yield Button("❌ Cancel", id="btn_adt_cancel")
+
     def on_mount(self) -> None:
-        settings_grid = self.query_one("#adt_settings_grid")
+        # Styling
+        self._apply_styles()
         
-        # Baseline Settings
-        settings_grid.mount(Static("📊 BASELINE SETTINGS", classes="section_title"))
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Baseline Tolerance:"),
-                Input(placeholder="0.0015", id="inp_adt_baseline_tolerance", value="0.0015"),
-                classes="setting_row"
-            )
-        )
-        
-        # Asymmetry Settings
-        settings_grid.mount(Static("🔀 ASYMMETRY SETTINGS", classes="section_title"))
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Asymmetry Ratio:"),
-                Input(placeholder="1.25", id="inp_adt_asymmetry_ratio", value="1.25"),
-                classes="setting_row"
-            )
-        )
-        
-        settings_grid.mount(
-            Horizontal(
-                Label("Min Move Distance:"),
-                Input(placeholder="0.005", id="inp_adt_min_move", value="0.005"),
-                classes="setting_row"
-            )
-        )
-        
-        # Help Text
-        settings_grid.mount(Static(
-            "📋 HELP:\n"
-            "• Baseline Tolerance: Maximum deviation to register return to baseline\n"
-            "• Asymmetry Ratio: Secondary move must be at least this ratio larger than first move\n"
-            "• Min Move Distance: Minimum price movement to filter out market noise\n"
-            "• Example: Ratio 1.25 means second dip must be 25% deeper than first dip",
-            classes="help_text"
-        ))
-        
-        # Buttons
-        button_row = self.query_one(".button_row")
-        button_row.mount(Button("💾 Save", id="btn_adt_save", variant="primary"))
-        button_row.mount(Button("❌ Cancel", id="btn_adt_cancel"))
+        # Load current values
+        self._load_values()
         
         # Styling
         self._apply_styles()
@@ -4505,7 +4472,6 @@ class MM2SettingsModal(ModalScreen):
     @on(Button.Pressed, "#btn_mm2_scaling")
     def open_scaling(self):
         # Using existing conviction scaling modal if available
-        from .ui_modals import ConvictionScalingModal
         self.main_app.push_screen(ConvictionScalingModal(self.main_app))
 
     @on(Button.Pressed, "#btn_mm2_test")
@@ -4578,4 +4544,198 @@ class MM2SettingsModal(ModalScreen):
         except Exception as e:
             self.main_app.log_msg(f"[red]Error saving MM2 settings: {e}[/]")
 
+        self.dismiss()
+
+
+class VolatilityScalingModal(ModalScreen):
+    """
+    [NEW] v5.9.15: High-Density Volatility scaling UI
+    """
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #ff00ff]Volatility (ATR) Scaling[/]", id="modal_title")
+            
+            with Vertical(classes="vol_settings_box"):
+                with Horizontal(classes="vol_row"):
+                    yield Label("Enable Scaling:", classes="vol_label")
+                    yield Checkbox(id="cb_vol_enabled")
+                
+                with Horizontal(classes="vol_row"):
+                    yield Label("Scaling Range:", classes="vol_label")
+                    yield Input(placeholder="15", id="inp_vol_floor", classes="vol_input_sm")
+                    yield Label("to", classes="vol_unit")
+                    yield Input(placeholder="40", id="inp_vol_ceiling", classes="vol_input_sm")
+                    yield Label("ATR", classes="vol_unit")
+                yield Static("[dim italic]Enter 0% size at Floor, 100% at Plateau[/]", classes="vol_hint")
+
+            yield Static("[dim]Note: Sizes scale linearly between levels.[/]", classes="vol_info")
+
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE & CLOSE", id="btn_vol_save", variant="primary")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        c = self.query_one("#modal_container")
+        c.styles.background = "#0c0c0c"; c.styles.border = ("thick", "#ff00ff")
+        c.styles.padding = (0, 1); c.styles.width = 48; c.styles.height = "auto"
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.margin = (0, 0)
+
+        box = self.query_one(".vol_settings_box")
+        box.styles.border = ("solid", "#222")
+        box.styles.padding = (0, 1)
+        box.styles.margin = (0, 0)
+        box.styles.background = "#141414"
+
+        for row in self.query(".vol_row"):
+            row.styles.height = 3; row.styles.align = ("left", "middle"); row.styles.width = "100%"
+        
+        for lb in self.query(".vol_label"):
+            lb.styles.width = 16; lb.styles.color = "#ff00ff"
+        
+        for inp in self.query(".vol_input_sm"):
+            inp.styles.width = 7; inp.styles.height = 1
+
+        for unit in self.query(".vol_unit"):
+            unit.styles.margin = (0, 1); unit.styles.color = "#666"
+
+        for hint in self.query(".vol_hint"):
+            hint.styles.margin = (-1, 0, 1, 16); hint.styles.color = "#444"; hint.styles.text_style = "italic"
+
+        self.query_one(".vol_info").styles.text_align = "center"; self.query_one(".vol_info").styles.margin = (0, 0)
+        
+        if self.main_app:
+            vs = self.main_app.volatility_scaling
+            self.query_one("#cb_vol_enabled").value = vs.get("enabled", False)
+            self.query_one("#inp_vol_floor").value = str(vs.get("floor", 15.0))
+            self.query_one("#inp_vol_ceiling").value = str(vs.get("ceiling", 40.0))
+
+    @on(Button.Pressed, "#btn_vol_save")
+    def save_settings(self):
+        if self.main_app:
+            try:
+                vs = self.main_app.volatility_scaling
+                vs["enabled"] = self.query_one("#cb_vol_enabled").value
+                vs["floor"] = float(self.query_one("#inp_vol_floor").value)
+                vs["ceiling"] = float(self.query_one("#inp_vol_ceiling").value)
+                self.main_app.save_settings()
+                self.main_app.log_msg(f"⚙️ Volatility Scaling Updated.", level="ADMIN")
+            except Exception as e:
+                self.main_app.log_msg(f"[red]Error saving Volatility settings: {e}[/]")
+        self.dismiss()
+
+
+class ValueReentryModal(ModalScreen):
+    """
+    [NEW] v5.9.15: Value Re-entry (Round 2) Logic
+    Allows a second entry if price retraces to neutral and then re-confirms.
+    """
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #ff00ff]Value Re-entry (Round 2)[/]", id="modal_title")
+            
+            with Vertical(classes="re_settings_box"):
+                with Horizontal(classes="re_row"):
+                    yield Label("Enable Strategy:", classes="re_label")
+                    yield Checkbox(id="cb_re_enabled")
+                
+                with Horizontal(classes="re_row"):
+                    yield Label("Reset Level (¢):", classes="re_label")
+                    yield Input(placeholder="52", id="inp_re_reset", classes="re_input")
+                yield Static("[dim italic]Enter after retrace to neutral (0.50)[/]", classes="re_hint")
+                
+                with Horizontal(classes="re_row"):
+                    yield Label("Snap-Back Speed:", classes="re_label")
+                    yield Input(placeholder="2.0", id="inp_re_move", classes="re_input_sm")
+                    yield Label("¢ in", classes="re_unit")
+                    yield Input(placeholder="10", id="inp_re_time", classes="re_input_sm")
+                    yield Label("sec", classes="re_unit")
+                yield Static("[dim italic]Min move amount and max time allowed[/]", classes="re_hint")
+
+                with Horizontal(classes="re_row"):
+                    yield Label("Decay Sizing (%):", classes="re_label")
+                    yield Input(placeholder="30", id="inp_re_size", classes="re_input")
+                    yield Label("Min Gap (¢):", classes="re_label_sm")
+                    yield Input(placeholder="5.0", id="inp_re_gap", classes="re_input_sm")
+                yield Static("[dim italic]Size mult and req. distance from 1st entry[/]", classes="re_hint")
+
+            yield Static("[dim]Note: Fires only after a neutral retrace and snap-back.[/]", classes="re_info")
+
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE & CLOSE", id="btn_re_save", variant="primary")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        c = self.query_one("#modal_container")
+        c.styles.background = "#0c0c0c"; c.styles.border = ("thick", "#ff00ff")
+        c.styles.padding = (0, 1); c.styles.width = 48; c.styles.height = "auto"
+        
+        self.query_one("#modal_title").styles.text_align = "center"
+        self.query_one("#modal_title").styles.margin = (0, 0)
+
+        box = self.query_one(".re_settings_box")
+        box.styles.border = ("solid", "#222")
+        box.styles.padding = (0, 1)
+        box.styles.margin = (0, 0)
+        box.styles.background = "#141414"
+
+        for row in self.query(".re_row"):
+            row.styles.height = 2; row.styles.align = ("left", "middle"); row.styles.width = "100%"
+        
+        for lb in self.query(".re_label"):
+            lb.styles.width = 16; lb.styles.color = "#ff00ff"
+        
+        for lbs in self.query(".re_label_sm"):
+            lbs.styles.width = 8; lbs.styles.margin_left = 1; lbs.styles.color = "#ff00ff"
+
+        for inp in self.query(".re_input"):
+            inp.styles.width = 8; inp.styles.height = 1
+        
+        for inps in self.query(".re_input_sm"):
+            inps.styles.width = 5; inps.styles.height = 1
+
+        for unit in self.query(".re_unit"):
+            unit.styles.margin = (0, 1); unit.styles.color = "#666"
+
+        for hint in self.query(".re_hint"):
+            hint.styles.margin = (0, 0, 1, 16); hint.styles.color = "#444"; hint.styles.text_style = "italic"
+
+        self.query_one(".re_info").styles.text_align = "center"; self.query_one(".re_info").styles.margin = (0, 0)
+        
+        if self.main_app:
+            re = self.main_app.value_reentry
+            self.query_one("#cb_re_enabled").value = re.get("enabled", False)
+            self.query_one("#inp_re_reset").value = str(int(re.get("reset_lvl", 0.52) * 100))
+            self.query_one("#inp_re_move").value = str(float(re.get("reconfirm_move", 0.02) * 100))
+            self.query_one("#inp_re_time").value = str(re.get("reconfirm_time", 10))
+            self.query_one("#inp_re_size").value = str(int(re.get("size_mult", 0.3) * 100))
+            self.query_one("#inp_re_gap").value = str(float(re.get("gap", 0.05) * 100))
+
+    @on(Button.Pressed, "#btn_re_save")
+    def save_settings(self):
+        if self.main_app:
+            try:
+                re = self.main_app.value_reentry
+                re["enabled"] = self.query_one("#cb_re_enabled").value
+                re["reset_lvl"] = float(self.query_one("#inp_re_reset").value) / 100.0
+                re["reconfirm_move"] = float(self.query_one("#inp_re_move").value) / 100.0
+                re["reconfirm_time"] = int(self.query_one("#inp_re_time").value)
+                re["size_mult"] = float(self.query_one("#inp_re_size").value) / 100.0
+                re["gap"] = float(self.query_one("#inp_re_gap").value) / 100.0
+                
+                self.main_app.save_settings()
+                self.main_app.log_msg(f"⚙️ Value Re-entry (RD2) Updated.", level="ADMIN")
+            except Exception as e:
+                self.main_app.log_msg(f"[red]Error saving Re-entry settings: {e}[/]")
         self.dismiss()

@@ -1,0 +1,13 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,95 25,95 31,95 35,87 41,83 46,66 53,61 60,63 65,72 77,68 83,68 90,64 95,64 105,64 118,78 131,63 144,40 161,34 176,43 191,63 206,89 218,125 232,107 251,110 258,134 267,136 277,164 292,166 299,167 312,167 318,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="58" cy="64" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (70¢)</title>
+</circle>
+</svg>

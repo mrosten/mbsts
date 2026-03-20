@@ -1,0 +1,47 @@
+# Polymarket Vortex Pulse V5 — Session Log
+# Generated: 2026-03-16 07:59:48
+# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.
+#
+# SNAPSHOT FIELDS:
+#   Timestamp      — Wall-clock time of snapshot
+#   SimBal         — Simulated wallet balance (USD)
+#   LiveBal        — Live Polymarket wallet balance (USD)
+#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)
+#   TimeRem        — Time remaining in current 5-min window (MM:SS)
+#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback
+#   BTC_Open       — BTC price at window open (Kraken REST)
+#   BTC_Diff       — BTC_Price minus BTC_Open (USD)
+#   BTC_Range      — Intra-window high-low price range (USD)
+#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)
+#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)
+#   Trend_1H       — 1-hour trend direction (same scale)
+#   RSI_1m         — 14-period RSI on 1-minute Binance candles
+#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)
+#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)
+#   Sig_Cobra      — Cobra scanner signal this tick
+#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick
+#   Sig_Flag       — BullFlag scanner signal this tick
+#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)
+#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL
+#   Active_Scanners— Count of scanners firing a BET signal this tick
+#   UP_Price       — Polymarket UP option midpoint price
+#   DN_Price       — Polymarket DOWN option midpoint price
+#   UP_Bid         — Polymarket UP option best bid
+#   DN_Bid         — Polymarket DOWN option best bid
+#   Shares_UP      — Current UP shares held
+#   Shares_DN      — Current DOWN shares held
+#
+# TRADE_EVENT FIELDS (interleaved rows):
+#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note
+Timestamp,SimBal,LiveBal,RiskBankroll,TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,Master_Score,Master_Status,Active_Scanners,UP_Price,DN_Price,UP_Bid,DN_Bid,Shares_UP,Shares_DN
+2026-03-16 07:59:50,100.00,87.28,100.00,00:10,0.00,0.00,0.00,0.00,0,NEUTRAL,NEUTRAL,50.0,0.00,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.500,0.500,0.500,0.500,0.00,0.00
+TRADE_EVENT,2026-03-16 08:00:01,SETTLE,UP,0.00,1.00000,1.00000,0.00000,0.00,0.00,N/A,0.00,100.00,Win: UP | PnL: 0.00
+2026-03-16 08:00:06,100.00,87.28,100.00,04:55,74196.90,74196.90,0.00,0.00,-20.0,NEUTRAL,S-UP,62.8,105.24,OFF,OFF,OFF,OFF,-1,BUY_DN,1,0.400,0.600,0.410,0.610,0.00,0.00
+2026-03-16 08:00:22,100.00,87.28,100.00,04:38,74197.00,74196.90,0.10,0.10,-11.0,NEUTRAL,S-UP,60.0,94.97,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.445,0.555,0.450,0.560,0.00,0.00
+2026-03-16 08:00:38,100.00,87.28,100.00,04:23,74175.75,74196.90,-21.15,32.70,-34.0,NEUTRAL,S-UP,60.2,97.56,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.330,0.670,0.350,0.690,0.00,0.00
+2026-03-16 08:00:54,100.00,87.28,100.00,04:07,74168.10,74196.90,-28.80,32.70,-33.0,NEUTRAL,S-UP,60.8,97.56,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.335,0.665,0.340,0.670,0.00,0.00
+2026-03-16 08:01:09,100.00,87.28,100.00,03:51,74169.40,74196.90,-27.50,32.70,-45.0,NEUTRAL,S-UP,57.1,72.14,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.275,0.725,0.280,0.730,0.00,0.00
+2026-03-16 08:01:26,100.00,87.28,100.00,03:35,74154.50,74196.90,-42.40,43.20,-51.0,NEUTRAL,S-UP,57.3,74.84,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.245,0.755,0.250,0.760,0.00,0.00
+2026-03-16 08:01:41,100.00,87.28,100.00,03:19,74171.51,74196.90,-25.39,56.25,-68.0,NEUTRAL,S-UP,55.7,75.06,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.160,0.840,0.170,0.850,0.00,0.00
+2026-03-16 08:01:56,100.00,87.28,100.00,03:04,74123.80,74196.90,-73.10,73.20,-79.0,NEUTRAL,S-UP,53.0,81.30,OFF,OFF,OFF,OFF,0,NEUTRAL,0,0.105,0.890,0.110,0.900,0.00,0.00
+2026-03-16 08:02:12,100.00,87.28,100.00,02:48,74054.90,74196.90,-142.00,142.10,-93.0,NEUTRAL,S-UP,47.4,80.95,OFF,OFF,OFF,OFF,-1,BUY_DN,1,0.035,0.965,0.040,0.970,0.00,0.00

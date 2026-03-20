@@ -1,0 +1,13 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,94 22,94 28,87 33,90 40,78 46,90 51,78 55,80 61,81 66,90 72,95 77,106 83,111 89,97 95,107 100,108 104,110 109,107 115,104 121,101 126,101 132,102 136,114 142,92 148,108 155,114 161,125 170,113 174,119 181,122 186,115 195,124 200,139 205,148 211,155 216,153 221,153 225,148 230,136 238,132 242,143 251,148 257,153 262,156 267,155 271,160 276,165 281,166 286,157 294,156 298,154 303,160 311,162 317,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="280" cy="24" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>Moshe DOWN (97¢)</title>
+</circle>
+</svg>

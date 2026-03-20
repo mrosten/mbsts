@@ -30,7 +30,7 @@ class TradingConfig:
     MAX_BET_SESSION_CAP: float = 100.0
     LIVE_RISK_DIVISOR: int = 8 
     TOLERANCE_PCT: float = 0.002
-    REQUEST_TIMEOUT: float = 7.5  # Increased from 2.5s for GCP stability
+    REQUEST_TIMEOUT: float = 3.5  # Optimized for responsive shutdown
     HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")
 
 # --- Web3 & RPC Config ---

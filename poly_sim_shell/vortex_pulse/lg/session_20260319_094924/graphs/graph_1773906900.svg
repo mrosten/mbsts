@@ -1,0 +1,13 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,67 24,67 31,66 37,75 43,83 49,86 54,72 60,73 65,75 71,84 76,69 81,60 86,59 91,60 101,60 106,60 117,67 122,60 127,52 133,71 143,78 149,81 155,86 160,87 166,91 173,90 180,84 187,101 198,97 203,98 208,105 222,101 228,101 239,125 245,131 252,145 263,161 268,160 277,163 285,166 291,166 298,167 307,167 313,167 318,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="85" cy="63" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap UP (71¢)</title>
+</circle>
+</svg>

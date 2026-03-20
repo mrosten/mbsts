@@ -35,8 +35,7 @@ def main():
         except: 
             start_bal = 100.00
         
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    log_base = os.path.join(script_dir, "lg")
+    log_base = os.path.join(parent_dir, "lg")
     
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = os.path.join(log_base, f"session_{session_id}")

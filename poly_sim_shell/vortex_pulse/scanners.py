@@ -9,9 +9,11 @@ class BaseScanner:
     def __init__(self, config: TradingConfig = None):
         self.config = config
         self.triggered_signal = None
+        self.fired = False  # Latch to prevent machine-gunning within a window
         
     def reset(self):
         self.triggered_signal = None
+        self.fired = False
         
     def get_price_slice(self, history, start_elapsed, end_elapsed):
         if not history: return []
@@ -466,9 +468,16 @@ class Momentum2Scanner(BaseScanner):
         down_score = 0
         factors = []
         
-        # 1. Price Lead Factor
+        # 0. ATR Tier Analysis
+        atr_low = self.adv_settings.get("atr_low", 20)
+        atr_high = self.adv_settings.get("atr_high", 40)
+        atr_tier = "CHAOS" if atr_5m >= atr_high else "STABLE" if atr_5m <= atr_low else "NEUTRAL"
+        
+        # 1. Price Lead Factor (Adaptive)
+        # In High ATR, we need a larger spread to be 'decisive'
+        decisive_base = self.adv_settings.get("decisive_diff", 0.02)
+        decisive_min = max(decisive_base, atr_5m / 1000.0) * 100 # In Cents
         spread = (up_bid - down_bid) * 100
-        decisive_min = self.adv_settings.get("decisive_diff", 0.02) * 100
         
         if abs(spread) >= decisive_min:
             if spread > 0:
@@ -478,7 +487,7 @@ class Momentum2Scanner(BaseScanner):
                 down_score += 2
                 factors.append(f"Price Lead: DOWN +{abs(spread):.1f}¢ [+2]")
         else:
-            factors.append(f"Price Lead: Neutral ({spread:.1f}¢)")
+            factors.append(f"Price Lead: Neutral ({spread:.1f}¢ < {decisive_min:.1f}¢ req)")
 
         # 2. BTC Velocity Factor
         # Weight increases as window ends
@@ -499,6 +508,16 @@ class Momentum2Scanner(BaseScanner):
         elif "DOWN" in trend_1h and trend_1h != "NEUTRAL":
             down_score += t_penalty
             factors.append(f"Trend 1H: {trend_1h} [+2 DOWN]")
+            
+        # 3.5 ATR Accuracy Bonus (User Insight)
+        # When ATR is high, we trust the leading side more.
+        if atr_tier == "CHAOS":
+            if up_score > down_score:
+                up_score += 1
+                factors.append(f"ATR Accuracy Bonus: [green]CHAOS UP[/] [+1]")
+            elif down_score > up_score:
+                down_score += 1
+                factors.append(f"ATR Accuracy Bonus: [red]CHAOS DOWN[/] [+1]")
 
         # 4. Sentiment (Odds Score)
         if abs(odds_score) > 10:
@@ -546,14 +565,16 @@ class Momentum2Scanner(BaseScanner):
         if self.buy_mode == "PRE":
             return "WAIT_PRE_MODE"
             
-        # Requires conviction score >= 3 for non-PBN entries
-        conviction_min = 3
+        # Adaptive Conviction (Tiered Thresholds)
+        # STABLE = 4 (Needs proof), NEUTRAL = 3 , CHAOS = 2 (Trust the move)
+        conviction_min = 4 if atr_tier == "STABLE" else 2 if atr_tier == "CHAOS" else 3
+        
         if abs(net_score) >= conviction_min:
             side = "UP" if net_score > 0 else "DOWN"
-            self.triggered_signal = f"BET_{side}_MOM2|Conviction {net_score:+d} HIT"
+            self.triggered_signal = f"BET_{side}_MM2|Conviction {net_score:+d} (Tier: {atr_tier}) HIT"
             return self.triggered_signal
 
-        return f"WAIT_conv_{net_score:+d}"
+        return f"WAIT_conv_{net_score:+d}/{conviction_min}"
 
 class RsiScanner(BaseScanner):
     def __init__(self, config: TradingConfig = None, rsi_threshold=20, time_remaining_pct=0.25):

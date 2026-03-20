@@ -1,0 +1,16 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,84 23,84 33,82 38,85 44,86 49,87 61,84 72,84 81,90 85,91 90,102 98,119 109,129 113,134 119,107 125,128 134,126 140,108 144,118 151,118 156,112 168,116 173,131 184,136 188,141 193,141 213,142 226,140 237,157 250,145 257,141 263,126 268,108 273,123 280,123 285,153 295,154 299,159 305,167 314,167 318,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="133" cy="58" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro DOWN (74¢)</title>
+</circle>
+<circle cx="267" cy="67" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>GrindSnap DOWN (68¢)</title>
+</circle>
+</svg>

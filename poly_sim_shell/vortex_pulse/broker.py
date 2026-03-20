@@ -145,18 +145,16 @@ class SimBroker:
         return True, msg, shares, price
 
     def sell(self, side, price, reason="Manual", size=None):
-        shares = self.shares[side] if size is None else size
+        available = self.shares[side]
+        shares = available if size is None else min(size, available)
         if shares <= 0: return False, "No shares", 0.0
         revenue = shares * price
         self.balance += revenue
         self.revenue_this_window += revenue
         
-        if size is None:
-            self.shares[side] = 0.0
-        else:
-            self.shares[side] -= size
+        self.shares[side] -= shares
+        if self.shares[side] < 0: self.shares[side] = 0.0  # Safety clamp
             
-        action = "SELL UP" if side == "UP" else "SELL DOWN"
         msg = f"SELL {side}: {shares:.2f} @ {price*100:.1f}c | ${revenue:.2f} [{reason}]"
         self.log_trade("SELL", side, revenue, price, shares, note=reason)
         return True, msg, revenue

@@ -1,0 +1,16 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,90 25,83 33,80 36,78 41,80 44,78 50,80 54,79 64,74 67,78 71,72 76,81 84,78 90,77 95,83 98,81 102,80 107,78 110,77 114,77 117,78 121,78 124,72 131,75 138,74 142,75 146,71 149,71 153,71 156,71 160,77 163,72 168,74 171,72 181,74 185,72 188,72 192,74 195,75 201,75 204,69 212,72 220,69 223,71 228,69 235,66 238,66 242,60 245,60 249,40 254,46 257,47 261,41 267,37 275,40 278,35 282,37 288,33 293,34 297,33 301,28 309,22 316,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="140" cy="75" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (63¢)</title>
+</circle>
+<circle cx="281" cy="36" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Moshe UP (89¢)</title>
+</circle>
+</svg>

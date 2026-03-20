@@ -32,6 +32,14 @@ class TradeEngineMixin:
             pass # App is shutting down
 
     def _handle_successful_buy(self, name, side, cost, act_shares, act_price, is_live):
+        # [NEW] Record bet indicator on chart (v5.9.13)
+        try:
+            start_ts = self.market_data.get("start_ts", 0)
+            if start_ts > 0:
+                elapsed = int(time.time() - start_ts)
+                self.query_one("#pulse_lean_chart").push_trigger(elapsed, act_price, side, name)
+        except: pass
+
         ticket_id = f"{name}_{time.time()}"
         target_tp = self.committed_tp
         target_sl = self.committed_sl
@@ -142,13 +150,16 @@ class TradeEngineMixin:
         if skepticism_penalty > 0:
             original_bs = final_bs
             final_bs *= (1.0 - skepticism_penalty)
-            log_tag = "skeptic_logged"
-            if info is not None:
-                if not info.get(log_tag):
-                    self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name}", level="SYS")
-                    info[log_tag] = True
-            else:
-                self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name} (${original_bs:.2f} -> ${final_bs:.2f})", level="SYS")
+            log_tag = f"SKEPTIC_{name}"
+            if log_tag not in self.skipped_logs:
+                if info is not None:
+                    if not info.get("skeptic_logged"):
+                        self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name}", level="SYS")
+                        info["skeptic_logged"] = True
+                        self.skipped_logs.add(log_tag)
+                else:
+                    self.log_msg(f"SKEPTIC: {skepticism_penalty*100:.0f}% Cut | Target: {name} (${original_bs:.2f} -> ${final_bs:.2f})", level="SYS")
+                    self.skipped_logs.add(log_tag)
 
         # 2. Market Conviction Scaling
         conv_cfg = getattr(self, "conviction_scaling", {"enabled": False})
@@ -168,17 +179,47 @@ class TradeEngineMixin:
             if conv_mult != 1.0:
                 original_pre_conv = final_bs
                 final_bs *= conv_mult
-                log_tag = "conv_logged"
-                if info is not None:
-                    if not info.get(log_tag):
+                log_tag = f"CONV_{name}"
+                if log_tag not in self.skipped_logs:
+                    if info is not None:
+                        if not info.get("conv_logged"):
+                            tag = "BOOST" if conv_mult > 1.0 else "PENALTY"
+                            self.log_msg(f"CONVICTION {tag}: {conv_mult}x (Odds:{odds_score:+.1f}) -> ${final_bs:.2f}", level="SYS")
+                            info["conv_logged"] = True
+                            self.skipped_logs.add(log_tag)
+                    else:
                         tag = "BOOST" if conv_mult > 1.0 else "PENALTY"
                         self.log_msg(f"CONVICTION {tag}: {conv_mult}x (Odds:{odds_score:+.1f}) -> ${final_bs:.2f}", level="SYS")
+                        self.skipped_logs.add(log_tag)
+
+        # 3. [NEW] Window-Level Volatility Latching (v5.9.15)
+        vol_cfg = getattr(self, "volatility_scaling", {"enabled": False})
+        if vol_cfg.get("enabled"):
+            if getattr(self, "window_vol_halt", False):
+                # Hard Cutoff from window start
+                final_bs = 0.0
+                log_tag = f"ATR_HALT_{name}"
+                if log_tag not in self.skipped_logs:
+                    self.log_msg(f"[yellow]VOL-HALT:[/] {name} skipped due to low ATR at window start.", level="SYS")
+                    self.skipped_logs.add(log_tag)
+                return False, final_bs, skepticism_penalty
+            
+            vol_mult = getattr(self, "window_vol_mult", 1.0)
+            if vol_mult < 1.0:
+                original_pre_vol = final_bs
+                final_bs *= vol_mult
+                
+                log_tag = f"vol_ramp_logged_{name}"
+                if info is not None:
+                    if not info.get(log_tag):
+                        self.log_msg(f"VOL-SCALED: {name} | {vol_mult*100:.0f}% Sizing (${original_pre_vol:.2f} -> ${final_bs:.2f})", level="SYS")
                         info[log_tag] = True
                 else:
-                    tag = "BOOST" if conv_mult > 1.0 else "PENALTY"
-                    self.log_msg(f"CONVICTION {tag}: {conv_mult}x (Odds:{odds_score:+.1f}) -> ${final_bs:.2f}", level="SYS")
+                    if log_tag not in self.skipped_logs:
+                        self.log_msg(f"VOL-SCALED: {name} | {vol_mult*100:.0f}% Sizing (${original_pre_vol:.2f} -> ${final_bs:.2f})", level="SYS")
+                        self.skipped_logs.add(log_tag)
 
-        # 3. [NEW] Nuance-Floor Enforcement (v5.9.12)
+        # 4. [NEW] Nuance-Floor Enforcement (v5.9.12)
         # If nuance (penalties/scaling) dropped the bet below $1 but the base was valid (>= $1),
         # floor it back to $1.00 so it actually executes on PolyMarket.
         if 0 < final_bs < 1.00 and bs >= 1.00:
@@ -263,6 +304,7 @@ class TradeEngineMixin:
                 self.pre_buy_triggered = False # reset pre-buy latch for new window
                 self.hdo_fired_in_window = False # reset HDO latch for new window
                 self.window_realized_revenue = 0.0 # reset revenue tracker for new window
+                self.window_bets.clear() # [FIX] Clear previous window's trades (Accurate PnL)
                 
                 # Transfer any pre-buy position into window_bets so TP/SL monitors it
                 if self.pre_buy_pending:
@@ -281,6 +323,29 @@ class TradeEngineMixin:
                 self.bounce_pending.clear() # discard any stale bounce entries from last window
                 for sc in self.scanners.values(): sc.reset() # reset all scanner signals/timers
                 self._window_tick_signals = {}  # Clear tick signals for new window
+                self.reentry_state = {}         # [NEW] Clear re-entry tracking for new window
+                
+                # --- [NEW] Window-Level Volatility Latching (v5.9.15) ---
+                vol_cfg = getattr(self, "volatility_scaling", {"enabled": False})
+                if vol_cfg.get("enabled"):
+                    atr = getattr(self.market_data_manager, "atr_5m", 0.0)
+                    floor = vol_cfg.get("floor", 15.0)
+                    ceiling = vol_cfg.get("ceiling", 40.0)
+                    
+                    if atr < floor:
+                        self.window_vol_mult = 0.0
+                        self.window_vol_halt = True
+                        self.log_msg(f"[bold yellow]VOL-HALT:[/] ATR {atr:.1f} < Floor {floor:.1f}. Trading SUSPENDED for this window.", level="SYS")
+                    else:
+                        self.window_vol_mult = max(0.0, min(1.0, (atr - floor) / (ceiling - floor)))
+                        self.window_vol_halt = False
+                        if self.window_vol_mult < 1.0:
+                            self.log_msg(f"VOL-LATCH: {self.window_vol_mult*100:.0f}% Sizing (ATR:{atr:.1f}) latched for window.", level="SYS")
+                        else:
+                            self.log_msg(f"VOL-LATCH: 100% Sizing (ATR:{atr:.1f} >= Ceiling {ceiling:.1f}) window confirmed.", level="SYS")
+                else:
+                    self.window_vol_mult = 1.0
+                    self.window_vol_halt = False
                 
                 if self.mid_window_lockout:
                     self.mid_window_lockout = False
@@ -550,6 +615,8 @@ class TradeEngineMixin:
                                     f.write(f"<td><span class='{official_winner}'>{official_winner}</span></td>") # Resolution
                                     f.write(f"<td><span class='{buf['pulse_result']}'>{buf['pulse_result']}</span></td>") # Pulse Result
                                     f.write(f"<td>{sync_status}</td>")
+                                    f.write(f"<td>${buf.get('invested', 0):,.2f}</td>")
+                                    f.write(f"<td>${buf.get('revenue', 0):,.2f}</td>")
                                     f.write(f"<td>{logged_pnl:+.2f}</td>")
                                     f.write(f"<td>${main_bal:,.2f}</td>") # Simulated/Live Balance
                                     graph_fn = buf.get("graph_filename", "")
@@ -608,7 +675,19 @@ class TradeEngineMixin:
             self.market_data_manager.market_data["btc_open"] = d["opn"]
             
             # Push to Lean Chart
-            try: self.query_one("#pulse_lean_chart").push_value(elapsed, d["poly"]["up_price"])
+            try: 
+                chart = self.query_one("#pulse_lean_chart")
+                # If there's a pending tilt from the previous window, inject it at T=0
+                if not chart.history and hasattr(self, "_pending_next_tilt") and self._pending_next_tilt:
+                    tilt_dir, tilt_mag = self._pending_next_tilt
+                    chart.push_tilt(0, tilt_dir, tilt_mag)
+                    self._pending_next_tilt = None
+                chart.push_value(elapsed, d["poly"]["up_price"])
+                # Capture and push scanner triggers (v5.9.13)
+                for scanner_name, sig in self.tick_signals.items():
+                    if "BET" in sig or "BUY" in sig:
+                        side = "UP" if "UP" in sig else "DOWN"
+                        chart.push_trigger(elapsed, d["poly"]["up_price"], side, scanner_name)
             except: pass
             
             rsi = calculate_rsi(d["c60"])
@@ -678,12 +757,88 @@ class TradeEngineMixin:
                                     context={}, reason=f"Bounce:{_binfo['signal']}"
                                 )
                                 if _ok:
+                                    sc = self.scanners.get(_bname)
+                                    if sc: sc.fired = True # [FIX] Latch prevents immediate re-entry after bounce
                                     self._handle_successful_buy(_bname, _bsd, _bbs, _act_sh, _act_pr, _is_l)
                                     self.session_total_trades += 1
                                     self.log_msg(f"[bold green]BOUNCE EXEC {_bname}[/]: {_msg} ({_binfo['signal']})", level="TRADE")
                                 else:
                                     self.log_msg(f"[bold red]BOUNCE FAIL {_bname}[/]: {_msg}")
                             del self.bounce_pending[_bname]
+            # --- [NEW] Value Re-entry Monitor (v5.9.15) ---
+            re_cfg = getattr(self, "value_reentry", {"enabled": False})
+            if re_cfg.get("enabled") and not self.mid_window_lockout:
+                for name, sc in self.scanners.items():
+                    if not sc.fired: continue
+                    
+                    # Already fired, check if we are tracking for re-entry
+                    rstate = self.reentry_state.get(name)
+                    if not rstate:
+                        # Find the first entry price from window_bets
+                        f_entry = next((b["entry"] for b in self.window_bets.values() if b["algorithm"] == name), None)
+                        if f_entry:
+                            # Start tracking
+                            self.reentry_state[name] = {"stage": "ARMED", "first_entry": f_entry, "side": "UP" if f_entry > 0.5 else "DOWN"}
+                        continue
+
+                    if rstate["stage"] == "ARMED":
+                        # Monitor for Neutral Touch
+                        cur_p = self.market_data["up_ask"] if rstate["side"] == "UP" else self.market_data["down_ask"]
+                        reset_lvl = re_cfg.get("reset_lvl", 0.52)
+                        
+                        touched = False
+                        if rstate["side"] == "UP" and cur_p <= reset_lvl: touched = True
+                        if rstate["side"] == "DOWN" and cur_p >= (1.0 - reset_lvl): touched = True
+                        
+                        if touched:
+                            rstate["stage"] = "TOUCHED"
+                            rstate["touch_ts"] = time.time()
+                            rstate["touch_pr"] = cur_p
+                            self.log_msg(f"RE-ENTRY ARMED: {name} ({rstate['side']}) | Price reset to neutral zone ({cur_p*100:.1f}¢).", level="SCAN")
+
+                    elif rstate["stage"] == "TOUCHED":
+                        # Monitor for Snap-Back
+                        cur_p = self.market_data["up_ask"] if rstate["side"] == "UP" else self.market_data["down_ask"]
+                        move_req = re_cfg.get("reconfirm_move", 0.02)
+                        time_req = re_cfg.get("reconfirm_time", 10)
+                        gap_req = re_cfg.get("gap", 0.05)
+                        
+                        elapsed_since_touch = time.time() - rstate["touch_ts"]
+                        if elapsed_since_touch > time_req:
+                            # Timeout, reset back to ARMED to watch for another touch
+                            rstate["stage"] = "ARMED"
+                            continue
+                        
+                        move = (cur_p - rstate["touch_pr"]) if rstate["side"] == "UP" else (rstate["touch_pr"] - cur_p)
+                        if move >= move_req:
+                            # Recovery confirmed! Check Gap and execute
+                            # "Value" means the second entry is cheaper than the first
+                            gap = rstate["first_entry"] - cur_p
+                            if gap < gap_req:
+                                continue # Too close to first entry or more expensive
+                            
+                            # Execute!
+                            self.log_msg(f"RE-CONFIRM {name}: Snap-back detected (+{move*100:.1f}¢ in {int(elapsed_since_touch)}s). Firing RD2.", level="SCAN")
+                            
+                            # Original size calculation logic (simplified for re-entry)
+                            base_bs = float(self.query_one("#inp_amount").value)
+                            bs = base_bs * re_cfg.get("size_mult", 0.3)
+                            
+                            is_l = self.query_one("#cb_live").value
+                            ok, msg, act_sh, act_pr = self.trade_executor.execute_buy(
+                                is_l, rstate["side"], bs, cur_p,
+                                d["poly"]["up_id" if rstate["side"] == "UP" else "down_id"],
+                                context={}, reason=f"ReEntry:{name}"
+                            )
+                            if ok:
+                                self._handle_successful_buy(name, rstate["side"], bs, act_sh, act_pr, is_l)
+                                self.session_total_trades += 1
+                                self.log_msg(f"[bold green]RD2 EXEC {name}[/]: {msg}", level="TRADE")
+                                rstate["stage"] = "DONE"
+                            else:
+                                self.log_msg(f"[bold red]RD2 FAIL {name}[/]: {msg}")
+                                rstate["stage"] = "ARMED" # Try again if failed? Or DONE? Let's say ARMED.
+
             # --- Trend / Safety Logic (v5.9.10) ---
             cur_trend = self.market_data_manager.trend_1h
             safety_mode = getattr(self, "exec_safety_mode", "global_lock")
@@ -808,7 +963,7 @@ class TradeEngineMixin:
                                 
                                 short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
                                 prefix = name[:3].upper()
-                                self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})")
+                                self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})", level="TRADE")
                             else:
                                 self.log_msg(f"[bold red]FAIL {name}[/]: {msg}")
                                 
@@ -869,6 +1024,11 @@ class TradeEngineMixin:
                     continue
                 # ----------------------------
                 
+                # [FIXED] Prevent "Machine-Gunning": If this scanner already fired this window, skip.
+                if getattr(sc, "fired", False):
+                    tick_signals[name] = "FIRED"
+                    continue
+                
                 # Dynamic Advanced Settings injection (primarily for Momentum)
                 if hasattr(sc, "adv_settings"):
                     sc.adv_settings = self.mom_adv_settings
@@ -898,6 +1058,11 @@ class TradeEngineMixin:
                     continue
                         
                 if "BET_" in str(res):
+                    log_tag = f"TRIGGERED_LOG_{name}"
+                    if log_tag not in self.skipped_logs:
+                        self.log_msg(f"TRIGGERED {name} | {res}", level="SCAN")
+                        self.skipped_logs.add(log_tag)
+                    
                     sd = "UP" if "UP" in str(res) else "DOWN"
                     # Robust Duplicate Check: Match algorithm name and side
                     already_have = any(
@@ -1079,12 +1244,13 @@ class TradeEngineMixin:
                                     reason=res
                                 )
                                 if ok:
+                                    sc.fired = True # [FIX] Latch prevents immediate re-entry
                                     self._handle_successful_buy(name, sd, final_bs, act_shares, act_price, is_l)
                                     self.session_total_trades += 1
                                     
                                     short_res = str(res).replace("BET_UP_", "").replace("BET_DOWN_", "").replace("Leader @ 10s:", "Ldr:").replace(" UP ", " ").replace(" DOWN ", " ")
                                     prefix = name[:3].upper()
-                                    self.log_msg(f"{msg} ({prefix}|{short_res})", level="TRADE")
+                                    self.log_msg(f"[bold green]EXEC {name}[/]: {msg} ({prefix}|{short_res})", level="TRADE")
                                 else:
                                     self.log_msg(f"Fail {name}: {msg}", level="ERROR")
 
@@ -1143,24 +1309,41 @@ class TradeEngineMixin:
             self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_1h}")
             
             # --- Update Exposure Dashboard ---
-            exp_up_cost = 0.0; exp_up_win = 0.0
-            exp_dn_cost = 0.0; exp_dn_win = 0.0
-            for bid, info in self.window_bets.items():
-                if info.get("closed"): continue
-                if info["side"] == "UP":
-                    exp_up_cost += info["cost"]
-                    exp_up_win += info["shares"] # shares * $1 payout
-                else:
-                    exp_dn_cost += info["cost"]
-                    exp_dn_win += info["shares"]
-            
-            self.query_one("#lbl_owned_up").update(f"UP OWNED: ${exp_up_cost:.0f}/${exp_up_win:.0f}")
-            self.query_one("#lbl_owned_dn").update(f"DN OWNED: ${exp_dn_cost:.0f}/${exp_dn_win:.0f}")
-            # ---------------------------------
-            
-            # Update Volume UI (BTC quantity near window open price)
+            # --- OWNERSHIP STATUS UI (v5.9.14) ---
             v_up = self.market_data.get("vol_up", 0)
             v_dn = self.market_data.get("vol_dn", 0)
+            up_cnt = len([i for i in self.window_bets.values() if i.get("side") == "UP" and not i.get("closed")])
+            dn_cnt = len([i for i in self.window_bets.values() if i.get("side") == "DOWN" and not i.get("closed")])
+            
+            exp_up_cost = sum(info["cost"] for info in self.window_bets.values() if info.get("side") == "UP" and not info.get("closed"))
+            exp_up_win = sum(info["shares"] for info in self.window_bets.values() if info.get("side") == "UP" and not info.get("closed"))
+            exp_dn_cost = sum(info["cost"] for info in self.window_bets.values() if info.get("side") == "DOWN" and not info.get("closed"))
+            exp_dn_win = sum(info["shares"] for info in self.window_bets.values() if info.get("side") == "DOWN" and not info.get("closed"))
+
+            self.query_one("#lbl_owned_up").update(f"UP OWNED ({up_cnt}): ${exp_up_cost:.0f}/${exp_up_win:.0f}")
+            self.query_one("#lbl_owned_dn").update(f"DN OWNED ({dn_cnt}): ${exp_dn_cost:.0f}/${exp_dn_win:.0f}")
+            # ---------------------------------
+            # --- SAFETY SYNC CHECK (v5.9.14+) ---
+            # Must include pre_buy_shares since pre-buy positions in window_bets
+            # sit in broker.pre_buy_shares until the next window promotes them.
+            if not self.query_one("#cb_live").value: # SIM Mode Only
+                s_up = self.sim_broker.shares.get("UP", 0.0) + self.sim_broker.pre_buy_shares.get("UP", 0.0)
+                s_dn = self.sim_broker.shares.get("DOWN", 0.0) + self.sim_broker.pre_buy_shares.get("DOWN", 0.0)
+                has_drift = abs(s_up - exp_up_win) > 0.01 or abs(s_dn - exp_dn_win) > 0.01
+                
+                if has_drift:
+                    if not getattr(self, "sync_drift_logged", False):
+                        self.sync_drift_logged = True
+                        self.log_msg(f"[bold red]⚠️ SYNC DRIFT:[/] UI={exp_up_win:.2f}UP/{exp_dn_win:.2f}DN | Broker={s_up:.2f}UP/{s_dn:.2f}DN - auto-correcting", level="ERROR")
+                        # Auto-correct: if broker is truly at 0 (post-settle, no pre-buys), close all UI bets
+                        if s_up == 0.0 and s_dn == 0.0:
+                            for bet in self.window_bets.values():
+                                if not bet.get("closed"):
+                                    bet["closed"] = True
+                else:
+                    self.sync_drift_logged = False  # Reset latch when back in sync
+            # ------------------------------------------
+
             cur_btc = self.market_data.get("btc_price", 0)
             def fmt_v(v_btc, price):
                 if v_btc >= 100: return f"{v_btc:.0f}B"
@@ -1296,13 +1479,17 @@ class TradeEngineMixin:
                     realized_loss = info["cost"] - realized_rev
                     if realized_rev > 0: self._add_risk_revenue(realized_rev)
                     
+                    algo_name = info.get("algorithm", "Manual")
                     if realized_rev >= info["cost"]:
                         self.session_win_count += 1 # TP/Max Profit hit
-                        self.log_msg(f"{reason} | [bold green]WIN[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
+                        self.log_msg(f"[{algo_name}] {reason} | [bold green]WIN[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
                     else:
-                        self.log_msg(f"{reason} | [bold red]LOSS[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
+                        self.log_msg(f"[{algo_name}] {reason} | [bold red]LOSS[/] | Closed {side} @ {cur*100:.1f}c", level="MONEY")
                         if "SL HIT" in reason:
                             self.last_sl_event_time = time.time()
+                    
+                    # Explicit Traceability Log (v5.9.14)
+                    self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} | Entry {info['cost']:.1f}c -> {cur*100:.1f}c | Rev: +${realized_rev:.2f}", level="SYS")
                     
                     # --- SL+ RECOVERY LOGIC ---
                     # Guard: never chain recovery on a recovery bet to prevent infinite loops
@@ -1491,7 +1678,10 @@ class TradeEngineMixin:
                 self.log_msg(f"[bold {'red' if is_live else 'green'}]⏱ FINAL EXIT {side}: {msg}[/]")
                 # Mark all sub-tickets in this window as closed
                 for info in self.window_bets.values(): 
-                    if info.get("side") == side: info["closed"] = True
+                    if info.get("side") == side and not info.get("closed"):
+                        info["closed"] = True
+                        algo_name = info.get("algorithm", "Unknown")
+                        self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} (Final Exit) | Rev: +${revenue:.2f}", level="SYS")
                 
                 # Update Risk Bankroll with realized revenue
                 if revenue > 0: 
@@ -1546,12 +1736,34 @@ class TradeEngineMixin:
                     up_ask  = d.get("up_ask",  0)
                     dn_ask  = d.get("down_ask", 0)
                     if up_bid > 0 or dn_bid > 0:
+                        # Detect 52/48 tilt
+                        up_c = round(up_bid * 100, 1)
+                        dn_c = round(dn_bid * 100, 1)
+                        tilt_dir = None
+                        tilt_mag = None
+                        if up_c >= 52:
+                            tilt_dir = "UP"
+                            tilt_mag = int(up_c)
+                        elif dn_c >= 52:
+                            tilt_dir = "DOWN"
+                            tilt_mag = int(dn_c)
+
                         fmt_msg = (
                             f"NEXT: "
                             f"UP {up_bid*100:.1f}/{up_ask*100:.1f}c | "
                             f"DN {dn_bid*100:.1f}/{dn_ask*100:.1f}c"
                         ).replace(".0/", "/").replace(".0c", "c")
+
+                        if tilt_dir == "UP":
+                            fmt_msg = f"[bold cyan]▲ TILT UP {tilt_mag}¢[/] | {fmt_msg}"
+                        elif tilt_dir == "DOWN":
+                            fmt_msg = f"[bold magenta]▼ TILT DN {tilt_mag}¢[/] | {fmt_msg}"
+
                         self.safe_call(self.log_msg, fmt_msg)
+
+                        # Store tilt to be applied at T=0 of the NEXT window's chart
+                        if tilt_dir:
+                            self._pending_next_tilt = (tilt_dir, tilt_mag)
                     else:
                         self.safe_call(self.log_msg, f"[dim]🔭 Next window not yet available ({next_slug})[/]")
                 except Exception as e:
@@ -1985,8 +2197,14 @@ class TradeEngineMixin:
         else:
             self.log_msg(f"TRADES: No trades this window", level="STATS")
         
-        self.log_msg(f"PNL BREAKDOWN: Invested=${window_invested:.2f} | Revenue=${total_window_revenue:.2f} | Net=${net_pnl:+.2f}", level="STATS")
-        self.log_msg(f"PNL: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Ses: {'+' if self.session_pnl >= 0 else ''}${self.session_pnl:.2f} | Eq: ${main_bal:.1f} | Acc: {acc_val:.1f}%", level="STATS")
+        # DISTINGUISH: Realized vs Running (v6.0.1)
+        # Realized PNL = Revenue from closed trades - Cost of closed trades
+        closed_cost = sum(info.get("cost", 0) for info in self.window_bets.values() if info.get("closed"))
+        realized_pnl = self.window_realized_revenue - closed_cost
+        running_cost = sum(info.get("cost", 0) for info in self.window_bets.values() if not info.get("closed"))
+        
+        self.log_msg(f"PNL BREAKDOWN: Realized=${realized_pnl:+.2f} | [dim]ActiveCost=${running_cost:.2f}[/] | WindowNet=${net_pnl:+.2f}", level="STATS")
+        self.log_msg(f"PNL SUMMARY: {'+' if net_pnl >= 0 else ''}${net_pnl:.2f} | Rev: ${total_window_revenue:.2f} | Ses: {'+' if self.session_pnl >= 0 else ''}${self.session_pnl:.2f} | Eq: ${main_bal:.1f} | Acc: {acc_val:.1f}%", level="STATS")
 
         # HTML Verification row is now written at T+15 after official audit
         # to ensure the most accurate data (Polymarket result + finalized delta)
@@ -2008,7 +2226,7 @@ class TradeEngineMixin:
         
         # Use a unique filename for the graph
         start_ts = self.market_data.get("start_ts", 0)
-        graph_filename = f"graph_{start_ts}.png"
+        graph_filename = f"graph_{start_ts}.svg"
         
         self.audit_buffer = {
             "window_id": start_ts,
@@ -2018,6 +2236,8 @@ class TradeEngineMixin:
             "open_price": self.market_data.get("btc_open", 0),
             "close_price": btc_p,
             "pnl": net_pnl,
+            "invested": window_invested,
+            "revenue": total_window_revenue,
             "graph_filename": graph_filename,
             "tick_signals": getattr(self, "_window_tick_signals", {}),  # Store scanner signals for this window
             "shares": {
@@ -2047,7 +2267,7 @@ class TradeEngineMixin:
             graph_path = os.path.join(graphs_dir, graph_filename)
             try:
                 chart = self.query_one("#pulse_lean_chart")
-                if chart.save_graph_image(graph_path):
+                if chart.save_graph_svg(graph_path):
                     self.log_msg(f"[dim]Saved window graph to graphs/{os.path.basename(graph_path)}[/]")
                     # Parallel FTP Upload
                     if self.log_settings.get("verification_html", True):
@@ -2237,6 +2457,8 @@ class TradeEngineMixin:
             for info in self.window_bets.values():
                 if info.get("side") == side and not info.get("closed"):
                     info["closed"] = True
+                    algo_name = info.get("algorithm", "Manual")
+                    self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} (Manual) | Rev: +${revenue:.2f}", level="SYS")
         else:
             self.log_msg(f"[bold red]MANUAL SELL FAILED:[/] {msg}")
             

@@ -489,15 +489,11 @@ class MarketDataManager:
                     return float(requests.get("https://clob.polymarket.com/price", params={"token_id":tid,"side":side}, timeout=1.5).json().get("price",0))
                 except: return 0
             
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                f_ua = executor.submit(get_p, up_id, "buy")
-                f_da = executor.submit(get_p, down_id, "buy")
-                f_ub = executor.submit(get_p, up_id, "sell")
-                f_db = executor.submit(get_p, down_id, "sell")
-                
-                up_ask, down_ask = f_ua.result(), f_da.result()
-                up_bid, down_bid = f_ub.result(), f_db.result()
+            # Remove nested ThreadPoolExecutor to prevent thread-join hangs on exit
+            up_ask = get_p(up_id, "buy")
+            down_ask = get_p(down_id, "buy")
+            up_bid = get_p(up_id, "sell")
+            down_bid = get_p(down_id, "sell")
 
             if not getattr(self, "app_active", False): return m
 
