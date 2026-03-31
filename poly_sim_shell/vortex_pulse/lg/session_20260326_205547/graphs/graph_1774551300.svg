@@ -1,0 +1,20 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,82 79,82 106,100 123,122 132,122 141,122 152,104 160,86 169,104 179,113 188,114 196,83 206,83 216,76 223,74 232,75 240,80 251,90 259,90 268,70 280,38 291,30 301,49 312,45" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="172" cy="87" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>Manual: UP @ 55¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="176" y="59" width="104" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="180" y="69" font-size="9" fill="#00FF00" font-family="monospace">Manual: UP @ 55¢</text>
+  </g>
+</g>
+</svg>

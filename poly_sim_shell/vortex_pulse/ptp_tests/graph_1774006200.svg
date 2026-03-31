@@ -1,0 +1,17 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,106 23,106 29,116 34,103 41,102 47,109 56,117 60,120 64,122 68,123 71,107 74,106 77,116 80,107 83,107 86,101 89,96 92,95 95,95 98,99 101,96 104,89 107,81 110,82 113,93 116,93 119,92 122,92 126,110 129,107 132,102 135,101 138,98 141,105 146,104 149,119 152,119 155,119 158,128 161,122 164,108 167,110 170,110 173,103 176,104 179,109 182,123 185,130 188,110 191,105 194,102 197,96 200,95 203,95 206,87 209,87 212,87 215,86 218,83 221,84 224,89 227,96 230,96 233,97 236,96 239,96 242,125 245,132 248,136 251,130 254,133 257,133 260,135 263,109 266,110 269,110 272,107 275,114 278,110 281,113 284,98 287,79 290,74 293,75 296,78 299,77 302,82 305,81 308,81 311,95 314,149 317,104" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+ <circle cx="47.0" cy="102.0" r="2" fill="#ff00ff" stroke="white" stroke-width="0.5" />
+ <text x="49.0" y="100.0" font-size="6" fill="#ff00ff">P1</text>
+ <circle cx="113.0" cy="81.0" r="2" fill="#ff00ff" stroke="white" stroke-width="0.5" />
+ <text x="115.0" y="79.0" font-size="6" fill="#ff00ff">P2</text>
+ <line x1="47.0" y1="102.0" x2="113.0" y2="81.0" stroke="#00ff00" stroke-width="1.5" stroke-dasharray="3,2" />
+ <text x="10" y="180" font-family="monospace" font-size="9" fill="cyan" font-weight="bold">Pattern: RISING | Result: UP</text>
+</svg>

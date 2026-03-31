@@ -1,0 +1,19 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,95 20,95 24,95 29,101 33,107 39,107 42,108 47,114 50,116 58,110 62,107 66,107 69,107 72,112 75,111 78,111 81,111 84,122 87,121 90,124 93,129 96,133 99,136 102,135 105,125 108,122 111,123 114,127 117,138 120,137 123,139 126,151 129,151 133,154 136,160 139,163 142,165 145,165 148,165 151,166 154,166 157,166 160,165 163,165 166,166 169,167 172,167 175,167 178,167 181,167 184,167 187,167 190,167 193,167 196,167 199,167 202,167 205,167 208,167 211,167 214,167 217,167 220,167 223,167 226,167 229,167 232,167 235,167 238,167 241,167 244,167 247,167 250,167 253,167 256,167 259,167 262,167 265,167 268,167 271,167 274,167 277,167 280,167 283,167 286,167 289,167 292,167 295,167 298,167 301,167 304,167 310,167 317,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#FF00FF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▼DOWN 52¢</title>
+</line>
+<rect x="21" y="20" width="58" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#FF00FF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#FF00FF" font-family="monospace" font-weight="bold">▼DOWN 52¢</text>
+ <circle cx="72.0" cy="107.0" r="2" fill="#ff00ff" stroke="white" stroke-width="0.5" />
+ <text x="74.0" y="105.0" font-size="6" fill="#ff00ff">P1</text>
+ <text x="10" y="180" font-family="monospace" font-size="9" fill="cyan" font-weight="bold">Pattern: NONE | Result: DOWN</text>
+</svg>

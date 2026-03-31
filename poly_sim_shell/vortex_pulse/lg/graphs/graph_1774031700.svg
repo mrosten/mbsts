@@ -1,0 +1,29 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,92 22,92 29,91 36,90 43,99 50,118 55,110 63,113 69,113 76,115 82,116 86,114 92,107 98,123 104,122 111,117 115,114 120,120 127,124 132,139 137,135 144,142 152,143 163,155 172,158 178,162 183,163 189,163 196,160 205,163 212,165 221,165 229,166 239,165 248,164 255,158 261,131 268,127 272,125 279,128 284,124 292,121 299,163 306,164 316,168" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="85" cy="75" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>VolSnap: DOWN @ 63¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="89" y="47" width="122" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="93" y="57" font-size="9" fill="#FF0000" font-family="monospace">VolSnap: DOWN @ 63¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="91" cy="75" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 63¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="95" y="47" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="99" y="57" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 63¢</text>
+  </g>
+</g>
+</svg>

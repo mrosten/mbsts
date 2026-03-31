@@ -52,7 +52,7 @@ class FTPManager:
     def set_session(self, session_id):
         """Sets the current session ID and ensures the remote directory exists."""
         self.session_id = session_id
-        self.remote_session_dir = f"{self.root_dir}/{session_id}"
+        self.remote_session_dir = f"{self.root_dir}/{session_id}".replace("\\", "/")
         self.session_stats = {"pnl": 0.0, "trades": 0, "status": "ACTIVE", "asset": "BTC", "interval": "5M"}
         self.enqueue_task(self._ensure_remote_dirs_and_update_index)
         # Force immediate index update for new session
@@ -171,6 +171,25 @@ class FTPManager:
                 items = ftp.nlst()
                 
             sessions = [os.path.basename(i) for i in items if "session_" in i]
+            
+            self._log(f"Found {len(sessions)} session directories: {sessions[:10]}...", level="INFO")
+            
+            # Enhanced sorting: parse datetime from session names for proper chronological order
+            def parse_session_time(session_id):
+                try:
+                    # Extract datetime from session_YYYYMMDD_HHMMSS format
+                    timestamp_str = session_id.replace("session_", "")
+                    return datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                except:
+                    return datetime.min  # Put invalid dates at the end
+            
+            # Sort sessions by actual datetime, newest first
+            sessions.sort(key=parse_session_time, reverse=True)
+            
+            # Log the newest few sessions for debugging
+            if sessions:
+                self._log(f"Newest 5 sessions: {sessions[:5]}", level="INFO")
+            
         except Exception as e:
             self._log(f"Failed to list remote directories: {e}", level="ERROR")
             if local_ftp: ftp.quit()
@@ -182,7 +201,7 @@ class FTPManager:
         total_pnl = 0.0
         total_trades = 0
         
-        for s_id in sessions[:20]: # Only build rich cards for last 20 sessions for speed
+        for s_id in sessions[:50]: # Increased from 20 to 50 to capture more sessions
             meta = {"pnl": 0.0, "trades": 0, "status": "UNKNOWN", "asset": "BTC", "interval": "5M"}
             try:
                 # Try to download metadata.json
@@ -209,15 +228,28 @@ class FTPManager:
             except:
                 sd["pretty_date"] = s_id
 
-        # --- SORTING ---
+        # --- ENHANCED SORTING ---
+        # Sort by multiple criteria for robust ordering:
         # 1. ACTIVE sessions first
-        # 2. Then by session date (newest first)
-        def sort_key(item):
+        # 2. Then by actual parsed datetime (newest first)
+        # 3. Finally by session ID as fallback
+        def enhanced_sort_key(item):
             is_active = 1 if item.get("status") == "ACTIVE" else 0
-            # item['id'] is session_20260320_094325, so strings sort chronologically
-            return (is_active, item.get("id", ""))
+            session_id = item.get("id", "")
             
-        session_data_list.sort(key=sort_key, reverse=True)
+            # Parse datetime from session ID for reliable sorting
+            try:
+                timestamp_str = session_id.replace("session_", "")
+                session_dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                # Use timestamp for sorting (newer = larger number)
+                session_timestamp = session_dt.timestamp()
+            except:
+                # Fallback: use string sorting if parsing fails
+                session_timestamp = 0
+            
+            return (is_active, session_timestamp, session_id)
+            
+        session_data_list.sort(key=enhanced_sort_key, reverse=True)
 
         # 3. Build Premium Master Index
         links_html = ""
@@ -571,6 +603,12 @@ class FTPManager:
         from io import BytesIO
         ftp.storbinary(f"STOR {index_file}", BytesIO(master_html.encode('utf-8')))
         self._log("Master index.html uploaded successfully.", level="SYS")
+
+    def force_update_index(self):
+        """Force update the index.html immediately, bypassing rate limiting."""
+        self._log("Force updating index.html...", level="SYS")
+        self.enqueue_task(self._update_remote_index)
+        self.last_index_update = time.time()
 
     def upload_html_log(self, local_path):
         """Enqueues the upload of the main HTML verification log and triggers index update."""

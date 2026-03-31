@@ -7,11 +7,10 @@ load_dotenv()
 import asyncio
 import json
 import os
-import csv
 from datetime import datetime, timezone
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static, Collapsible
+from textual.widgets import Header, Footer, Input, Button, RichLog, Label, Checkbox, RadioButton, RadioSet, Static, Collapsible, Select
 from textual import work, on, events
 from rich.text import Text
 
@@ -30,7 +29,8 @@ try:
         CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
-        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
+        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner,
+        PeakToPeakScanner
     )
     from .darwin_agent import DarwinAgent
     from .ui_modals import (
@@ -44,7 +44,8 @@ try:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal, DarwinSettingsModal, LogFilterModal
+        MM2SettingsModal, DarwinSettingsModal, LogFilterModal, DatabaseExplorerModal,
+        PTPSettingsModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -70,7 +71,8 @@ except ImportError:
         CobraScanner, NitroScanner, BullFlagScanner, HdoScanner, Momentum2Scanner,
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
-        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner
+        VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner,
+        PeakToPeakScanner
     )
     from darwin_agent import DarwinAgent
     from ui_modals import (
@@ -84,7 +86,8 @@ except ImportError:
         FAKSettingsModal, MEASettingsModal, VOLSettingsModal,
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
-        MM2SettingsModal, DarwinSettingsModal, LogFilterModal
+        MM2SettingsModal, DarwinSettingsModal, LogFilterModal, DatabaseExplorerModal,
+        PTPSettingsModal
     )
     from ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -591,6 +594,10 @@ class PulseApp(TradeEngineMixin, App):
     .algo_item Label { width: 1fr; }
     #btn_dar_info { min-width: 3; width: 3; height: 1; border: none; background: #333333; color: #00ffff; margin: 0; padding: 0; }
     #btn_dar_info:hover { background: #444444; color: #ffffff; }
+    #sel_trade_limit { width: 16; height: 3; margin: 0 1; background: #333333; color: #00ffff; border: none; }
+    #sel_trade_limit:hover { background: #444444; }
+    #sel_trade_limit SelectCurrent { background: transparent; border: none; padding: 0 1; height: 3; }
+    .lbl_sm_inline { width: auto; color: #ffffff; margin-left: 1; height: 1; content-align: center middle; }
     """
 
     @on(Button.Pressed, "#btn_dar_info")
@@ -629,7 +636,7 @@ class PulseApp(TradeEngineMixin, App):
         elif cb_id and cb_id.startswith("cb_log_"):
             log_key = cb_id.replace("cb_log_", "")
             # Mapping short ID to settings key
-            key_map = {"main": "main_csv", "console": "console_txt", "mom": "momentum_csv", "html": "verification_html"}
+            key_map = {"console": "console_txt", "html": "verification_html"}
             if log_key in key_map:
                 settings_key = key_map[log_key]
                 self.log_settings[settings_key] = event.value
@@ -678,7 +685,8 @@ class PulseApp(TradeEngineMixin, App):
                 "SSI": lambda: SSISettingsModal(self),
                 "SSC": lambda: SSCSettingsModal(self),
                 "ADT": lambda: ADTSettingsModal(self),
-                "MM2": lambda: MM2SettingsModal(self)
+                "MM2": lambda: MM2SettingsModal(self),
+                "PTP": lambda: PTPSettingsModal(self)
             }
 
             if code in modal_factory:
@@ -748,13 +756,13 @@ class PulseApp(TradeEngineMixin, App):
         
         # Log Toggles
         self.log_settings = {
-            "main_csv": True,
             "console_txt": True,
-            "momentum_csv": True,
             "verification_html": True
         }
         self.log_display_filter = set()
         self.log_display_mode = "ALL"  # Modes: ALL, HIDE, ONLY
+        self.log_history = []          # Store last N (msg, level) for retroactive filtering
+        self.log_paused = False        # Console Pause Feature (v5.9.17)
         
         # [REFACTORED LOG SETUP] - Moved to end of __init__ to handle session subfolders correctly.
         pass
@@ -786,6 +794,7 @@ class PulseApp(TradeEngineMixin, App):
             "Nitro": NitroScanner(self.config),
             "VolSnap": VolSnapScanner(self.config),
             "HDO": HdoScanner(self.config),
+            "PTP": PeakToPeakScanner(self.config),
             "Briefing": BriefingScanner(self.config),
             "WCP": WindowCandleProfiler(self.config),
             "VPOC": VPOCAnalyzer(self.config),
@@ -797,7 +806,7 @@ class PulseApp(TradeEngineMixin, App):
         }
         
         # Initialize DARWIN AI Agent (v5.9.16)
-        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg)
+        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg, app=self)
         self.scanners["Darwin"] = self.darwin
 
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
@@ -810,9 +819,6 @@ class PulseApp(TradeEngineMixin, App):
         self.saved_sim_bankroll = None
         self.app_start_time = time.time()
         
-        # Initialize DARWIN AI Agent (v5.9.16)
-        self.darwin = DarwinAgent(mode=self.config.DARWIN_MODE, log_fn=self.log_msg, app=self)
-        self.scanners["Darwin"] = self.darwin
         
         # Next-Strike Audit State
         self.audit_pending_info = None
@@ -830,6 +836,7 @@ class PulseApp(TradeEngineMixin, App):
         self.last_execution_time = 0
         self.exec_safety_mode = "global_lock"
         self.total_risk_cap = 30.0
+        self.bet_size = 1.0
         self.trend_efficiency = {
             "M-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
             "S-UP":    {"mult": 1.0, "lock": "side_lock", "cool": 1.0},
@@ -841,7 +848,7 @@ class PulseApp(TradeEngineMixin, App):
         }
         
         # Adjustable global settings
-        self.csv_log_freq = 15
+        # CSV Freq removed
         self.last_log_dump = 0
         
         # [NEW] SQLite Shared History Toggles (v5.9.16)
@@ -898,6 +905,7 @@ class PulseApp(TradeEngineMixin, App):
         self.mos_settings = {"moshe_threshold": 0.86, "t1": 290, "d1": 2000.0, "t2": 80, "d2": 80.0, "t3": 15, "d3": 25.0}
         self.zsc_settings = {"z_threshold": 3.5, "coil_threshold": 0.001}
         self.gri_settings = {"grind_duration": 100, "snap_duration": 20, "min_slope_pct": 0.1, "reversal_ratio": 0.60}
+        self.ptp_settings = {"prominence": 2.0, "t_mid_pct": 0.5, "min_slope": 0.0001, "breakdown_tolerance": 5.0}
         self.bri_settings = {"rsi_low": 30, "rsi_high": 70, "odds_thresh": 5.0, "imb_thresh": 2.0, "signal_thresh": 2}
         self.wcp_settings = {"body_ratio_thresh": 0.30, "shadow_ratio_thresh": 2.0}
         self.vpoc_settings = {"dev_threshold": 0.0005}
@@ -970,7 +978,7 @@ class PulseApp(TradeEngineMixin, App):
                             sc.diff_threshold = self.vsn_settings["diff_threshold"]
                     
                     # Basic scanner settings mapping
-                    for key in ["rsi", "tra", "mid", "lat", "pos", "ste", "sli", "min", "liq", "cob", "mes", "gri", "npa", "fak", "mea", "vol", "mos", "zsc", "bri", "wcp", "vpoc", "sdp", "div", "ssi"]:
+                    for key in ["rsi", "tra", "mid", "lat", "pos", "ste", "sli", "min", "liq", "cob", "mes", "gri", "npa", "fak", "mea", "vol", "mos", "zsc", "bri", "wcp", "vpoc", "sdp", "div", "ssi", "ptp"]:
                         s_key = f"{key}_settings"
                         if s_key in saved:
                             getattr(self, s_key).update(saved[s_key])
@@ -982,7 +990,7 @@ class PulseApp(TradeEngineMixin, App):
                         "Liquidity": "liq", "Cobra": "cob", "Mesa": "mes", "GrindSnap": "gri",
                         "NPattern": "npa", "Fakeout": "fak", "MeanReversion": "mea", "VolCheck": "vol",
                         "Moshe": "mos", "ZScore": "zsc", "Briefing": "bri",
-                        "WCP": "wcp", "VPOC": "vpoc", "SDP": "sdp", "DIV": "div", "SSI": "ssi"
+                        "WCP": "wcp", "VPOC": "vpoc", "SDP": "sdp", "DIV": "div", "SSI": "ssi", "PTP": "ptp"
                     }
                     for scanner_name, attr_prefix in sync_map.items():
                         sc = self.scanners.get(scanner_name)
@@ -1009,6 +1017,12 @@ class PulseApp(TradeEngineMixin, App):
 
                     if "auto_sync_risk" in saved: self.auto_sync_risk = bool(saved["auto_sync_risk"])
                     if "exec_safety_mode" in saved: self.exec_safety_mode = str(saved["exec_safety_mode"])
+                    # Restore trade limit
+                    self.trade_limit = saved.get("sel_trade_limit", 0)
+                    try:
+                        sel = self.query_one("#sel_trade_limit", Select)
+                        sel.value = self.trade_limit
+                    except: pass
                     if "total_risk_cap" in saved: self.total_risk_cap = float(saved["total_risk_cap"])
                     if "shield_time" in saved: self.shield_time = int(saved["shield_time"])
                     if "shield_reach" in saved: self.shield_reach = int(saved["shield_reach"])
@@ -1034,8 +1048,8 @@ class PulseApp(TradeEngineMixin, App):
         # ---------------------------------------------------------
         # [SESSION LOG INITIALIZATION]
         # ---------------------------------------------------------
-        csv_base = os.path.basename(self.sim_broker.log_file)
-        base_name_only = os.path.splitext(csv_base)[0]
+        log_base_fn = os.path.basename(self.sim_broker.log_file)
+        base_name_only = os.path.splitext(log_base_fn)[0]
         
         # 1. Console Log
         self.console_log_file = os.path.join(log_dir, base_name_only + "_console.txt")
@@ -1074,27 +1088,34 @@ document.addEventListener('DOMContentLoaded', function() {
 """
             with open(self.html_log_file, "w", encoding="utf-8") as f:
                 f.write("<html><head><title>Vortex Pulse Verification Log</title>")
-                f.write("<style>body{font-family:sans-serif;background:#111;color:#eee;padding:20px;}")
-                f.write("table{width:100%;border-collapse:collapse;margin-top:20px;}")
-                f.write("th,td{border:1px solid #444;padding:10px;text-align:left;}")
-                f.write("th{background:#222;color:#00ffff;}")
-                f.write("tr:nth-child(even){background:#1a1a1a;}")
-                f.write("a{color:#00ffff;text-decoration:none;}a:hover{text-decoration:underline;}")
-                f.write(".UP{color:#00ff00;font-weight:bold;}.DOWN{color:#ff0000;font-weight:bold;}")
-                f.write(".discrepancy{background:#4d0000 !important;}")
-                f.write(".graph-img{width:100%;max-width:350px;height:auto;border:1px solid #444;background:#121212;transition:transform 0.2s;}")
-                f.write(".graph-img:hover{transform:scale(1.8);z-index:100;position:relative;border-color:#00ffff;}")
-                f.write(".no-data{background:#2a2a2a;color:#888;padding:20px;text-align:center;border-radius:8px;margin:20px 0;}")
-                f.write(".algorithm-signals{background:#1a1a1a;border-bottom:2px solid #333;}")
-                f.write(".algorithm-signals td{padding:8px 10px;font-size:0.9em;color:#bbb;}")
-                f.write(".algorithm-signals strong{color:#00ffff;}")
-                # SVG inline styles: makes the inlined svg scale and show tooltips properly
-                f.write(".svg-wrapper{display:inline-block;max-width:350px;width:100%;transition:transform 0.2s;position:relative;}")
-                f.write(".svg-wrapper:hover{transform:scale(1.8);z-index:100;}")
-                f.write(".graph-svg{width:100%;height:auto;border:1px solid #444;background:#121212;display:block;}")
-                f.write(".graph-svg:hover{border-color:#00ffff;}")
-                # Style for SVG circle tooltips so they appear on title hover
-                f.write(".graph-svg circle{cursor:crosshair;}")
+                f.write("<style>")
+                f.write("@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');")
+                f.write("body{font-family:'Inter',sans-serif;background:#0f172a;color:#f8fafc;padding:2rem;margin:0;line-height:1.5;}")
+                f.write(".container{max-width:1400px;margin:0 auto;}")
+                f.write("h1{font-weight:700;color:#38bdf8;letter-spacing:-0.025em;margin-bottom:0.5rem;}")
+                f.write("p{color:#94a3b8;font-size:0.875rem;}")
+                f.write("table{width:100%;border-collapse:separate;border-spacing:0;margin-top:2rem;border-radius:0.75rem;overflow:hidden;box-shadow:0 4px 6px -1px rgb(0 0 0 / 0.1);background:#1e293b;}")
+                f.write("th{background:#334155;color:#38bdf8;text-transform:uppercase;font-size:0.75rem;font-weight:600;letter-spacing:0.05em;padding:1rem;text-align:left;}")
+                f.write("td{padding:1rem;border-bottom:1px solid #334155;font-size:0.875rem;vertical-align:middle;}")
+                f.write("tr.trade-row:hover{background:#334155;}")
+                f.write("a{color:#38bdf8;text-decoration:none;}a:hover{text-decoration:underline;}")
+                f.write(".UP{color:#10b981;font-weight:600;}.DOWN{color:#f43f5e;font-weight:600;}")
+                f.write(".discrepancy{background:#450a0a !important;}")
+                f.write(".graph-cell{width:220px;text-align:center;padding:0.5rem;}")
+                f.write(".graph-img{width:200px;height:100px;border-radius:0.5rem;border:1px solid #475569;background:#0f172a;object-fit:contain;transition:all 0.3s;cursor:pointer;}")
+                f.write(".graph-img:hover{transform:scale(1.05);border-color:#38bdf8;box-shadow:0 0 15px rgba(56,189,248,0.4);}")
+                f.write(".no-data{background:#1e293b;color:#64748b;padding:3rem;text-align:center;border-radius:0.75rem;border:2px dashed #334155;margin:2rem 0;}")
+                f.write(".tier1{background:rgba(51, 65, 85, 0.4) !important;}")
+                f.write(".tier2{background:rgba(88, 28, 135, 0.4) !important;}")
+                f.write(".tier3{background:rgba(49, 46, 129, 0.5) !important;}")
+                f.write(".tier4{background:rgba(131, 24, 67, 0.5) !important;}")
+                f.write(".algorithm-signals{background:rgba(51, 65, 85, 0.3);}")
+                f.write(".algorithm-signals td{padding:0.5rem 1rem 1rem 1rem;font-size:0.75rem;color:#94a3b8;border-top:none;}")
+                f.write(".algorithm-signals strong{color:#38bdf8;}")
+                f.write(".svg-wrapper{display:inline-block;width:200px;transition:transform 0.3s;position:relative;}")
+                f.write(".svg-wrapper:hover{transform:scale(1.1);z-index:100;}")
+                f.write(".graph-svg{width:100%;height:100px;border-radius:0.5rem;border:1px solid #475569;background:#0f172a;display:block;}")
+                f.write(".graph-svg:hover{border-color:#38bdf8;}")
                 f.write("</style>")
                 f.write(svg_inline_js)
                 f.write("</head><body>")
@@ -1102,18 +1123,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 f.write(f"<p>Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
                 f.write("<table><thead><tr>")
                 f.write("<th>Timestamp</th>")
-                f.write("<th>Polymarket Window Link</th>")
+                f.write("<th>Window Audit</th>")
                 f.write("<th>Bot Strike</th>")
-                f.write("<th>Poly Strike</th>")
-                f.write("<th>Strike Drift</th>")
-                f.write("<th>Settlement Price</th>")
-                f.write("<th>Resolution</th>")
-                f.write("<th>Pulse Result</th>")
-                f.write("<th>Sync Status</th>")
-                f.write("<th>Action</th>")
+                f.write("<th>Drift</th>")
+                f.write("<th>Settlement</th>")
                 f.write("<th>Result</th>")
-                f.write("<th>Profit/Loss</th>")
-                f.write("<th>Balance ($)</th>")
+                f.write("<th>Sync</th>")
+                f.write("<th>Action</th>")
+                f.write("<th>Execution</th>")
+                f.write("<th>PnL</th>")
+                f.write("<th>Balance</th>")
                 f.write("<th>Graph</th>")
                 f.write("</tr></thead>")
                 f.write("<tbody>\n")
@@ -1121,10 +1140,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 # Add a placeholder row for early exits - will be replaced if data is added
                 f.write("<!-- SESSION_DATA_PLACEHOLDER -->\n")
 
-        # 3. Momentum ADV Log
+        # 3. Momentum ADV Log removed
         self.mom_analytics = self._reset_mom_analytics()
-        self.mom_adv_log_file = os.path.join(log_dir, f"momentum_adv_{base_name_only}.csv")
-        self._init_mom_adv_log()
 
     def _reset_mom_analytics(self):
         return {
@@ -1245,13 +1262,8 @@ document.addEventListener('DOMContentLoaded', function() {
             with Vertical(classes="input_group"):
                 yield Label("LOGGING CONTROL (Persisted)", classes="input_title")
                 with Horizontal(classes="input_row"):
-                    yield Label("Main CSV:", classes="lbl_sm")
-                    yield Checkbox(value=self.log_settings["main_csv"], id="cb_log_main")
                     yield Label("Console TXT:", classes="lbl_sm")
                     yield Checkbox(value=self.log_settings["console_txt"], id="cb_log_console")
-                with Horizontal(classes="input_row"):
-                    yield Label("Momentum CSV:", classes="lbl_sm")
-                    yield Checkbox(value=self.log_settings["momentum_csv"], id="cb_log_mom")
                     yield Label("Verification HTML:", classes="lbl_sm")
                     yield Checkbox(value=self.log_settings["verification_html"], id="cb_log_html")
 
@@ -1296,6 +1308,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     yield Horizontal(Checkbox(value=False, id="cb_fak"), Label("FAK", id="lbl_fak"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_zsc"), Label("ZSC", id="lbl_zsc"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_vsn"), Label("VSN", id="lbl_vsn"), classes="algo_item")
+                    yield Horizontal(Checkbox(value=False, id="cb_ptp"), Label("PTP", id="lbl_ptp"), classes="algo_item")
 
                 with Vertical(classes="scanner_col"):
                     yield Label("REVERSAL / OSC", classes="scanner_header")
@@ -1341,7 +1354,8 @@ document.addEventListener('DOMContentLoaded', function() {
             Checkbox("TP/SL", value=True, id="cb_tp_active"),
             Checkbox("Tranche Exits", value=False, id="cb_tranche"),
             Checkbox("Strong Only", value=False, id="cb_strong"),
-            Checkbox("1 Trade Max", value=False, id="cb_one_trade"), 
+            Select([("Limit: OFF", 0)] + [(f"Limit: {i}", i) for i in range(1, 10)], 
+                   id="sel_trade_limit", value=0, allow_blank=False),
             Checkbox("Whale Protect", value=False, id="cb_whale"),
             Checkbox("Bounce Entry", value=False, id="cb_bounce"),
             Checkbox("Audit", value=self.official_audit_enabled, id="cb_audit_enabled"),
@@ -1358,6 +1372,8 @@ document.addEventListener('DOMContentLoaded', function() {
             Checkbox("LIVE MODE", value=False, id="cb_live"),
             Input(placeholder="Command: e.g., lo=false", id="inp_cmd"),
             Button("🧬 AI HUB", id="btn_darwin_hub", variant="warning"),
+            Button("🗄 DB", id="btn_db_explorer", variant="default"),
+            Button("||", id="btn_pause_logs", variant="primary"),
             Button("📜 Logs", id="btn_logs"),
             Button("⚙ Settings", id="btn_settings"),
             id="live_row",
@@ -1626,7 +1642,8 @@ document.addEventListener('DOMContentLoaded', function() {
         # Update internal logic variables IMMEDIATELY so they are used in next tick
         val = event.input.value
         try:
-            if event.input.id == "inp_tp": self.committed_tp = float(val) / 100
+            if event.input.id == "inp_amount": self.bet_size = float(val) if val else 1.0
+            elif event.input.id == "inp_tp": self.committed_tp = float(val) / 100
             elif event.input.id == "inp_sl": self.committed_sl = float(val) / 100
             elif event.input.id == "inp_skeptic_odds": self.global_skeptic_odds = float(val)
             elif event.input.id == "inp_skeptic_guess": self.global_skeptic_guess = float(val)
@@ -1659,13 +1676,8 @@ document.addEventListener('DOMContentLoaded', function() {
             self.log_msg(f"VERIFICATION LOG: {self.html_log_file}", level="ADMIN")
         
         # Display other active log files
-        b_log = os.path.basename(self.sim_broker.log_file)
         c_log = os.path.basename(self.console_log_file)
-        m_log = os.path.basename(self.mom_adv_log_file)
-        
-        if self.log_settings.get("main_csv", True): self.log_msg(f"MAIN CSV LOG:     {b_log}", level="ADMIN")
         if self.log_settings.get("console_txt", True): self.log_msg(f"CONSOLE LOG:      {c_log}", level="ADMIN")
-        if self.log_settings.get("momentum_csv", True): self.log_msg(f"MOMENTUM LOG:     {m_log}", level="ADMIN")
         
         # self.log_msg(f"Simulation Started. Bal: ${self.sim_broker.balance}")
         def_risk = self.sim_broker.balance
@@ -1727,6 +1739,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 # Assign to variables for engine access
                 self.global_skeptic_odds = float(s.get("inp_skeptic_odds", 0.05))
                 self.global_skeptic_guess = float(s.get("inp_skeptic_guess", 0.03))
+                self.bet_size = float(s.get("inp_amount", 1.0))
                 if "volatility_scaling" in s:
                     self.volatility_scaling.update(s["volatility_scaling"])
                 self.penalty_percentage = float(s.get("inp_penalty_pct", 10)) / 100.0
@@ -1751,9 +1764,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 except: pass
                 try: self.query_one("#cb_hdo").value = bool(s.get("cb_hdo", False))
                 except: pass
-                try: self.query_one("#cb_one_trade").value = bool(s.get("cb_one_trade", False))
-                except: pass
                 try: self.query_one("#cb_time_tp").value = bool(s.get("cb_time_tp", False))
+                except: pass
+                
+                # Restore trade limit
+                self.trade_limit = s.get("trade_limit", 0)
+                try:
+                    btn = self.query_one("#btn_trade_limit", Button)
+                    btn.label = f"Limit: {self.trade_limit if self.trade_limit > 0 else 'OFF'}"
                 except: pass
                 
                 try: self.query_one("#cb_bounce").value = self.bounce_mode
@@ -1766,9 +1784,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 # Sync log switches
                 sync_logs = {
-                    "#cb_log_main": "main_csv",
                     "#cb_log_console": "console_txt",
-                    "#cb_log_mom": "momentum_csv",
                     "#cb_log_html": "verification_html"
                 }
                 for qid, k in sync_logs.items():
@@ -1902,20 +1918,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 self.risk_manager.set_bankroll(sb, is_live=False)
             self.risk_initialized = True
 
+    @on(Select.Changed, "#sel_trade_limit")
+    def on_trade_limit_change(self, event: Select.Changed):
+        """Update trade limit from dropdown."""
+        try:
+            val = int(event.value)
+            self.trade_limit = val
+            if not getattr(self, "is_initializing", False):
+                self.save_settings()
+                self.log_msg(f"SETTING: Trade Limit | Value: {val if val > 0 else 'OFF'}", level="SYS")
+        except Exception as e:
+            self.log_msg(f"[red]Trade Limit Update Error: {e}[/]", level="ERROR")
     @on(Checkbox.Changed, "#cb_tp_active")
     @on(Checkbox.Changed, "#cb_hdo")
     @on(Checkbox.Changed, "#cb_tranche")
     @on(Checkbox.Changed, "#cb_strong")
-    @on(Checkbox.Changed, "#cb_one_trade")
     @on(Checkbox.Changed, "#cb_whale")
     @on(Checkbox.Changed, "#cb_bounce")
     @on(Checkbox.Changed, "#cb_time_tp")
-    def on_settings_checkbox_changed(self, event: Checkbox.Changed):
-        """Auto-persist setting checkboxes and log them."""
+    def on_settings_changed(self, event: Checkbox.Changed):
+        """Auto-persist setting changes and log them."""
         cid = event.checkbox.id
+        val = event.value
+        
         # Update runtime state for bounce toggle
         if cid == "cb_bounce":
-            self.bounce_mode = event.value
+            self.bounce_mode = val
         
         if not getattr(self, "is_initializing", False):
             self.save_settings()
@@ -1923,7 +1951,6 @@ document.addEventListener('DOMContentLoaded', function() {
         name = ""
         if cid == "cb_tp_active": name = "TP/SL Monitoring"
         elif cid == "cb_strong": name = "Strong Only Mode"
-        elif cid == "cb_one_trade": name = "1 Trade Max Guard"
         elif cid == "cb_whale": name = "Whale Protect"
         elif cid == "cb_bounce": name = "Bounce Entry Mode"
         elif cid == "cb_time_tp": name = "Time-Based TP"
@@ -2002,10 +2029,16 @@ document.addEventListener('DOMContentLoaded', function() {
             pass
         else:
             try:
-                self.query_one(RichLog).write(display_msg)
+                if not self.log_paused:
+                    self.query_one(RichLog).write(display_msg)
             except:
                 # During shutdown or if UI is not ready, skip RichLog
                 pass
+        
+        # Add to history for retroactive filtering
+        self.log_history.append((display_msg, short_lv))
+        if len(self.log_history) > 2000:
+            self.log_history.pop(0)
         
         # Mirror to console log file for persistence (pure ASCII scrubbing)
         import re
@@ -2019,6 +2052,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 with open(self.console_log_file, "a", encoding="utf-8") as f:
                     f.write(f"[{timestamp}] {clean_msg}\n")
         except: pass
+
+    def rebuild_rich_log(self):
+        """Clears and re-populates the RichLog with history based on current filters."""
+        try:
+            log_window = self.query_one(RichLog)
+            log_window.clear()
+            for display_msg, short_lv in self.log_history:
+                should_display = True
+                if self.log_display_mode == "HIDE":
+                    if short_lv in self.log_display_filter: should_display = False
+                elif self.log_display_mode == "ONLY":
+                    if short_lv not in self.log_display_filter: should_display = False
+                
+                if should_display:
+                    log_window.write(display_msg)
+        except Exception as e:
+            # print(f"Error rebuilding log: {e}")
+            pass
 
     def dump_state_log(self):
         try:
@@ -2045,8 +2096,9 @@ document.addEventListener('DOMContentLoaded', function() {
             pass
 
     def check_dump_log(self):
+        # CSV dumping removed. Web Dash status updates still needed?
         now = time.time()
-        if now - self.last_log_dump >= self.csv_log_freq:
+        if now - self.last_log_dump >= 15: # Hardware heart-beat/Dash update
             self.last_log_dump = now
             self.dump_state_log()
 
@@ -2085,24 +2137,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
             data = {
                 "scanner_weights": self.scanner_weights,
-                "shield_time": _si("#inp_shield_time", 45),
-                "shield_reach": _si("#inp_shield_reach", 5),
+                "shield_time": getattr(self, "shield_time", 45),
+                "shield_reach": getattr(self, "shield_reach", 5),
                 "total_risk_cap": getattr(self, "total_risk_cap", 30.0),
                 "inp_risk_alloc": _v("#inp_risk_alloc", "0.0"),
-                "inp_amount":    _v("#inp_amount",    "1.00"),
-                "inp_tp":        _v("#inp_tp",        "95"),
-                "inp_sl":        _v("#inp_sl",        "40"),
+                "inp_amount":    f"{getattr(self, 'bet_size', 1.0):.2f}",
+                "inp_tp":        f"{getattr(self, 'committed_tp', 0.95)*100:.0f}",
+                "inp_sl":        f"{getattr(self, 'committed_sl', 0.40)*100:.0f}",
                 "inp_min_diff":  _v("#inp_min_diff",  "0"),
                 "inp_min_price": _v("#inp_min_price", "0.55"),
                 "inp_max_price": _v("#inp_max_price", "0.80"),
-                "inp_skeptic_odds": _v("#inp_skeptic_odds", "0.05"),
-                "inp_skeptic_guess": _v("#inp_skeptic_guess", "0.03"),
-                "inp_penalty_pct": _v("#inp_penalty_pct", "10"),
+                "inp_skeptic_odds": f"{getattr(self, 'global_skeptic_odds', 0.05):.2f}",
+                "inp_skeptic_guess": f"{getattr(self, 'global_skeptic_guess', 0.03):.2f}",
+                "inp_penalty_pct": f"{getattr(self, 'penalty_percentage', 0.10)*100:.0f}",
+                "inp_lw_lockout": str(getattr(self, "lw_lockout", 0)),
+                "inp_sentiment_guard": f"{getattr(self, 'sentiment_guard', 0.45):.2f}",
                 "cb_tp_active":  _cb("#cb_tp_active", False),
                 "cb_hdo":        _cb("#cb_hdo", False),
-                "cb_one_trade":  _cb("#cb_one_trade", False),
+                "sel_trade_limit":getattr(self, "trade_limit", 0),
                 "cb_bounce":     _cb("#cb_bounce", False),
-                "official_audit_enabled": _cb("#cb_audit_enabled", True),
+                "official_audit_enabled": getattr(self, "official_audit_enabled", True),
                 "sl_plus_mode":  self.sl_plus_mode,
                 "grow_riskbankroll": getattr(self, "grow_riskbankroll", False),
                 "mom_buy_mode":  self.mom_buy_mode,
@@ -2113,6 +2167,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 "algo_enabled":  {code: _cb(f"#cb_{code.lower()}", False) for code in ALGO_INFO},
                 "nit_settings": self.nit_settings,
                 "vsn_settings": self.vsn_settings,
+                "ptp_settings": self.ptp_settings,
                 "rsi_settings": self.rsi_settings,
                 "tra_settings": self.tra_settings,
                 "mid_settings": self.mid_settings,
@@ -2149,15 +2204,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 "volatility_scaling": self.volatility_scaling,
                 "conviction_scaling":  self.conviction_scaling,
                 "value_reentry": self.value_reentry,
-                "db_log_windows": self.db_log_windows,
-                "db_log_alpha":   self.db_log_alpha,
-                "db_log_darwin":  self.db_log_darwin,
-                "db_log_ticks":   self.db_log_ticks,
-                "db_log_context": self.db_log_context,
-                "official_audit_enabled": self.official_audit_enabled,
-                "db_tick_freq": self.db_tick_freq,
-                "log_display_mode": self.log_display_mode,
-                "log_display_filter": list(self.log_display_filter),
+                "db_log_windows": getattr(self, "db_log_windows", False),
+                "db_log_alpha":   getattr(self, "db_log_alpha", False),
+                "db_log_darwin":  getattr(self, "db_log_darwin", False),
+                "db_log_ticks":   getattr(self, "db_log_ticks", False),
+                "db_log_context": getattr(self, "db_log_context", False),
+                "db_tick_freq":   getattr(self, "db_tick_freq", 1),
+                "log_display_mode": getattr(self, "log_display_mode", "ALL"),
+                "log_display_filter": list(getattr(self, "log_display_filter", [])),
                 "darwin_mode": self.config.DARWIN_MODE
             }
             
@@ -2474,6 +2528,20 @@ document.addEventListener('DOMContentLoaded', function() {
         bid = event.button.id
         if bid == "btn_settings":
             self.push_screen(GlobalSettingsModal(self))
+        elif bid == "btn_db_explorer":
+            self.push_screen(DatabaseExplorerModal(self))
+        elif bid == "btn_pause_logs":
+            self.log_paused = not self.log_paused
+            btn = event.button
+            if self.log_paused:
+                btn.label = "▶ RESUME"
+                btn.variant = "success"
+                self.log_msg("CONSOLE: Updates PAUSED. (Scroll up to review history)", level="SYS")
+            else:
+                btn.label = "⏸ PAUSE"
+                btn.variant = "primary"
+                self.log_msg("CONSOLE: Updates RESUMED.", level="SYS")
+                self.rebuild_rich_log()
         elif bid == "btn_logs":
             self.push_screen(LogFilterModal(self))
         elif bid == "btn_pre_up" or bid == "btn_pre_down":

@@ -1,0 +1,43 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,84 22,84 31,81 38,81 44,84 54,84 63,91 75,103 88,105 94,105 100,104 109,101 118,70 126,55 131,49 138,46 144,40 150,38 157,34 166,31 177,33 187,33 200,34 210,31 225,28 237,24 247,23 258,20 272,22 282,20 292,20 306,20 318,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#00FFFF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▲UP 56¢</title>
+</line>
+<rect x="21" y="20" width="46" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#00FFFF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#00FFFF" font-family="monospace" font-weight="bold">▲UP 56¢</text>
+<g class="trade-dot">
+  <circle cx="87" cy="90" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 53¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="91" y="62" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="95" y="72" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 53¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="87" cy="90" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>WCP: DOWN @ 53¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="91" y="62" width="98" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="95" y="72" font-size="9" fill="#FF0000" font-family="monospace">WCP: DOWN @ 53¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="130" cy="54" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>HDO: UP @ 77¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_2" opacity="0" style="pointer-events:none">
+    <rect x="134" y="26" width="86" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="138" y="36" font-size="9" fill="#00FF00" font-family="monospace">HDO: UP @ 77¢</text>
+  </g>
+</g>
+</svg>

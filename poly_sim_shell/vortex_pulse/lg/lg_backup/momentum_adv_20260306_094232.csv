@@ -1,3 +1,0 @@
-Window_ID,Pre_15s_Gap,BTC_Pre_15s,BTC_Pre_60s,BTC_Velocity_60s,Gap_5s,BTC_5s,Gap_10s,BTC_10s,Gap_15s,BTC_15s,Poly_Spread_15s,UP_Bid_15s,DN_Bid_15s,First_55c_Side,First_55c_Time,First_60c_Side,First_60c_Time,First_65c_Side,First_65c_Time,RSI_1m,V_1m,Drawdown_UP,Drawdown_DN,ATR_5m,BTC_Open,BTC_Close,Winner
-1772782800,,,71038.9,-133.20,,,,,,,,,,UP,154,UP,154,UP,154,70.40,10,-105.25,148.80,62.55,70905.70,71054.50,UP
-1772783100,,,71124.5,-65.60,0.0,71058.9,-0.09099502487562189,71064.9,,,,,,DOWN,10,UP,25,UP,78,67.45,13,0.00,119.80,65.32,71058.90,71096.70,UP

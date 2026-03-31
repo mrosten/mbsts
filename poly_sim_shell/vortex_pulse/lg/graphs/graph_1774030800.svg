@@ -1,0 +1,25 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,70 22,70 32,69 35,68 40,75 45,74 50,61 55,64 59,73 63,75 67,87 72,113 78,100 83,126 86,123 91,110 95,102 99,101 104,110 109,105 117,106 120,95 125,103 129,96 133,120 139,145 142,141 146,135 150,148 155,157 159,163 164,161 169,161 173,163 179,165 183,166 191,166 195,166 200,167 206,168 210,167 216,168 221,168 225,168 232,168 235,168 239,168 243,168 248,168 252,168 257,168 261,168 266,168 273,168 278,168 284,168 288,168 293,168 298,168 306,168 311,168" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#FF00FF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▼DOWN 52¢</title>
+</line>
+<rect x="21" y="20" width="58" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#FF00FF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#FF00FF" font-family="monospace" font-weight="bold">▼DOWN 52¢</text>
+<g class="trade-dot">
+  <circle cx="77" cy="76" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 62¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="81" y="48" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="85" y="58" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 62¢</text>
+  </g>
+</g>
+</svg>

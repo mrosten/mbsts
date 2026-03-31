@@ -1,0 +1,16 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,86 26,86 34,95 41,107 49,105 57,116 64,127 72,107 85,113 91,115 98,91 104,90 109,96 116,104 122,102 128,95 134,101 140,115 153,129 161,138 166,125 176,119 182,128 188,125 195,117 202,117 212,116 217,118 225,98 233,98 240,107 248,90 255,60 264,55 276,53 285,66 292,49 300,24 309,21 317,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#00FFFF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▲UP 52¢</title>
+</line>
+<rect x="21" y="20" width="46" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#00FFFF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#00FFFF" font-family="monospace" font-weight="bold">▲UP 52¢</text>
+</svg>

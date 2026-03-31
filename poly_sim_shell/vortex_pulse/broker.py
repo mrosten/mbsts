@@ -31,67 +31,13 @@ class SimBroker:
             
         if not os.path.exists(self.log_file):
             with open(self.log_file, 'w') as f:
-                meta = (
-                    f"# Polymarket Vortex Pulse V5 — Session Log\n"
-                    f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"# Snapshot rows logged every ~15s. TRADE_EVENT rows on buy/sell/settle.\n"
-                    f"#\n"
-                    f"# SNAPSHOT FIELDS:\n"
-                    f"#   Timestamp      — Wall-clock time of snapshot\n"
-                    f"#   SimBal         — Simulated wallet balance (USD)\n"
-                    f"#   LiveBal        — Live Polymarket wallet balance (USD)\n"
-                    f"#   RiskBankroll   — Current risk-adjusted bankroll available for bets (USD)\n"
-                    f"#   TimeRem        — Time remaining in current 5-min window (MM:SS)\n"
-                    f"#   BTC_Price      — Live BTC/USD price from Kraken WS / Binance fallback\n"
-                    f"#   BTC_Open       — BTC price at window open (Kraken REST)\n"
-                    f"#   BTC_Diff       — BTC_Price minus BTC_Open (USD)\n"
-                    f"#   BTC_Range      — Intra-window high-low price range (USD)\n"
-                    f"#   Odds_Score     — Polymarket UP-DN bid skew in cents (+ve = UP favoured)\n"
-                    f"#   Trend_4H       — 4-hour macro trend direction (S-UP/M-UP/W-UP/NEUTRAL/W-DOWN/M-DOWN/S-DOWN)\n"
-                    f"#   Trend_1H       — 1-hour trend direction (same scale)\n"
-                    f"#   RSI_1m         — 14-period RSI on 1-minute Binance candles\n"
-                    f"#   ATR_5m         — 5-period Average True Range on 1-minute candles (USD)\n"
-                    f"#   Sig_Slingshot  — Slingshot scanner signal this tick (WAIT/OFF/BET_UP/BET_DOWN)\n"
-                    f"#   Sig_Cobra      — Cobra scanner signal this tick\n"
-                    f"#   Sig_CoiledCobra— Coiled Cobra (CCO) scanner signal this tick\n"
-                    f"#   Sig_Flag       — BullFlag scanner signal this tick\n"
-                    f"#   Master_Score   — Net scanner consensus: (# UP signals) minus (# DOWN signals)\n"
-                    f"#   Master_Status  — Aggregate direction: BUY_UP / BUY_DN / NEUTRAL\n"
-                    f"#   Active_Scanners— Count of scanners firing a BET signal this tick\n"
-                    f"#   UP_Price       — Polymarket UP option midpoint price\n"
-                    f"#   DN_Price       — Polymarket DOWN option midpoint price\n"
-                    f"#   UP_Bid         — Polymarket UP option best bid\n"
-                    f"#   DN_Bid         — Polymarket DOWN option best bid\n"
-                    f"#   Shares_UP      — Current UP shares held\n"
-                    f"#   Shares_DN      — Current DOWN shares held\n"
-                    f"#\n"
-                    f"# TRADE_EVENT FIELDS (interleaved rows):\n"
-                    f"#   TRADE_EVENT,Time,Type,Side,Amount,ExecPrice,SigPrice,Slippage,Shares,RSI,Trend,RiskBal,MainBal,Note\n"
-                )
-                header = (
-                    "Timestamp,SimBal,LiveBal,RiskBankroll,"
-                    "TimeRem,BTC_Price,BTC_Open,BTC_Diff,BTC_Range,"
-                    "Odds_Score,Trend_4H,Trend_1H,RSI_1m,ATR_5m,"
-                    "Sig_Slingshot,Sig_Cobra,Sig_CoiledCobra,Sig_Flag,"
-                    "Master_Score,Master_Status,Active_Scanners,"
-                    "UP_Price,DN_Price,UP_Bid,DN_Bid,"
-                    "Shares_UP,Shares_DN"
-                )
-                f.write(meta + header + "\n")
+                f.write(f"# Polymarket Vortex Pulse V5 — Session Log\n")
+                f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"# Standard Text Format\n\n")
 
     def write_to_log(self, text):
-        # Access app for log settings if possible. 
-        # PulseApp sets self.app = self on this broker during init.
-        current_app = getattr(self, "app", None)
-        if current_app and hasattr(current_app, "log_settings"):
-            if not current_app.log_settings.get("main_csv", True):
-                return
-
-        if not os.path.exists(os.path.dirname(self.log_file)):
-            os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
-
-        with open(self.log_file, 'a') as f:
-            f.write(text + "\n")
+        # CSV logging disabled
+        return
 
     def log_trade(self, type_, side, amount, price, shares, context=None, note=""):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

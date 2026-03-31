@@ -63,6 +63,7 @@ class MarketDataManager:
         self.market_data = {
             "btc_price": 0, "btc_open": 0, "start_ts": 0, 
             "up_p": 0.5, "down_p": 0.5, "up_price": 0.5, "down_price": 0.5,
+            "up_price_open": 0.5, # [NEW] Track option open price for Darwin
             "up_bid": 0.5, "down_bid": 0.5, "up_ask": 0.51, "down_ask": 0.51,
             "up_id": None, "down_id": None,
             "sling_signal": "OFF", "cobra_signal": "OFF", "flag_signal": "OFF",
@@ -486,7 +487,8 @@ class MarketDataManager:
             
             def get_p(tid, side):
                 try: 
-                    return float(requests.get("https://clob.polymarket.com/price", params={"token_id":tid,"side":side}, timeout=1.5).json().get("price",None))
+                    price = requests.get("https://clob.polymarket.com/price", params={"token_id":tid,"side":side}, timeout=1.5).json().get("price",None)
+                    return float(price) if price is not None else None
                 except: return None
             
             # Remove nested ThreadPoolExecutor to prevent thread-join hangs on exit

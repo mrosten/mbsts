@@ -247,7 +247,8 @@ class TradeEngineMixin:
     # ===========================================================================
     # DARWIN ORCHESTRATION HELPERS (Phase 2)
     # ===========================================================================
-    def _assemble_darwin_system_config(self):
+
+    def _assemble_darwin_system_config(self):
         """Gather current bot settings for Darwin to analyze/adjust."""
         scanner_to_cb = {
             "MOM": "#cb_mom", "MM2": "#cb_mm2", "NIT": "#cb_nit", "CCO": "#cb_cco",
@@ -269,7 +270,7 @@ class TradeEngineMixin:
                         active_scanners.append(sc_id)
                 except: pass
                     
-            bet_size = float(self.query_one("#inp_amount").value)
+            bet_size = getattr(self, "bet_size", 1.0)
             tp_pct = float(self.query_one("#inp_tp").value) / 100.0
             sl_pct = float(self.query_one("#inp_sl").value) / 100.0
         except:
@@ -282,6 +283,9 @@ class TradeEngineMixin:
             "sl_pct": sl_pct,
             "risk_cap": getattr(self, "total_risk_cap", 30.0),
             "penalty_pct": getattr(self, "penalty_percentage", 0.20),
+            "lw_lockout": getattr(self, "lw_lockout", 0),
+            "sentiment_guard": getattr(self, "sentiment_guard", 0.50),
+            "volatility_scaling": getattr(self, "volatility_scaling", {"enabled": False}),
             "darwin_mode": getattr(self.config, "DARWIN_MODE", "v1")
         }
 
@@ -298,7 +302,7 @@ class TradeEngineMixin:
             "COB": "#cb_cob", "SLI": "#cb_sli", "VOL": "#cb_vol", "LIQ": "#cb_liq",
             "SSC": "#cb_ssc", "ADT": "#cb_adt", "MID": "#cb_mid", "MIN": "#cb_min",
             "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div",
-            "SSI": "#cb_ssi"
+            "SSI": "#cb_ssi", "PTP": "#cb_ptp"
         }
 
         
@@ -320,7 +324,9 @@ class TradeEngineMixin:
                 def _do_risk():
                     try:
                         if "bet_size" in act:
-                            self.query_one("#inp_amount").value = f"{float(act['bet_size']):.2f}"
+                            val = float(act['bet_size'])
+                            self.bet_size = val
+                            self.query_one("#inp_amount").value = f"{val:.2f}"
                         if "tp_pct" in act:
                             self.query_one("#inp_tp").value = f"{float(act['tp_pct'])*100:.0f}"
                             self.committed_tp = float(act['tp_pct'])
@@ -333,6 +339,52 @@ class TradeEngineMixin:
                     except: pass
                 self.safe_call(_do_risk)
                 self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Adjusted Risk Parameters", level="ADMIN")
+
+            elif a_type in ["set_scanner_param", "set_algo_param"]:
+                sid = act.get("id", "").upper()
+                param = act.get("param")
+                val = act.get("value")
+                sc = self.scanners.get(sid)
+                if sc and param:
+                    # Support both adv_settings dict or direct attribute update
+                    if hasattr(sc, "adv_settings") and param in sc.adv_settings:
+                        sc.adv_settings[param] = val
+                        self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Updated {sid} {param} -> {val}", level="ADMIN")
+                        self.save_settings()
+                    elif hasattr(sc, param):
+                        setattr(sc, param, val)
+                        self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Updated {sid} {param} -> {val}", level="ADMIN")
+
+            elif a_type == "set_global":
+                def _do_global():
+                    try:
+                        if "lw_lockout" in act:
+                            self.lw_lockout = int(act["lw_lockout"])
+                            self.query_one("#inp_lw_lockout").value = str(self.lw_lockout)
+                        if "sentiment_guard" in act:
+                            self.sentiment_guard = float(act["sentiment_guard"])
+                            self.query_one("#inp_sentiment_guard").value = f"{self.sentiment_guard:.2f}"
+                        if "penalty_pct" in act:
+                            self.penalty_percentage = float(act["penalty_pct"])
+                            self.query_one("#inp_penalty_pct").value = f"{self.penalty_percentage*100:.0f}"
+                        self.save_settings()
+                    except: pass
+                self.safe_call(_do_global)
+                self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Updated Global Parameters", level="ADMIN")
+
+            elif a_type == "set_volatility":
+                def _do_vol():
+                    try:
+                        vs = getattr(self, "volatility_scaling", {})
+                        if "enabled" in act: vs["enabled"] = bool(act["enabled"])
+                        if "floor" in act: vs["floor"] = float(act["floor"])
+                        if "ceiling" in act: vs["ceiling"] = float(act["ceiling"])
+                        self.save_settings()
+                    except: pass
+                self.safe_call(_do_vol)
+                self.log_msg(f"[bold cyan]🧬 DARWIN:[/] Updated Volatility Scaling", level="ADMIN")
+        
+        self.save_settings()
 
 
     async def fetch_market_loop(self):
@@ -356,7 +408,7 @@ class TradeEngineMixin:
                 "Mesa": "#cb_mes", "MeanReversion": "#cb_mea", "GrindSnap": "#cb_gri", "VolCheck": "#cb_vol",
                 "Moshe": "#cb_mos", "ZScore": "#cb_zsc", "Nitro": "#cb_nit", "VolSnap": "#cb_vsn", "HDO": "#cb_hdo", "Briefing": "#cb_bri",
                 "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div", "SSI": "#cb_ssi",
-                "SSC": "#cb_ssc", "ADT": "#cb_adt", "Darwin": "#cb_dar"
+                "SSC": "#cb_ssc", "ADT": "#cb_adt", "Darwin": "#cb_dar", "PTP": "#cb_ptp"
             }
             
             if not self.risk_initialized:
@@ -433,17 +485,17 @@ class TradeEngineMixin:
                     floor = vol_cfg.get("floor", 15.0)
                     ceiling = vol_cfg.get("ceiling", 40.0)
                     
-                    if atr < floor:
+                    if 0.01 < atr < floor:
                         self.window_vol_mult = 0.0
                         self.window_vol_halt = True
-                        self.log_msg(f"[bold yellow]VOL-HALT:[/] ATR {atr:.1f} < Floor {floor:.1f}. Trading SUSPENDED for this window.", level="SYS")
+                        self.log_msg(f"[bold yellow]VOL-HALT:[/] 5m ATR {atr:.1f} < Floor {floor:.1f}. Trading SUSPENDED for this window.", level="SYS")
                     else:
-                        self.window_vol_mult = max(0.0, min(1.0, (atr - floor) / (ceiling - floor)))
+                        self.window_vol_mult = max(0.0, min(1.0, (atr - floor) / (ceiling - floor))) if atr >= floor else 1.0
                         self.window_vol_halt = False
-                        if self.window_vol_mult < 1.0:
-                            self.log_msg(f"VOL-LATCH: {self.window_vol_mult*100:.0f}% Sizing (ATR:{atr:.1f}) latched for window.", level="SYS")
-                        else:
-                            self.log_msg(f"VOL-LATCH: 100% Sizing (ATR:{atr:.1f} >= Ceiling {ceiling:.1f}) window confirmed.", level="SYS")
+                        if atr >= floor and self.window_vol_mult < 1.0:
+                            self.log_msg(f"VOL-LATCH: {self.window_vol_mult*100:.0f}% Sizing (5m ATR:{atr:.1f}) latched for window.", level="SYS")
+                        elif atr >= ceiling:
+                            self.log_msg(f"VOL-LATCH: 100% Sizing (5m ATR:{atr:.1f} >= Ceiling {ceiling:.1f}) window confirmed.", level="SYS")
                 else:
                     self.window_vol_mult = 1.0
                     self.window_vol_halt = False
@@ -535,6 +587,7 @@ class TradeEngineMixin:
                     self.market_data["down_bid"] = poly.get("down_bid", 0.5)
                     self.market_data["up_ask"] = poly.get("up_ask", 0.51)
                     self.market_data["down_ask"] = poly.get("down_ask", 0.51)
+                    self.market_data["up_price_open"] = poly.get("up_price", 0.5) # [NEW] Capture Option Open Price
                     # Re-calculate odds_score immediately so generate_window_briefing is fresh
                     u, d = self.market_data["up_bid"], self.market_data["down_bid"]
                     self.market_data["odds_score"] = round((u - d) * 100, 1)
@@ -719,7 +772,14 @@ class TradeEngineMixin:
                                     main_bal = self.live_broker.balance if is_l else self.sim_broker.balance
                                     logged_pnl = buf.get("pnl", 0.0)
                                     
-                                    f.write(f"<tr class='{row_class}'>")
+                                    price_diff = abs(buf.get('close_price', 0) - p2b_start) * 100
+                                    tier_class = ""
+                                    if price_diff >= 100: tier_class = "tier4"
+                                    elif price_diff >= 50: tier_class = "tier3"
+                                    elif price_diff >= 25: tier_class = "tier2"
+                                    elif price_diff >= 1: tier_class = "tier1"
+                                    
+                                    f.write(f"<tr class='{row_class} trade-row {tier_class}'>")
                                     f.write(f"<td>{timestamp_str}</td>")
                                     f.write(f"<td><a href='{pm_url}' target='_blank'>{audit_slug}</a></td>")
                                     f.write(f"<td>${p2b_start:,.2f}</td>") # Bot Strike
@@ -735,50 +795,50 @@ class TradeEngineMixin:
                                     f.write(f"<td>${main_bal:,.2f}</td>") # Simulated/Live Balance
                                     graph_fn = buf.get("graph_filename", "")
                                     if graph_fn:
-                                        f.write(f"<td><img src='graphs/{graph_fn}' class='graph-img' onclick='window.open(this.src)'></td>")
+                                        f.write(f"<td class='graph-cell'><img src='graphs/{graph_fn}' class='graph-img' onclick='window.open(this.src)'></td>")
                                     else:
-                                        f.write(f"<td>N/A</td>")
+                                        f.write(f"<td class='graph-cell'>N/A</td>")
                                     f.write(f"</tr>\n")
                                     
                                     # Add algorithm signals paragraph as a separate row below
-                                    f.write(f"<tr class='algorithm-signals'><td colspan='10'>{algorithms_text}</td></tr>\n")
+                                    f.write(f"<tr class='algorithm-signals'><td colspan='12'>{algorithms_text}</td></tr>\n")
                                     
-                                    # Parallel FTP Upload
-                                    if self.log_settings.get("verification_html", True):
-                                        self.ftp_manager.upload_html_log(self.html_log_file)
-                                        
-                                    # Push metrics to dashboard
-                                    try:
-                                        self.ftp_manager.push_session_stats(
-                                            pnl=getattr(self, "session_pnl", 0.0),
-                                            trades=getattr(self, "session_total_trades", 0),
-                                            status="ACTIVE",
-                                            interval=f"{self.config.MARKET_FREQ}M"
-                                        )
-                                    except: pass
+                                # Parallel FTP Upload
+                                if self.log_settings.get("verification_html", True):
+                                    self.ftp_manager.upload_html_log(self.html_log_file)
+                                    
+                                # Push metrics to dashboard
+                                try:
+                                    self.ftp_manager.push_session_stats(
+                                        pnl=getattr(self, "session_pnl", 0.0),
+                                        trades=getattr(self, "session_total_trades", 0),
+                                        status="ACTIVE",
+                                        interval=f"{self.config.MARKET_FREQ}M"
+                                    )
+                                except: pass
 
-                                    # [DARWIN] Window End Analysis (v5.9.16)
-                                    try:
-                                        if hasattr(self, "darwin"):
-                                            darwin_ctx = {
-                                                "window_id": audit_slug,
-                                                "winner": official_winner,
-                                                "pnl": buf.get("pnl", 0.0),
-                                                "invested": buf.get("invested", 0.0),
-                                                "scanners_fired": list(buf.get("tick_signals", {}).keys()),
-                                                "btc_open": buf.get("strike_o", 0.0),
-                                                "btc_close": p2b_next,
-                                                "btc_move_pct": (p2b_next - buf.get("strike_o", 0.0)) / buf.get("strike_o", 1.0) if buf.get("strike_o", 0.0) > 0 else 0,
-                                                "atr": getattr(self, "market_data", {}).get("atr", 0.0),
-                                                "trend_1h": self.market_data_manager.trend_1h,
-                                                "odds_score": getattr(self, "market_data", {}).get("odds_score", 0.0),
-                                                "up_price_open": buf.get("open_price", 0.5),
-                                                "up_price_close": buf.get("close_price", 0.5),
-                                                "tilt_next": getattr(self, "_pending_next_tilt", None)
-                                            }
-                                            self.darwin.on_window_end(darwin_ctx)
-                                    except Exception as de:
-                                        self.log_msg(f"[dim]🧬 DARWIN Context Error: {de}[/]", level="SYS")
+                                # [DARWIN] Window End Analysis (v5.9.16)
+                                try:
+                                    if hasattr(self, "darwin"):
+                                        darwin_ctx = {
+                                            "window_id": audit_slug,
+                                            "winner": official_winner,
+                                            "pnl": buf.get("pnl", 0.0),
+                                            "invested": buf.get("invested", 0.0),
+                                            "scanners_fired": list(buf.get("tick_signals", {}).keys()),
+                                            "btc_open": buf.get("strike_o", 0.0),
+                                            "btc_close": p2b_next,
+                                            "btc_move_pct": (p2b_next - buf.get("strike_o", 0.0)) / buf.get("strike_o", 1.0) if buf.get("strike_o", 0.0) > 0 else 0,
+                                            "atr_5m": getattr(self, "market_data", {}).get("atr_5m", 0.0),
+                                            "trend_1h": self.market_data_manager.trend_1h,
+                                            "odds_score": getattr(self, "market_data", {}).get("odds_score", 0.0),
+                                            "up_price_open": buf.get("up_price_open", 0.5), # [FIX] Use option open price
+                                            "up_price_close": buf.get("close_price", 0.5),
+                                            "tilt_next": getattr(self, "_pending_next_tilt", None)
+                                        }
+                                        self.darwin.on_window_end(darwin_ctx)
+                                except Exception as de:
+                                    self.log_msg(f"[dim]🧬 DARWIN Context Error: {de}[/]", level="SYS")
                             except Exception as e:
                                 self.log_msg(f"[red]HTML Log Error: {e}[/]", level="ERROR")
                         else:
@@ -870,7 +930,7 @@ class TradeEngineMixin:
                         self.mom_analytics[key_s], self.mom_analytics[key_t] = "DOWN", elapsed
             # -----------------------------------
 
-            tick_signals = {}  # Collect scanner signals this tick for CSV analytics
+            tick_signals = {}  # Collect scanner signals this tick for UI / consensus
 
             # --- Bounce Entry: Per-Tick Monitor ---
             if self.bounce_pending and not self.mid_window_lockout:
@@ -960,7 +1020,7 @@ class TradeEngineMixin:
                             self.log_msg(f"RE-CONFIRM {name}: Snap-back detected (+{move*100:.1f}¢ in {int(elapsed_since_touch)}s). Firing RD2.", level="SCAN")
                             
                             # Original size calculation logic (simplified for re-entry)
-                            base_bs = float(self.query_one("#inp_amount").value)
+                            base_bs = getattr(self, "bet_size", 1.0)
                             bs = base_bs * re_cfg.get("size_mult", 0.3)
                             
                             is_l = self.query_one("#cb_live").value
@@ -1021,17 +1081,19 @@ class TradeEngineMixin:
                         elif safety_mode == "global_lock":
                             if len(active_bets) > 0: is_blocked = True
                         elif safety_mode == "side_lock":
-                            if any(ab["side"] == sd for ab in active_bets): is_blocked = True
+                            # REDEFINED: Block opposite side once any bet is placed (Directional Lock)
+                            if any(ab["side"] != sd for ab in active_bets): is_blocked = True
                         elif safety_mode == "risk_cap":
                             current_cost = sum(ab["cost"] for ab in active_bets)
                             if current_cost + bs >= self.total_risk_cap: is_blocked = True
                         elif safety_mode == "dynamic":
-                            atr = getattr(self.market_data_manager, "atr_5m", 0)
+                            raw_atr = getattr(self.market_data_manager, "atr_5m", 0)
+                            atr = float(raw_atr) if raw_atr is not None else 0.0
                             bias = self.market_data.get("bias_guess", "NEUTRAL")
                             if atr > 40 or bias == "CHOP":
                                 if len(active_bets) > 0: is_blocked = True 
                             else:
-                                if any(ab["side"] == sd for ab in active_bets): is_blocked = True
+                                if any(ab["side"] != sd for ab in active_bets): is_blocked = True
                         
                         # --- UNIVERSAL WINDOW CAP ENFORCEMENT (v5.9.9) ---
                         # Strictly enforce self.total_risk_cap regardless of safety mode.
@@ -1197,7 +1259,7 @@ class TradeEngineMixin:
                 # Check Signal
                 res = sc.get_signal(context)
                 
-                tick_signals[name] = str(res)  # Capture for CSV analytics
+                tick_signals[name] = str(res)  # Capture for UI / scoring
                 if res == "WAIT": continue
                 if res == "NONE":
                     reason = getattr(sc, "last_skip_reason", None)
@@ -1260,8 +1322,9 @@ class TradeEngineMixin:
                     # 1c. PRE mode: Momentum only enters via pre-buy, never mid-window (silent)
                     if name in ["Momentum", "MM2"] and self.mom_buy_mode == "PRE":
                         continue
-                    # 2. 1-Trade-Max Guard
-                    if self.query_one("#cb_one_trade").value and self.window_bets: continue
+                    # 2. Configurable Trade-Max Guard (v5.9.18)
+                    trade_limit = getattr(self, "trade_limit", 0)
+                    if trade_limit > 0 and len(self.window_bets) >= trade_limit: continue
                     
                     # 3. Strong Only Filter
                     if self.query_one("#cb_strong").value:
@@ -1283,7 +1346,7 @@ class TradeEngineMixin:
 
                     # 5. Bet Sizing (Unified Risk Mode)
                     try:
-                        ui_amount = float(self.query_one("#inp_amount").value)
+                        ui_amount = getattr(self, "bet_size", 1.0)
                         is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
                         if is_pct:
                             # Percentage of Anchor Bankroll
@@ -1403,7 +1466,7 @@ class TradeEngineMixin:
                                 else:
                                     self.log_msg(f"Fail {name}: {msg}", level="ERROR")
 
-            # --- Update market_data with live analytics for CSV logging ---
+            # market_data analytics update removed
             # BTC Range: intra-window price range from tick history
             _ph = self.market_data_manager.price_history
             if _ph:
@@ -1649,7 +1712,8 @@ class TradeEngineMixin:
                             self.last_sl_event_time = time.time()
                     
                     # Explicit Traceability Log (v5.9.14)
-                    self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} | Entry {info['cost']:.1f}c -> {cur*100:.1f}c | Rev: +${realized_rev:.2f}", level="SYS")
+                    entry_cents = info.get("entry", 0) * 100
+                    self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} | Cost ${info['cost']:.2f} @ Entry {entry_cents:.1f}¢ -> Exit {cur*100:.1f}¢ | Rev: +${realized_rev:.2f}", level="SYS")
                     
                     # --- SL+ RECOVERY LOGIC ---
                     # Guard: never chain recovery on a recovery bet to prevent infinite loops
@@ -1684,57 +1748,64 @@ class TradeEngineMixin:
     async def _check_hdo(self):
         """
         Hedge Direction Opposite evaluates if we need to enter an offset trade to protect portfolio delta.
-        v5.9.5: Refactored for single-fire per window and net exposure hedging.
+        v5.9.15: Updated for Mode-based hedging (Recovery vs Delta-Neutral) and Coverage %.
         """
         if self.hdo_fired_in_window: return
         
-        # Check if HDO is active via weights / existence
         hdo_scanner = self.scanners.get("HDO")
         if not hdo_scanner: return
         
         hdo_weight = self.scanner_weights.get("HDO", 0.0)
         if hdo_weight <= 0: return # Consider weight 0 as inactive
         
-        # Check if actually enabled in UI
         if not self.query_one("#cb_hdo").value: return
         
         hdo_threshold = getattr(hdo_scanner, "trigger_threshold", 0.59)
+        hedge_mode = getattr(hdo_scanner, "hedge_mode", "recovery")
+        coverage_pct = getattr(hdo_scanner, "coverage_pct", 1.0)
         is_l = self.query_one("#cb_live").value
 
         # 1. Calculate Total Net Exposure for the Window
-        # We need to know the total dollar amount invested in UP vs DOWN.
         net_exposure = {"UP": 0.0, "DOWN": 0.0}
+        net_shares = {"UP": 0.0, "DOWN": 0.0}
         for info in self.window_bets.values():
             if not isinstance(info, dict) or info.get("closed"): continue
             if info.get("algorithm") == "HDO": continue 
             
             side = info["side"]
-            cost = info["cost"]
-            net_exposure[side] += cost
+            net_exposure[side] += info["cost"]
+            net_shares[side] += info["shares"]
 
         # 2. Check if either side's opposite is threatening
         sides_to_check = []
         if net_exposure["DOWN"] > net_exposure["UP"]:
-            sides_to_check.append(("DOWN", net_exposure["DOWN"] - net_exposure["UP"]))
+            sides_to_check.append(("DOWN", net_exposure["DOWN"] - net_exposure["UP"], net_shares["DOWN"] - net_shares["UP"]))
         elif net_exposure["UP"] > net_exposure["DOWN"]:
-            sides_to_check.append(("UP", net_exposure["UP"] - net_exposure["DOWN"]))
+            sides_to_check.append(("UP", net_exposure["UP"] - net_exposure["DOWN"], net_shares["UP"] - net_shares["DOWN"]))
 
-        for threatened_side, net_amt in sides_to_check:
+        for threatened_side, net_cost, net_sh in sides_to_check:
             opp_side = "UP" if threatened_side == "DOWN" else "DOWN"
             opp_ask = self.market_data["up_ask"] if opp_side == "UP" else self.market_data["down_ask"]
 
             if opp_ask >= hdo_threshold:
-                # threshold crossed! We execute ONE HEDGE for the ENTIRE net position.
                 self.hdo_fired_in_window = True # Latch immediately
                 
-                self.log_msg(f"[bold magenta]🚨 HDO TRIGGERED:[/] Net {threatened_side} exposure of ${net_amt:.2f} threatened. {opp_side} ask crossed {hdo_threshold*100:.1f}¢!", level="ADMIN")
+                # --- Mode-Based Hedge Sizing ---
+                if hedge_mode == "delta_neutral":
+                    # Strategy: Insurance - Buy exactly the same amount of shares as you have open.
+                    # This creates a "Straddle" where you lose a fixed amount regardless of who wins.
+                    hedge_bet_size = net_sh * opp_ask
+                    mode_info = f"DELTA-NEUTRAL ({net_sh:.0f} shares)"
+                else:
+                    # Strategy: Recovery - Buy enough shares so profit covers 'coverage_pct' of original cost.
+                    target_recov = net_cost * coverage_pct
+                    target_shares = target_recov / (1.00 - opp_ask)
+                    hedge_bet_size = target_shares * opp_ask
+                    mode_info = f"RECOVERY ({coverage_pct*100:.0f}%)"
                 
-                # Formula: We want to buy enough shares such that profit covers net_amt
-                target_shares = net_amt / (1.00 - opp_ask)
-                hedge_bet_size = target_shares * opp_ask
+                self.log_msg(f"[bold magenta]🚨 HDO TRIGGERED:[/] Net {threatened_side} ${net_cost:.2f} threatened. Mode: {mode_info}", level="ADMIN")
                 
                 # Apply HDO Scanner Weight
-                hdo_weight = self.scanner_weights.get("HDO", 1.0)
                 hedge_bet_size *= hdo_weight
 
                 # Final safety caps
@@ -1743,17 +1814,17 @@ class TradeEngineMixin:
                     self.log_msg(f"[yellow]HDO CAP:[/] Venture ${hedge_bet_size:.2f} max (Full Bankroll)", level="ADMIN")
                 
                 if hedge_bet_size >= 0.50:
-                    self.log_msg(f"[bold magenta]HDO EXECUTION:[/] Hedging ${net_amt:.2f} {threatened_side} w/ ${hedge_bet_size:.2f} {opp_side} @ {opp_ask*100:.1f}¢", level="ADMIN")
+                    self.log_msg(f"[bold magenta]HDO EXECUTION:[/] Hedging ${net_cost:.2f} {threatened_side} w/ ${hedge_bet_size:.2f} {opp_side} @ {opp_ask*100:.1f}¢", level="ADMIN")
                     
                     ok_hedge, msg_hedge, hedge_shares, hedge_price = await asyncio.to_thread(
                         self.trade_executor.execute_buy, is_l, opp_side, hedge_bet_size, opp_ask, 
                         self.market_data["up_id" if opp_side=="UP" else "down_id"], 
-                        context={}, reason="HDO_Hedge_Total"
+                        context={}, reason=f"HDO_{hedge_mode}"
                     )
                     
                     if ok_hedge:
                         self._handle_successful_buy("HDO", opp_side, hedge_bet_size, hedge_shares, hedge_price, is_l)
-                        self.log_msg(f"[bold green]HDO HALT:[/] Multi-trade hedge complete. All scanning suspended for window.", level="ADMIN")
+                        self.log_msg(f"[bold green]HDO HALT:[/] {hedge_mode.upper()} hedge complete. All scanning suspended for window.", level="ADMIN")
                         self.update_balance_ui()
                     else:
                         self.log_msg(f"[bold red]HDO FAILED:[/] {msg_hedge}", level="ERROR")
@@ -1841,7 +1912,8 @@ class TradeEngineMixin:
                     if info.get("side") == side and not info.get("closed"):
                         info["closed"] = True
                         algo_name = info.get("algorithm", "Unknown")
-                        self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} (Final Exit) | Rev: +${revenue:.2f}", level="SYS")
+                        entry_cents = info.get("entry", 0) * 100
+                        self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} (Final Exit) | Cost ${info['cost']:.2f} @ Entry {entry_cents:.1f}¢ | Rev: +${revenue:.2f}", level="SYS")
                 
                 # Update Risk Bankroll with realized revenue
                 if revenue > 0: 
@@ -1891,10 +1963,10 @@ class TradeEngineMixin:
                     if not getattr(self, "app_active", False): return
                     d = self.market_data_manager.fetch_polymarket(next_slug)
                     if not getattr(self, "app_active", False): return
-                    up_bid  = d.get("up_bid",  0)
-                    dn_bid  = d.get("down_bid", 0)
-                    up_ask  = d.get("up_ask",  0)
-                    dn_ask  = d.get("down_ask", 0)
+                    up_bid  = d.get("up_bid", 0) or 0
+                    dn_bid  = d.get("down_bid", 0) or 0
+                    up_ask  = d.get("up_ask", 0) or 0
+                    dn_ask  = d.get("down_ask", 0) or 0
                     if up_bid > 0 or dn_bid > 0:
                         # Detect 52/48 tilt
                         up_c = round(up_bid * 100, 1)
@@ -1940,8 +2012,7 @@ class TradeEngineMixin:
             next_ts   = self.market_data["start_ts"] + self.config.WINDOW_SECONDS
             next_slug = f"btc-updown-{self.config.MARKET_FREQ}m-{next_ts}"
             is_live   = self.query_one("#cb_live").value
-            try: ui_amt = float(self.query_one("#inp_amount").value)
-            except: ui_amt = 1.0
+            ui_amt = getattr(self, "bet_size", 1.0)
             is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
             trend = self.market_data_manager.trend_1h  # "UP" / "DOWN" / "NEUTRAL"
 
@@ -2174,8 +2245,7 @@ class TradeEngineMixin:
         if self.halted: return
 
         br = self.risk_manager.risk_bankroll
-        try: min_bet = float(self.query_one("#inp_amount").value)
-        except: min_bet = 1.0
+        min_bet = getattr(self, "bet_size", 1.0)
         hard_floor = 1.0  # Absolute minimum to even consider a bet
 
         # Only freeze if a bet was actually placed this window (we lost) AND
@@ -2188,7 +2258,7 @@ class TradeEngineMixin:
             is_live = self.query_one("#cb_live").value
             mode_str = "LIVE" if is_live else "SIM"
 
-            # Final CSV snapshot
+            # Final status update
             self.dump_state_log()
 
             final_msg = (
@@ -2393,7 +2463,8 @@ class TradeEngineMixin:
             "slug": settlement_slug or self.market_data.get("slug"),
             "pulse_result": winner,
             "strike_o": btc_o, # Use the validated baseline from above
-            "open_price": self.market_data.get("btc_open", 0),
+            "open_price": self.market_data.get("btc_open", 0), # [KEEP] This is BTC open
+            "up_price_open": self.market_data.get("up_price_open", 0.5), # [NEW] Actual Option Open Price
             "close_price": btc_p,
             "pnl": net_pnl,
             "invested": window_invested,
@@ -2473,9 +2544,8 @@ class TradeEngineMixin:
         for s in self.scanners.values(): s.reset()
         self.market_data_manager.reset_history()
 
-        # --- Write Momentum Analytics (v5.9.4) (Conditional if enabled) ---
-        if not getattr(self, "log_settings", {}).get("momentum_csv", True):
-            return
+        # Momentum CSV logging removed
+        return
 
         try:
             ma = self.mom_analytics
@@ -2590,7 +2660,8 @@ class TradeEngineMixin:
                 scanners_fired = []
                 for info in self.window_bets.values():
                     algo = info.get("algorithm")
-                    if algo and algo not in scanners_fired:
+                    # User Manual actions are excluded from Darwin's learning model (contextual filter)
+                    if algo and algo != "Manual" and algo not in scanners_fired:
                         scanners_fired.append(algo)
                 
                 # 'winner' is already defined above in this method
@@ -2601,7 +2672,7 @@ class TradeEngineMixin:
                     "atr": getattr(self.market_data_manager, "atr_5m", 0.0),
                     "trend_1h": getattr(self.market_data_manager, "trend_1h", "N/A"),
                     "odds_score": self.market_data.get("odds_score", 0.0),
-                    "up_price_open": self.market_data.get("up_price_open", 0.5),
+                    "up_price_open": self.market_data.get("up_price_open", 0.5), # [FIX] Use option open price
                     "up_price_close": self.market_data.get("up_price", 0.5), # Final price at settlement
                     "tilt_next": getattr(self, "_pending_next_tilt", None),
                     "scanners_fired": scanners_fired,
@@ -2618,8 +2689,7 @@ class TradeEngineMixin:
             return self.log_msg("[yellow]Manual Buy Debounce Active...[/]")
         self._last_manual_buy = time.time()
         
-        try: val = float(self.query_one("#inp_amount").value)
-        except: return self.log_msg("[red]Invalid Amount[/]")
+        val = getattr(self, "bet_size", 1.0)
         if self.risk_initialized and val > self.risk_manager.risk_bankroll + 0.01: return self.log_msg("[red]Insuff Risk Cap[/]")
         is_l = self.query_one("#cb_live").value
         pr = self.market_data["up_ask" if side=="UP" else "down_ask"]

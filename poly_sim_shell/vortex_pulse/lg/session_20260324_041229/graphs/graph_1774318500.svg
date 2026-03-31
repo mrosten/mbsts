@@ -1,0 +1,43 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,98 31,86 40,84 46,102 56,108 62,101 73,100 80,111 90,108 101,105 110,93 117,85 124,81 134,87 143,71 162,81 176,78 190,112 203,103 220,126 245,139 266,111 284,116 298,80" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#00FFFF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▲UP 53¢</title>
+</line>
+<rect x="21" y="20" width="46" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#00FFFF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#00FFFF" font-family="monospace" font-weight="bold">▲UP 53¢</text>
+<g class="trade-dot">
+  <circle cx="45" cy="79" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>Briefing: UP @ 60¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="49" y="51" width="116" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="53" y="61" font-size="9" fill="#00FF00" font-family="monospace">Briefing: UP @ 60¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="99" cy="81" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 59¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="103" y="53" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="107" y="63" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 59¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="244" cy="57" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>HDO: DOWN @ 75¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_2" opacity="0" style="pointer-events:none">
+    <rect x="238" y="29" width="98" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="242" y="39" font-size="9" fill="#FF0000" font-family="monospace">HDO: DOWN @ 75¢</text>
+  </g>
+</g>
+</svg>

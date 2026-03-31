@@ -1,0 +1,16 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,95 22,95 25,91 28,83 31,80 34,78 37,77 40,74 43,75 46,76 49,72 52,79 55,72 58,78 61,74 64,75 67,69 70,63 73,57 76,65 79,65 82,75 85,76 88,75 91,75 94,83 97,69 100,75 103,80 106,92 109,93 112,95 115,88 118,82 121,78 124,78 127,81 130,78 133,82 136,84 139,84 142,80 145,78 148,78 151,78 154,75 157,78 160,73 163,73 166,65 169,57 172,56 175,45 178,46 181,43 184,46 188,46 191,54 194,56 197,54 200,56 203,57 206,53 209,63 212,60 215,82 218,91 221,90 224,93 227,90 230,84 233,81 236,81 239,68 242,79 245,60 248,53 251,52 254,52 257,51 260,28 263,25 266,22 269,20 272,20 275,20 278,23 281,23 284,24 287,23 290,22 293,20 296,20 299,20 302,20 305,20 308,20 311,20 314,20 317,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#FF00FF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▼DOWN 52¢</title>
+</line>
+<rect x="21" y="20" width="58" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#FF00FF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#FF00FF" font-family="monospace" font-weight="bold">▼DOWN 52¢</text>
+</svg>

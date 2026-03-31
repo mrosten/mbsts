@@ -1,0 +1,20 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,108 24,108 32,110 39,104 47,105 51,90 57,87 68,78 73,73 78,82 84,95 89,93 95,84 103,93 108,90 118,107 123,109 128,108 136,133 142,136 148,126 155,128 161,144 167,146 171,145 179,147 190,156 197,157 202,157 208,162 213,163 221,157 229,163 236,165 245,166 258,166 273,166 279,167 283,167 290,167 296,167 302,167 308,167 318,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="71" cy="81" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>WCP: UP @ 59¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="75" y="53" width="86" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="79" y="63" font-size="9" fill="#00FF00" font-family="monospace">WCP: UP @ 59¢</text>
+  </g>
+</g>
+</svg>

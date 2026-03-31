@@ -1,0 +1,11 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,94 22,94 33,98 40,96 52,131 65,133 73,136 82,145 90,151 98,139 110,137 117,136 124,136 131,131 140,131 147,134 153,136 159,126 171,118 181,122 190,116 201,108 207,111 216,142 222,145 228,108 235,73 242,25 248,24 253,22 260,21 266,20 273,20 279,20 283,20 290,20 297,20 307,20 315,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+</svg>

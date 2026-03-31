@@ -1,0 +1,34 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,101 20,101 23,107 26,109 30,105 33,104 37,95 41,117 45,117 49,117 53,107 58,116 62,115 67,113 70,105 74,101 78,107 81,109 85,124 89,131 92,124 95,123 100,126 104,128 108,140 112,139 116,142 120,139 125,130 132,131 136,132 140,131 144,130 148,136 152,142 156,148 161,144 165,144 169,139 173,145 177,146 181,147 186,145 192,152 196,150 200,148 204,151 208,150 212,150 216,151 221,151 225,151 229,156 233,159 237,160 241,162 246,162 251,163 256,162 260,162 264,163 268,163 272,162 276,163 281,160 285,160 289,163 293,165 297,164 300,162 307,164 313,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#FF00FF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▼DOWN 52¢</title>
+</line>
+<rect x="21" y="20" width="58" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#FF00FF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#FF00FF" font-family="monospace" font-weight="bold">▼DOWN 52¢</text>
+<g class="trade-dot">
+  <circle cx="84" cy="78" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>VolSnap: DOWN @ 61¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="88" y="50" width="122" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="92" y="60" font-size="9" fill="#FF0000" font-family="monospace">VolSnap: DOWN @ 61¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="94" cy="64" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 70¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="98" y="36" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="102" y="46" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 70¢</text>
+  </g>
+</g>
+</svg>

@@ -1,0 +1,20 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,92 22,92 30,81 36,87 43,90 51,86 57,91 63,98 69,115 74,119 80,122 86,122 93,145 100,144 105,151 112,159 116,159 122,161 133,160 138,159 144,154 150,156 157,158 163,157 170,151 176,153 182,160 187,160 193,164 199,163 205,165 212,164 220,164 226,157 232,151 239,154 245,154 251,157 258,160 265,161 270,162 275,163 284,165 289,161 295,166 301,167 307,166 313,168 318,168" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="85" cy="67" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 68¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="89" y="39" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="93" y="49" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 68¢</text>
+  </g>
+</g>
+</svg>

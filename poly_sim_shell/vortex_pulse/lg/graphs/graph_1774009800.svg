@@ -1,0 +1,20 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,89 22,89 25,90 28,95 31,98 34,105 37,119 40,95 43,92 46,89 49,80 52,80 55,79 58,80 61,86 64,84 67,86 70,86 73,83 76,75 79,81 82,90 85,116 88,128 91,123 94,119 97,126 100,130 103,139 106,133 109,120 112,117 115,122 118,122 121,122 124,128 127,138 130,141 133,140 136,142 139,142 142,143 145,160 148,157 151,160 154,160 157,155 160,160 163,159 166,156 169,155 172,162 175,162 178,160 181,160 184,165 187,163 190,163 193,164 196,165 199,165 202,150 205,154 208,157 211,161 214,162 217,165 220,160 223,160 226,158 229,158 232,163 235,165 238,165 241,166 244,166 247,166 250,166 253,166 256,166 259,166 262,166 265,166 268,166 271,166 274,167 277,166 280,167 283,167 286,167 289,167 292,167 295,167 298,167 301,167 304,167 307,168 310,168 313,167 316,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="92" cy="63" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 71¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="96" y="35" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="100" y="45" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 71¢</text>
+  </g>
+</g>
+</svg>

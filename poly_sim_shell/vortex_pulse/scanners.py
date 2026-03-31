@@ -859,6 +859,7 @@ class MinOneScanner(BaseScanner):
         if self.triggered_signal: return self.triggered_signal
         
         price_history = context.get("history_objs", [])
+        elapsed = context.get("elapsed", 0)
         window_seconds = context.get("window_seconds", 300)
         phase1_duration = context.get("phase1_duration", 60)
         
@@ -1393,6 +1394,8 @@ class HdoScanner(BaseScanner):
     def __init__(self, config: TradingConfig = None):
         super().__init__(config)
         self.trigger_threshold = 0.59
+        self.hedge_mode = "recovery"  # Options: recovery, delta_neutral
+        self.coverage_pct = 1.0       # 1.0 = 100% of original cost
     def get_signal(self, context: dict):
         return "WAIT" # Logic is actually internal to trade_engine.py _check_hdo
 
@@ -1422,6 +1425,7 @@ ALGO_INFO = {
     "ZSC": {"name": "Z-Score", "desc": "Statistical breakout scanner triggering when price deviates >3.5 Standard Deviations from the window mean."},
     "VSN": {"name": "Vol Snap", "desc": "Triggers when BTC order book depth near the window open exceeds X BTC on one side, indicating strong directional conviction."},
     "HDO": {"name": "Hedge Direction Opposite", "desc": "Protects portfolio by entering an opposite position when the counter-side price crosses a threshold. Amount is scaled by Algo Weight."},
+    "PTP": {"name": "Peak-to-Peak", "desc": "Detects sequential higher peaks before midpoint, requiring a minimum positive slope and avoiding 'red dot' breakdowns."},
     "BRI": {"name": "Briefing", "desc": "Automated 'My Guess' logic: Uses 1H trend, RSI, bid spread, and ask imbalance at window start to determine conviction."},
     "WCP": {"name": "Window Candle Profiler", "desc": "Analyzes OHLC of the previous window to detect reversal patterns like Shooting Stars or Hammers."},
     "VPOC": {"name": "VPOC Analyzer", "desc": "Tracks Volume Point of Control to identify overextended 'thin' price moves vs most traded price."},
@@ -1431,6 +1435,103 @@ ALGO_INFO = {
     "SSC": {"name": "Shallow Symmetrical Continuation", "desc": "Detects shallow trends with pullback and symmetrical recovery continuation patterns."},
     "ADT": {"name": "Asymmetric Double Test", "desc": "Identifies baseline moves with asymmetric double dips/rallies requiring full recovery before execution."}
 }
+
+class PeakToPeakScanner(BaseScanner):
+    """
+    Algorithm: Peak-to-Peak (PTP)
+    Triggers based on sequential higher peaks and a minimum slope threshold, 
+    with a breakdown safeguard (Stop-Loss) below the first peak.
+    """
+    def __init__(self, config: TradingConfig = None, t_mid_pct=0.5, prominence=2.0, 
+                 min_slope=0.0001, breakdown_tolerance=5.0):
+        super().__init__(config)
+        self.t_mid_pct = t_mid_pct # Evaluation window as % of total window
+        self.prominence = prominence # Min price swing to define a peak
+        self.min_slope = min_slope # Min required slope (delta_y / delta_t)
+        self.breakdown_tolerance = breakdown_tolerance # Max drop below P1
+        
+        self.valid_peaks = []
+        self.aborted = False
+        self.last_max = -1
+        self.last_min = 1e10
+        self.seeking_state = "trough" # Use trough to require a climb-and-fall for P1
+
+    def reset(self):
+        super().reset()
+        self.valid_peaks = []
+        self.aborted = False
+        self.last_max = -1
+        self.last_min = 1e10
+        self.seeking_state = "trough"
+
+    def get_signal(self, context: dict):
+        if self.triggered_signal: return self.triggered_signal
+        if self.aborted: return "WAIT" # Stay quiet if aborted
+        
+        history_objs = context.get("history_objs", [])
+        if not history_objs: return "WAIT"
+        
+        window_seconds = context.get("window_seconds", 300)
+        elapsed = context.get("elapsed", 0)
+        t_mid = window_seconds * self.t_mid_pct
+        
+        current_price = history_objs[-1]['price']
+        
+        # 2. Peak Detection (Streaming/Sequential)
+        if elapsed < t_mid:
+            if self.seeking_state == "peak":
+                if current_price > self.last_max:
+                    self.last_max = current_price
+                elif current_price < self.last_max - self.prominence:
+                    # Found a peak at last_max
+                    peak_time = history_objs[-1]['elapsed']
+                    new_peak = {'time': peak_time, 'price': self.last_max}
+                    
+                    if not self.valid_peaks:
+                        self.valid_peaks.append(new_peak)
+                    elif new_peak['price'] > self.valid_peaks[-1]['price']:
+                        self.valid_peaks.append(new_peak)
+                        
+                    self.seeking_state = "trough"
+                    self.last_min = current_price
+            else: # seeking trough
+                if current_price < self.last_min:
+                    self.last_min = current_price
+                elif current_price > self.last_min + self.prominence:
+                    self.seeking_state = "peak"
+                    self.last_max = current_price
+
+        # 1. Breakdown Monitoring (Red Dot Scenario) - Checked after peak detection
+        # so it catches drops that newly confirm a peak.
+        if self.valid_peaks:
+            p1 = self.valid_peaks[0]
+            if current_price < (p1['price'] - self.breakdown_tolerance):
+                self.aborted = True
+                return "WAIT"
+
+        if elapsed < t_mid:
+            return "WAIT"
+
+        # 3. Slope Calculation & Trigger at T_mid
+        # Fire once in the window [T_mid, T_mid + 10]
+        if t_mid <= elapsed <= (t_mid + 10) and not self.triggered_signal:
+            if len(self.valid_peaks) < 2:
+                return "WAIT"
+            
+            p1 = self.valid_peaks[0]
+            pn = self.valid_peaks[-1]
+            
+            delta_y = pn['price'] - p1['price']
+            delta_x = pn['time'] - p1['time']
+            
+            if delta_x <= 0: return "WAIT"
+            
+            slope = delta_y / delta_x
+            if slope >= self.min_slope:
+                self.triggered_signal = f"BET_UP_PTP|Slope {slope:.4f} >= {self.min_slope:.4f}"
+                return self.triggered_signal
+        
+        return "WAIT"
 
 BullFlagScanner = StaircaseBreakoutScanner
 

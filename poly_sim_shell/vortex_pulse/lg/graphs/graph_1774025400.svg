@@ -1,0 +1,29 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,151 116,151 126,158 131,157 134,159 138,154 142,160 146,160 149,160 153,158 156,144 183,133 186,130 190,136 193,139 199,136 203,120 207,114 210,130 214,130 222,117 225,105 229,87 232,84 236,103 239,105 243,101 247,106 251,75 255,80 261,78 265,104 269,94 272,79 276,70 279,46 285,49 290,43 294,40 299,84 306,63 312,59 316,31" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="185" cy="57" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: DOWN @ 75¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="189" y="29" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="193" y="39" font-size="9" fill="#FF0000" font-family="monospace">Nitro: DOWN @ 75¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="260" cy="79" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>WCP: UP @ 60¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="238" y="51" width="86" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="242" y="61" font-size="9" fill="#00FF00" font-family="monospace">WCP: UP @ 60¢</text>
+  </g>
+</g>
+</svg>

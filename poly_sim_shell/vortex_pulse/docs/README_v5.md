@@ -2,10 +2,10 @@
 
 A Textual-based terminal UI for automated and semi-automated trading on Polymarket BTC 5-minute binary options markets.
 
-> **Version:** 5.9.4  
+> **Version:** 5.9.16  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
 > **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)  
-> **Architecture:** Modular enterprise-level system with 274KB+ of production-ready code
+> **Architecture:** Modular enterprise-level system with 300KB+ of production-ready code with AI Orchestration
 
 ---
 
@@ -14,12 +14,13 @@ A Textual-based terminal UI for automated and semi-automated trading on Polymark
 Polymarket Sniper V5 is a sophisticated automated trading system that has undergone significant architectural evolution through multiple AI-assisted development cycles. The system features enterprise-level modular architecture, comprehensive risk management, and professional-grade logging infrastructure.
 
 ### Key Capabilities
-- **20 independent scanners** running in parallel with configurable weights
+- **20+ independent scanners** running in parallel with configurable weights
+- **Darwin System Orchestrator** — Autonomous AI agent that manages system state and explores logic
 - **Simulation and Live modes** with identical execution paths
 - **Advanced risk management** with dynamic bet sizing and exhaustion protection
 - **Real-time market data** from multiple sources (Kraken, Binance, Chainlink, Polymarket)
 - **Professional UI/UX** with Textual TUI and modal configuration system
-- **Comprehensive analytics** with CSV logging and momentum research tools
+- **Comprehensive analytics** with CSV logging, momentum research tools, and Darwin Vault (SQLite)
 
 ---
 
@@ -154,7 +155,8 @@ Each Polymarket 5-minute window has unique UP and DOWN token IDs, so positions f
 | TRA | TrapCandle | Candle trap reversal |
 | VOL | VolCheck | Volume+price divergence |
 | ZSC | ZScore | Statistical z-score breakout |
-| MOM | Momentum | Price/time-based momentum (v5.9 Expert) |
+| VSN | VolSnap | Volatility-based snapback |
+| DAR | Darwin | Self-Evolving System Orchestrator (Gemini 2.0) |
 
 ### MOM Scanner — Buy Modes (v5.9)
 
@@ -164,6 +166,27 @@ The Momentum scanner now supports four exclusive buy modes (2x2 Grid):
 - **Pre-Buy (PBN)** — Advanced entry at -15s based on next-window demand. Follows spreads $\ge$ 2¢; reverses on < 2¢.
 - **Hybrid (HBR)** — Only Pre-Buys on $\ge$ 2¢ leads. If the gap is small, it waits for the window to start (standard behavior).
 - **Expert (ADV)** — Uses **5m ATR** to dynamically shift thresholds and behaviors. Requires configuration via the `CONFIGURE ADV` modal.
+
+---
+
+## Darwin Orchestrator (v5.9.16)
+
+Darwin has evolved from a blind observer into a **System Orchestrator** capable of closed-loop management of the entire bot.
+
+### Phase 1: On-Demand Code Access
+Darwin can now use the **Source Code Sniffer** to retrieve the actual Python implementation of any scanner in the system. This allows it to:
+- Understand the exact logic of "Black Box" scanners (e.g., VolSnap, MM2).
+- Identify regime-specific weaknesses in current algorithm implementations.
+- Propose hyper-parameter adjustments based on internal logic rather than just output.
+
+### Phase 2: System Orchestration (Command Bridge)
+Darwin is empowered to act upon the system through the **Command Bridge**. Every 5 minutes, after analyzing the window results, Darwin can issue a set of `system_actions`:
+- **Scanner Control**: Enable or disable any scanner (e.g., disable RSI during high-volatility "Chaos" regimes).
+- **Risk Management**: Autonomously adjust `bet_size`, `tp_pct`, `sl_pct`, and `total_risk_cap`.
+- **Regime Switching**: Transition the entire bot's stance based on multi-factor AI reasoning.
+
+### Darwin Vault (SQLite)
+All Darwin hypotheses, observations, and system actions are stored in the **Darwin Vault** (SQLite) for long-term strategy drift analysis and performance backtesting.
 
 ---
 
@@ -265,6 +288,7 @@ If the next market isn't published yet, logs `Next window not yet available`.
 | **v5.9.2** | BullFlag configurable settings modal, research logging |
 | **v5.9.3** | Scanner loop refactor — persistent `base_threshold` state, background error fix |
 | **v5.9.4** | MOM Analytics log, CSV log overhaul (26 live fields, descriptive headers), 1H trend |
+| **v5.9.16** | Darwin Orchestrator — Phase 1 (Code Sniffer) & Phase 2 (Command Bridge Orchestration) |
 
 ### Recent Git History
 - **0cd0dd0** - Fix modal bugs and standardize log paths

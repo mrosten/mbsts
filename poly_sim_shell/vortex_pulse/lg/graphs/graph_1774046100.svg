@@ -1,0 +1,20 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,95 27,93 32,78 38,86 45,87 53,85 65,89 87,93 93,87 100,93 106,88 112,89 117,81 133,88 139,90 144,66 154,57 160,54 166,56 172,57 179,57 185,55 190,61 202,61 208,77 213,78 219,63 227,52 234,54 240,53 246,53 252,51 257,49 264,46 270,43 281,35 287,28 293,25 301,20 308,20 314,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="37" cy="79" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>Briefing: UP @ 60¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="41" y="51" width="116" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="45" y="61" font-size="9" fill="#00FF00" font-family="monospace">Briefing: UP @ 60¢</text>
+  </g>
+</g>
+</svg>

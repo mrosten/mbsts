@@ -8,22 +8,28 @@ from datetime import datetime
 from textual.screen import ModalScreen
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, Container, VerticalScroll
-from textual.widgets import Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, Select, Collapsible
-from textual import on
+from textual.widgets import (
+    Static, Label, Input, Button, Checkbox, RadioButton, RadioSet, 
+    Select, Collapsible, DataTable, Markdown, TextArea, RichLog
+)
+from textual import on, events
+import sqlite3
 
 # Handle imports for both package and direct execution
 try:
     from .scanners import ALGO_INFO
     from .darwin_agent import DarwinAgent, DARWIN_OBSERVATIONS, DARWIN_EXPERIMENT_LOG, DARWIN_CURRENT_ALGO
+    from .config import DB_PATH
 except ImportError:
     # Running directly from vortex_pulse directory
     from scanners import ALGO_INFO
     from darwin_agent import DarwinAgent, DARWIN_OBSERVATIONS, DARWIN_EXPERIMENT_LOG, DARWIN_CURRENT_ALGO
-from textual.widgets import Markdown, TextArea, RichLog
+    from config import DB_PATH
+# (Markdown, TextArea, RichLog moved to widgets import block)
 
 
 class GlobalSettingsModal(ModalScreen):
-    """A modal that shows global settings like CSV log frequency."""
+    """A modal that shows global settings."""
     BINDINGS = [("escape", "dismiss", "Dismiss")]
     def __init__(self, main_app=None):
         super().__init__()
@@ -34,9 +40,6 @@ class GlobalSettingsModal(ModalScreen):
             yield Static("[bold #00ffff]Global Settings[/]", id="modal_title")
             
             with Collapsible(title="System & Logging", id="gp_system", classes="settings_group"):
-                with Horizontal(classes="setting_row"):
-                    yield Label("CSV Log Freq (s):", classes="setting_label")
-                    yield Input(placeholder="15", id="inp_csv_freq", classes="setting_input")
                 with Horizontal(classes="setting_row"):
                     yield Label("Full Wallet Sync:", classes="setting_label")
                     yield Checkbox(id="cb_sync_risk")
@@ -144,11 +147,9 @@ class GlobalSettingsModal(ModalScreen):
             widget.styles.width = 20
             widget.styles.height = 3 # Increased from 1 to fix Select rendering issues
             
-        self.query_one("#inp_csv_freq").styles.width = 8
         self.query_one("#inp_risk_cap").styles.width = 12
         
-        if self.main_app and hasattr(self.main_app, "csv_log_freq"):
-            self.query_one("#inp_csv_freq").value = str(self.main_app.csv_log_freq)
+        # CSV freq removed
         
         if self.main_app:
             self.query_one("#cb_sync_risk").value = getattr(self.main_app, "auto_sync_risk", False)
@@ -220,10 +221,8 @@ class GlobalSettingsModal(ModalScreen):
     def close_modal(self):
         if self.main_app:
             try:
-                freq = int(self.query_one("#inp_csv_freq").value)
-                if freq > 0:
-                    self.main_app.csv_log_freq = freq
-                
+                # CSV freq removed
+                pass
                 self.main_app.auto_sync_risk = self.query_one("#cb_sync_risk").value
                 self.main_app.exec_safety_mode = self.query_one("#sel_exec_safety").value
                 self.main_app.total_risk_cap = float(self.query_one("#inp_risk_cap").value)
@@ -238,7 +237,9 @@ class GlobalSettingsModal(ModalScreen):
                 try: self.main_app.db_tick_freq = int(self.query_one("#inp_tick_freq").value)
                 except: pass
                 
-                self.main_app.official_audit_enabled = self.query_one("#cb_audit_enabled").value
+                aud_val = self.query_one("#cb_audit_enabled").value
+                self.main_app.official_audit_enabled = aud_val
+                self.main_app.log_msg(f"SETTING: Official Audit | Status: {'ENABLED' if aud_val else 'DISABLED'}", level="SYS")
                 
                 # Darwin Mode
                 rs = self.query_one("#rs_darwin_mode")
@@ -450,9 +451,35 @@ class AlgoInfoModal(ModalScreen):
                     yield Label("Vol Difference B:", id="lbl_vsn_diff")
                     yield Input(placeholder="50.0", id="inp_vsn_diff")
             elif self.algo_id == "HDO":
-                with Horizontal(id="modal_hdo_row1"):
-                    yield Label("Trigger Price (¢):", id="lbl_hdo_thresh")
-                    yield Input(placeholder="59", id="inp_hdo_thresh")
+                with Vertical(id="modal_hdo_settings", classes="setting_section"):
+                    yield Static("[bold #00ff88]HDO Hedge Strategy[/]", classes="section_title")
+                    yield Static("HDO (Hedge Direction Opposite) protects you when the market moves strongly against your current positions.", classes="help_text")
+                    
+                    # --- Trigger Price ---
+                    yield Static("[bold #aaaaaa]⚡ Activation Trigger[/]", classes="subsection_title")
+                    with Horizontal(classes="spaced_row"):
+                        yield Label("Trigger Price (¢):", classes="field_label")
+                        yield Input(placeholder="59", id="inp_hdo_thresh")
+                    yield Static("The hedge fires when the 'other' side's price crosses this level. (e.g. 59¢)", classes="help_text_small")
+
+                    # --- Hedge Mode ---
+                    yield Static("[bold #aaaaaa]🛡️ Hedge Mode[/]", classes="subsection_title")
+                    with Horizontal(classes="spaced_row"):
+                        yield Label("Hedge Style:", classes="field_label")
+                        yield Select([
+                            ("Recovery", "recovery"),
+                            ("Insurance (Delta-Neutral)", "delta_neutral")
+                        ], id="sel_hdo_mode", value="recovery", classes="mode_select")
+                    
+                    with Vertical(id="hdo_mode_help"):
+                        yield Static("RECOVERY: Tries to buy enough shares to get your original money back if the hedge wins.", classes="help_text_small", id="lbl_hdo_mode_desc")
+
+                    # --- Coverage ---
+                    yield Static("[bold #aaaaaa]📊 Risk Coverage[/]", classes="subsection_title")
+                    with Horizontal(classes="spaced_row"):
+                        yield Label("Coverage Amount (%):", classes="field_label")
+                        yield Input(placeholder="100", id="inp_hdo_coverage")
+                    yield Static("How much of the original cost to protect? 100% = Full protection, 50% = Half protection (safer if market reverses).", classes="help_text_small")
             with Horizontal(id="modal_footer"):
                 yield Button("CLOSE/SAVE", id="close_btn", variant="primary")
 
@@ -460,6 +487,8 @@ class AlgoInfoModal(ModalScreen):
         """Update the mode explanation on mount."""
         if self.algo_id in ["MOM", "MM2"]:
             self._update_mode_explanation()
+        elif self.algo_id == "HDO":
+            self._update_hdo_mode_explanation()
         # Center the modal on screen
         self.styles.align = ("center", "middle")
         
@@ -606,18 +635,42 @@ class AlgoInfoModal(ModalScreen):
             self.query_one("#inp_vsn_cutoff").styles.width = 10
             self.query_one("#inp_vsn_diff").styles.width = 10
         elif self.algo_id == "HDO" and self.main_app:
+            # Style the section container
+            sec = self.query_one("#modal_hdo_settings")
+            sec.styles.border = ("ascii", "#333333")
+            sec.styles.padding = (1, 1)
+            sec.styles.margin = (0, 0, 1, 0)
+            sec.styles.height = "auto"
+
+            # Style rows
+            for row in self.query(".spaced_row"):
+                row.styles.height = 3
+                row.styles.margin = (0, 0)
+                row.styles.align = ("left", "middle")
+            
+            # Style help text
+            for help_t in self.query(".help_text_small"):
+                help_t.styles.color = "#888888"
+                help_t.styles.text_style = "italic"
+                help_t.styles.margin = (0, 0, 1, 1)
+                help_t.styles.font_size = 12
+
+            # Style labels
+            for label in self.query(".field_label"):
+                label.styles.width = 22
+                label.styles.content_align = ("left", "middle")
+            
+            # Size inputs and selects
             self.query_one("#inp_hdo_thresh").styles.width = 10
-            row = self.query_one("#modal_hdo_row1")
-            row.styles.height = 3
-            row.styles.align = ("center", "middle")
-            row.styles.margin = (0, 0, 1, 0)
-            row.styles.border = ("ascii", "#333333")
+            self.query_one("#inp_hdo_coverage").styles.width = 10
+            self.query_one("#sel_hdo_mode").styles.width = 28
+            self.query_one("#sel_hdo_mode").styles.height = 3
+
             if "HDO" in self.main_app.scanners:
                 hdo = self.main_app.scanners["HDO"]
-                try:
-                    self.query_one("#inp_hdo_thresh").value = str(int(getattr(hdo, "trigger_threshold", 0.59) * 100))
-                except:
-                    pass  # UI element might not be ready yet
+                self.query_one("#inp_hdo_thresh").value = str(int(getattr(hdo, "trigger_threshold", 0.59) * 100))
+                self.query_one("#sel_hdo_mode").value = getattr(hdo, "hedge_mode", "recovery")
+                self.query_one("#inp_hdo_coverage").value = str(int(getattr(hdo, "coverage_pct", 1.0) * 100))
 
         footer = self.query_one("#modal_footer")
         footer.styles.height = "auto"
@@ -631,6 +684,10 @@ class AlgoInfoModal(ModalScreen):
     def _on_mode_change(self, event: Select.Changed):
         self._update_mode_explanation()
 
+    @on(Select.Changed, "#sel_hdo_mode")
+    def _on_hdo_mode_change(self, event: Select.Changed):
+        self._update_hdo_mode_explanation()
+
     def _update_mode_explanation(self):
         """Update the explanation text based on the selected mode."""
         try:
@@ -643,6 +700,19 @@ class AlgoInfoModal(ModalScreen):
             }
             explanation = explanations.get(mode, "Select a mode to see its behavior.")
             self.query_one("#lbl_mode_explanation").update(explanation)
+        except:
+            pass
+
+    def _update_hdo_mode_explanation(self):
+        """Update the HDO explanation text based on the selected mode."""
+        try:
+            mode = self.query_one("#sel_hdo_mode").value
+            explanations = {
+                "recovery": "[bold #00ff88]RECOVERY:[/] Tries to win back your original money. [italic]Risk: If the market flips back to your original side, you lose more.[/]",
+                "delta_neutral": "[bold #00ff88]INSURANCE:[/] Buys exactly the same number of shares. [italic]Safe: You lock in a small, fixed loss but avoid a total wipeout.[/]"
+            }
+            explanation = explanations.get(mode, "Select a mode.")
+            self.query_one("#lbl_hdo_mode_desc").update(explanation)
         except:
             pass
 
@@ -765,6 +835,42 @@ class AlgoInfoModal(ModalScreen):
                     if old_t != t:
                         hdo.trigger_threshold = t / 100.0
                         changes.append(f"HDO Trigger: {old_t}¢ -> {t}¢")
+                
+                m = self.query_one("#sel_hdo_mode").value
+                if m != getattr(hdo, "hedge_mode", "recovery"):
+                    old_m = getattr(hdo, "hedge_mode", "recovery")
+                    hdo.hedge_mode = m
+                    changes.append(f"HDO Mode: {old_m} -> {m}")
+                
+                c = int(self.query_one("#inp_hdo_coverage").value)
+                if 1 <= c <= 200:
+                    old_c = int(getattr(hdo, "coverage_pct", 1.0) * 100)
+                    if old_c != c:
+                        hdo.coverage_pct = c / 100.0
+                        changes.append(f"HDO Coverage: {old_c}% -> {c}%")
+            except: pass
+        elif self.algo_id == "PTP" and self.main_app and "PTP" in self.main_app.scanners:
+            ptp = self.main_app.scanners["PTP"]
+            try:
+                p = float(self.query_one("#inp_ptp_prominence").value)
+                if p != getattr(ptp, "prominence", 2.0):
+                    ptp.prominence = p
+                    changes.append(f"PTP Prom: {p}")
+                
+                t = int(self.query_one("#inp_ptp_tmid").value)
+                if 10 <= t <= 90:
+                    ptp.t_mid_pct = t / 100.0
+                    changes.append(f"PTP T-Mid: {t}%")
+                
+                s = float(self.query_one("#inp_ptp_slope").value)
+                if s != getattr(ptp, "min_slope", 0.0001):
+                    ptp.min_slope = s
+                    changes.append(f"PTP Slope: {s}")
+                
+                b = float(self.query_one("#inp_ptp_breakdown").value)
+                if b != getattr(ptp, "breakdown_tolerance", 5.0):
+                    ptp.breakdown_tolerance = b
+                    changes.append(f"PTP Breakdown: {b}")
             except: pass
             
         if changes and self.main_app:
@@ -1290,21 +1396,8 @@ class ResearchLogger:
         self.session_stats[timestamp] = log_entry
         
         # Write to research log file
-        if settings.get("research_enabled"):
-            session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = f"lg/bullflag_research_{session_time}.csv"
-            
-            # Write header if file doesn't exist
-            if not os.path.exists(log_file):
-                with open(log_file, 'w', newline='') as f:
-                    f.write("Timestamp,Max_Price,Volume_Filter,Entry_Timing,Pullback_Detection,Tolerance,ATR_Multiplier,Entry_Price,Exit_Price,Side,Result,Profit_Loss,Window_ID,RSI_1m,BTC_Velocity,ATR_5m\n")
-            
-            # Append trade data
-            with open(log_file, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(log_entry)
-            
-            self.main_app.log_msg(f"📊 BullFlag research logged: {log_file}")
+        # BullFlag research logging removed
+        pass
     
     def get_session_stats(self):
         """Calculate session performance statistics."""
@@ -1550,7 +1643,8 @@ class BullFlagSettingsModal(ModalScreen):
                 # --- Research Log ---
                 yield Static("📊 Research Log:", id="label_research_log", classes="bf_label")
                 with Horizontal(id="row_research", classes="bf_row"):
-                    yield Checkbox("Enable research logging (lg/bullflag_research_*.csv)", id="cb_research_log", value=False)
+                    # Research logging removed
+                    pass
             
             # --- Status + Buttons pinned at bottom ---
             yield Static("", id="bf_status")
@@ -1687,7 +1781,9 @@ class BullFlagSettingsModal(ModalScreen):
             atr_mult = float(self.query_one("#inp_atr_mult").value)
         except ValueError:
             atr_mult = 1.5
-        research_enabled = self.query_one("#cb_research_log").value
+        
+        # Research logging checkbox was removed, set to False by default
+        research_enabled = False
         
         # Update BullFlag scanner with new settings
         if hasattr(self.main_app, 'scanners') and 'BullFlag' in self.main_app.scanners:
@@ -4340,13 +4436,11 @@ class DarwinSettingsModal(ModalScreen):
         async def run_chat():
             # Run in thread pool to avoid blocking the main loop
             try:
-                # Add a timeout warning if it takes too long
-                timeout_warning = False
+                sys_ctx = self.main_app._assemble_darwin_system_config() if self.main_app else None
                 
                 def get_response():
-                    nonlocal timeout_warning
                     try:
-                        return self.darwin.on_chat_submit(msg)
+                        return self.darwin.on_chat_submit(msg, system_context=sys_ctx)
                     except Exception as e:
                         return f"Error: {e}"
 
@@ -4354,7 +4448,25 @@ class DarwinSettingsModal(ModalScreen):
                 response = await self.run_worker(get_response, thread=True).wait()
                 
                 if response:
-                    chat_log.write(f"[bold #ff00ff]DARWIN:[/] {response}\n")
+                    # Parse for JSON actions in the response
+                    import re
+                    json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                    actions = []
+                    clean_text = response
+                    
+                    if json_match:
+                        try:
+                            action_data = json.loads(json_match.group(1))
+                            actions = action_data.get("actions", [])
+                            # Strip the JSON block from the text shown to user to keep it clean
+                            clean_text = response.replace(json_match.group(0), "").strip()
+                        except: pass
+                    
+                    chat_log.write(f"[bold #ff00ff]DARWIN:[/] {clean_text}\n")
+                    
+                    if actions and self.main_app:
+                        self.main_app._apply_darwin_system_actions(actions)
+                        chat_log.write(f"[dim grey italic]🧬 System actions applied successfully.[/]\n")
                 else:
                     chat_log.write(f"[red]Darwin remained silent.[/]\n")
             except Exception as e:
@@ -4669,7 +4781,7 @@ class MM2SettingsModal(ModalScreen):
         self.query_one("#mm2_subtitle").styles.margin = (0, 0, 1, 0)
 
         scroll = self.query_one("#mm2_scroll_area")
-        scroll.styles.height = "auto"
+        scroll.styles.height = "1fr"
         scroll.styles.width = "100%"
         scroll.styles.overflow_y = "auto"
 
@@ -5118,6 +5230,9 @@ class LogFilterModal(ModalScreen):
             self.main_app.log_display_filter = new_filter
             self.main_app.save_settings()
             
+            # Trigger retroactive filtering
+            self.main_app.rebuild_rich_log()
+            
             mode_str = self.main_app.log_display_mode
             count = len(new_filter)
             self.main_app.log_msg(f"[bold cyan]LOG FILTERS APPLIED[/]: Mode={mode_str}, Tags={count}", level="SYS")
@@ -5128,3 +5243,312 @@ class LogFilterModal(ModalScreen):
     @on(Button.Pressed, "#btn_cancel_logs")
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class DatabaseExplorerModal(ModalScreen):
+    """A modal to explore the SQLite database tables."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.db_path = DB_PATH
+        self.current_table = "windows"
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold #00ffff]🗄 Database Explorer[/]", id="modal_title")
+            
+            with Horizontal(classes="setting_row"):
+                yield Label("Table:", classes="setting_label")
+                yield Select([
+                    ("Windows (Main)", "windows"),
+                    ("Variant Results", "variant_results"),
+                    ("Darwin Experiments", "darwin_experiments"),
+                    ("Ticks (Last 100)", "ticks"),
+                    ("Market Context", "market_context")
+                ], id="sel_db_table", value=self.current_table, classes="setting_select")
+            
+            yield DataTable(id="db_table_view")
+            
+            with Horizontal(id="modal_footer"):
+                yield Button("REFRESH", id="btn_db_refresh", variant="primary")
+                yield Button("CLOSE", id="btn_modal_close")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        container = self.query_one("#modal_container")
+        container.styles.background = "#1a1a1a"
+        container.styles.border = ("thick", "#00ffff")
+        container.styles.padding = (1, 1)
+        container.styles.width = "90%"
+        container.styles.height = "90%"
+        
+        table = self.query_one("#db_table_view")
+        table.styles.height = "1fr"
+        table.styles.border = ("solid", "#333333")
+        table.styles.margin = (1, 0)
+        
+        self.refresh_data()
+
+    def refresh_data(self):
+        table = self.query_one("#db_table_view")
+        table.clear(columns=True)
+        
+        if not os.path.exists(self.db_path):
+            self.main_app.log_msg(f"[red]DB Explorer:[/] Database file not found at {self.db_path}")
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            query = f"SELECT * FROM {self.current_table}"
+            if self.current_table == "ticks":
+                query += " ORDER BY id DESC LIMIT 100"
+            else:
+                query += " ORDER BY rowid DESC LIMIT 100"
+                
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            
+            # Get column names
+            cursor.execute(f"PRAGMA table_info({self.current_table})")
+            cols = [col[1] for col in cursor.fetchall()]
+            
+            table.add_columns(*cols)
+            table.add_rows(rows)
+            
+            conn.close()
+        except Exception as e:
+            self.main_app.log_msg(f"[red]DB Explorer Error:[/] {e}")
+
+    @on(Select.Changed, "#sel_db_table")
+    def on_table_change(self, event: Select.Changed):
+        self.current_table = event.value
+        self.refresh_data()
+
+    @on(Button.Pressed, "#btn_db_refresh")
+    def on_refresh_click(self):
+        self.refresh_data()
+
+    @on(Button.Pressed, "#btn_modal_close")
+    def action_dismiss(self):
+        self.dismiss()
+
+
+class SlopeSelectorWidget(Static):
+    """
+    A graphical widget to select a slope value via drag-and-drop.
+    """
+    def __init__(self, initial_slope=0.0001, **kwargs):
+        super().__init__(**kwargs)
+        self.can_focus = True
+        self.slope = initial_slope
+        self.is_dragging = False
+        self.display_width = 40
+        self.display_height = 10
+        self.max_slope = 0.01
+        self._update_coords_from_slope()
+
+    def _update_coords_from_slope(self):
+        # Origin is at (2, height-2)
+        # We'll fix end_x to the right side of the axis
+        self.end_x = self.display_width - 5
+        # slope = dy / dx => dy = slope * dx
+        # Normalized: slope max_slope should reach height-2
+        # Max dy achievable visual is display_height - 3
+        max_dy = self.display_height - 3
+        self.end_y = (self.slope / self.max_slope) * max_dy
+        self.end_y = max(0, min(max_dy, self.end_y))
+
+    def _calculate_slope_from_mouse(self, x, y):
+        # Origin is (2, display_height-2)
+        dx = x - 2
+        dy = (self.display_height - 2) - y
+        if dx <= 0: return 0.0
+        
+        # We need the ratio. Max visual ratio is (height-3)/(width-5)
+        max_visual_ratio = (self.display_height - 3) / (self.display_width - 5)
+        raw_ratio = dy / dx
+        
+        # Scale to max_slope
+        calculated = (raw_ratio / max_visual_ratio) * self.max_slope
+        return max(0.0, min(self.max_slope, calculated))
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        self.is_dragging = True
+        self._handle_mouse(event.x, event.y)
+        self.capture_mouse()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if self.is_dragging:
+            self._handle_mouse(event.x, event.y)
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        self.is_dragging = False
+        self.release_mouse()
+
+    def _handle_mouse(self, x, y):
+        self.slope = self._calculate_slope_from_mouse(x, y)
+        self._update_coords_from_slope()
+        self.refresh()
+        self.post_message(self.Changed(self, self.slope))
+
+    class Changed(events.Message):
+        def __init__(self, sender, value):
+            super().__init__()
+            self.sender = sender
+            self.value = value
+
+    def render(self) -> str:
+        # Buffer for drawing
+        grid = [[" " for _ in range(self.display_width)] for _ in range(self.display_height)]
+        
+        # Draw axes
+        for x in range(2, self.display_width - 2):
+            grid[self.display_height - 2][x] = "─"
+        for y in range(1, self.display_height - 2):
+            grid[y][2] = "│"
+        grid[self.display_height - 2][2] = "└"
+        
+        # Draw line (Bresenham)
+        x0, y0 = 2, self.display_height - 2
+        x1, y1 = int(x0 + (self.display_width - 7)), int(y0 - self.end_y) # Use fixed X for display
+        
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        
+        cx, cy = x0, y0
+        while True:
+            if 0 <= cx < self.display_width and 0 <= cy < self.display_height:
+                if grid[cy][cx] in [" ", "─", "│"]:
+                    grid[cy][cx] = "•"
+            if cx == x1 and cy == y1: break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                cx += sx
+            if e2 <= dx:
+                err += dx
+                cy += sy
+        
+        return "\n".join(["".join(row) for row in grid])
+
+
+class PTPSettingsModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close Modal")]
+    
+    def __init__(self, main_app):
+        super().__init__()
+        self.main_app = main_app
+        self.s = main_app.scanners.get("PeakToPeak")
+        
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog_ptp"):
+            yield Label("Peak-To-Peak Configuration", id="dialog_ptp_title")
+            yield Label("Drag the line to adjust minimum trigger slope.", classes="dialog_subtitle")
+            
+            with Vertical(id="ptp_form_area"):
+                with Vertical(id="ptp_graph_box"):
+                    yield Label("MIN SLOPE SELECTOR", id="ptp_graph_title")
+                    initial_slope = getattr(self.s, "min_slope", 0.0001) if self.s else 0.0001
+                    yield SlopeSelectorWidget(initial_slope=initial_slope, id="ptp_slope_selector")
+                    yield Label(f"Current Value: {initial_slope:.6f}", id="ptp_slope_display")
+                
+                with Horizontal(classes="ptp_row"):
+                    yield Label("Prominence (¢):", classes="ptp_lbl")
+                    val = str(getattr(self.s, "prominence", 2.0)) if self.s else "2.0"
+                    yield Input(placeholder="2.0", value=val, id="ptp_prominence", classes="ptp_inp")
+                with Horizontal(classes="ptp_row"):
+                    yield Label("Eval Window (%):", classes="ptp_lbl")
+                    val = str(int(getattr(self.s, "t_mid_pct", 0.5) * 100)) if self.s else "50"
+                    yield Input(placeholder="50", value=val, id="ptp_t_mid_pct", classes="ptp_inp")
+                with Horizontal(classes="ptp_row"):
+                    yield Label("Breakdown (¢):", classes="ptp_lbl")
+                    val = str(getattr(self.s, "breakdown_tolerance", 5.0)) if self.s else "5.0"
+                    yield Input(placeholder="5.0", value=val, id="ptp_breakdown", classes="ptp_inp")
+            
+            with Horizontal(id="dialog_ptp_buttons"):
+                yield Button("Reset", id="btn_ptp_reset", variant="warning")
+                yield Button("Apply & Save", id="btn_ptp_save", variant="primary")
+
+    def on_mount(self):
+        d = self.query_one("#dialog_ptp")
+        d.styles.background = "#1B1B1D"
+        d.styles.border = ("thick", "cyan")
+        d.styles.padding = (1, 2)
+        d.styles.width = 64
+        d.styles.height = "auto"
+        d.styles.align = ("center", "middle")
+        
+        self.query_one("#ptp_graph_title").styles.text_align = "center"
+        self.query_one("#ptp_graph_title").styles.color = "cyan"
+        self.query_one("#ptp_graph_title").styles.text_style = "bold"
+        
+        self.query_one("#ptp_slope_display").styles.text_align = "center"
+        self.query_one("#ptp_slope_display").styles.color = "#ffaa00"
+        self.query_one("#ptp_slope_display").styles.margin = (0, 0, 1, 0)
+        
+        sel = self.query_one("#ptp_slope_selector")
+        sel.styles.width = 40
+        sel.styles.height = 10
+        sel.styles.border = ("solid", "#333")
+        sel.styles.background = "#000"
+        sel.styles.margin = (1, 10) # Center the 40-width widget in 64-width modal
+        
+        for row in self.query(".ptp_row"):
+            row.styles.height = 3
+            row.styles.align = ("left", "middle")
+            
+        for lbl in self.query(".ptp_lbl"):
+            lbl.styles.width = 24
+            lbl.styles.content_align = ("right", "middle")
+            
+        for inp in self.query(".ptp_inp"):
+            inp.styles.width = 12
+            
+        btn_row = self.query_one("#dialog_ptp_buttons")
+        btn_row.styles.align = ("center", "middle")
+        btn_row.styles.margin = (1, 0, 0, 0)
+        btn_row.styles.height = 3
+
+    def on_slope_selector_changed(self, message: SlopeSelectorWidget.Changed):
+        self.query_one("#ptp_slope_display").update(f"Current Value: {message.value:.6f}")
+
+    @on(Button.Pressed, "#btn_ptp_reset")
+    def _reset_settings(self):
+        sel = self.query_one("#ptp_slope_selector")
+        sel.slope = 0.0001
+        sel._update_coords_from_slope()
+        sel.refresh()
+        self.query_one("#ptp_slope_display").update("Current Value: 0.000100")
+        self.query_one("#ptp_prominence").value = "2.0"
+        self.query_one("#ptp_t_mid_pct").value = "50"
+        self.query_one("#ptp_breakdown").value = "5.0"
+
+    @on(Button.Pressed, "#btn_ptp_save")
+    def save_and_close(self):
+        try:
+            slope = self.query_one("#ptp_slope_selector").slope
+            if self.s:
+                self.s.min_slope = slope
+                self.s.prominence = float(self.query_one("#ptp_prominence").value)
+                self.s.t_mid_pct = float(self.query_one("#ptp_t_mid_pct").value) / 100.0
+                self.s.breakdown_tolerance = float(self.query_one("#ptp_breakdown").value)
+                
+            if self.main_app:
+                self.main_app.ptp_settings = {
+                    "min_slope": slope,
+                    "prominence": float(self.query_one("#ptp_prominence").value),
+                    "t_mid_pct": float(self.query_one("#ptp_t_mid_pct").value) / 100.0,
+                    "breakdown_tolerance": float(self.query_one("#ptp_breakdown").value),
+                }
+                self.main_app.save_settings()
+                self.main_app.log_msg(f"⚙️ PTP Config Updated", level="ADMIN")
+        except Exception as e:
+            if self.main_app: self.main_app.log_msg(f"Error saving PTP: {e}", level="ERROR")
+        self.dismiss()

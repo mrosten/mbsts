@@ -32,6 +32,8 @@ class TradingConfig:
     TOLERANCE_PCT: float = 0.002
     REQUEST_TIMEOUT: float = 3.5  # Optimized for responsive shutdown
     HTTP_PROXY: str = os.getenv("HTTP_PROXY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    DARWIN_MODE: str = os.getenv("DARWIN_MODE", "V1_OBSERVER")  # Or V2_EXPERIMENTER
 
 # --- Web3 & RPC Config ---
 POLYGON_RPC_LIST = [
@@ -51,6 +53,31 @@ FTP_HOST = "ftps5.us.freehostia.com"
 FTP_USER = "mosros"
 FTP_PASS = "Myrost4012!!mmm"
 FTP_ROOT = "myfavoritemalshin.space"
+
+# --- SQLite Shared History Config ---
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(_ROOT_DIR, "poly_history.db")
+
+# Alternative database paths for compatibility
+_DB_PATH_VORTEX = os.path.join(os.path.dirname(os.path.dirname(__file__)), "poly_history.db")
+_DB_PATH_LOCAL = os.path.join(os.path.dirname(__file__), "poly_history.db")
+
+# Use first existing database path
+if os.path.exists(_DB_PATH_VORTEX):
+    DB_PATH = _DB_PATH_VORTEX
+elif os.path.exists(_DB_PATH_LOCAL):
+    DB_PATH = _DB_PATH_LOCAL
+elif not os.path.exists(DB_PATH):
+    # Create database at the primary location if none exist
+    DB_PATH = _DB_PATH_VORTEX
+
+# Toggles for the 5 Propositions
+DB_LOG_WINDOWS = os.getenv("DB_LOG_WINDOWS", "True").lower() == "true"
+DB_LOG_ALPHA   = os.getenv("DB_LOG_ALPHA", "True").lower() == "true"
+DB_LOG_DARWIN  = os.getenv("DB_LOG_DARWIN", "True").lower() == "true"
+DB_LOG_TICKS   = os.getenv("DB_LOG_TICKS", "True").lower() == "true"
+DB_LOG_CONTEXT = os.getenv("DB_LOG_CONTEXT", "True").lower() == "true"
+DB_LOGGING_ENABLED = os.getenv("DB_LOGGING_ENABLED", "True").lower() == "true"
 
 # Live Config
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")

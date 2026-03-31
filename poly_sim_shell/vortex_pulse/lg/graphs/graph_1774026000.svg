@@ -1,0 +1,29 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,84 23,84 29,76 32,75 36,78 40,87 43,86 47,89 50,90 55,84 58,84 62,77 65,85 70,70 74,80 79,83 83,74 88,68 93,67 100,66 105,73 110,66 116,52 120,47 125,60 129,60 135,57 141,57 147,47 152,63 158,56 163,60 169,46 174,40 177,40 182,41 187,38 193,37 197,37 202,41 206,51 211,46 217,40 221,38 225,43 229,46 234,43 239,48 242,47 247,37 251,40 257,31 266,25 272,23 277,22 284,22 289,21 294,20 300,20 308,20 312,20 317,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="86" cy="75" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>VolSnap: UP @ 63¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="90" y="47" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="94" y="57" font-size="9" fill="#00FF00" font-family="monospace">VolSnap: UP @ 63¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="128" cy="60" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: UP @ 73¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="132" y="32" width="98" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="136" y="42" font-size="9" fill="#00FF00" font-family="monospace">Nitro: UP @ 73¢</text>
+  </g>
+</g>
+</svg>
