@@ -1513,169 +1513,169 @@ class TradeEngineMixin:
                         
                         if already_have: continue
 
-                    # 1b. Mid-Round Lockout: skip execution if booted mid-window or in first 10s
-                    if is_initial_lockout or self.mid_window_lockout:
-                        if f"LOCKOUT_{name}" not in self.skipped_logs:
-                            reason = "mid-round boot" if self.mid_window_lockout else "initial stabilization"
-                            self.log_msg(f"[dim]LOCKOUT {name} | Signal held ({reason}) — waiting for clean window[/]", level="SCAN")
-                            self.skipped_logs.add(f"LOCKOUT_{name}")
-                        continue
+                        # 1b. Mid-Round Lockout: skip execution if booted mid-window or in first 10s
+                        if is_initial_lockout or self.mid_window_lockout:
+                            if f"LOCKOUT_{name}" not in self.skipped_logs:
+                                reason = "mid-round boot" if self.mid_window_lockout else "initial stabilization"
+                                self.log_msg(f"[dim]LOCKOUT {name} | Signal held ({reason}) — waiting for clean window[/]", level="SCAN")
+                                self.skipped_logs.add(f"LOCKOUT_{name}")
+                            continue
 
-                    # --- [NEW] LATE-WINDOW LOCKOUT (LWL) ---
-                    window_secs = self.config.WINDOW_SECONDS
-                    if elapsed > (window_secs - self.lw_lockout):
-                        if f"LWL_{name}" not in self.skipped_logs:
-                            self.log_msg(f"[bold yellow]LOCKOUT {name}[/]: {elapsed}s into window | Entry Blocked (LWL < {self.lw_lockout}s)", level="SCAN")
-                            self.skipped_logs.add(f"LWL_{name}")
-                        continue
+                        # --- [NEW] LATE-WINDOW LOCKOUT (LWL) ---
+                        window_secs = self.config.WINDOW_SECONDS
+                        if elapsed > (window_secs - self.lw_lockout):
+                            if f"LWL_{name}" not in self.skipped_logs:
+                                self.log_msg(f"[bold yellow]LOCKOUT {name}[/]: {elapsed}s into window | Entry Blocked (LWL < {self.lw_lockout}s)", level="SCAN")
+                                self.skipped_logs.add(f"LWL_{name}")
+                            continue
 
-                    # --- [NEW] SENTIMENT GUARD ---
-                    # Only apply in the second half of the window
-                    if elapsed > (window_secs / 2):
-                        odds_score = context.get("odds_score", 0)
-                        guard_thresh = self.sentiment_guard
-                        
-                        is_sentiment_blocked = False
-                        if sd == "UP" and odds_score < -guard_thresh:
-                            is_sentiment_blocked = True
-                        elif sd == "DOWN" and odds_score > guard_thresh:
-                            is_sentiment_blocked = True
+                        # --- [NEW] SENTIMENT GUARD ---
+                        # Only apply in the second half of the window
+                        if elapsed > (window_secs / 2):
+                            odds_score = context.get("odds_score", 0)
+                            guard_thresh = self.sentiment_guard
                             
-                        if is_sentiment_blocked:
-                            guard_key = f"GUARD_{name}_{sd}"
-                            if guard_key not in self.skipped_logs:
-                                sentiment_str = "Bullish" if odds_score > 0 else "Bearish"
-                                self.log_msg(f"[bold yellow]GUARD {name}[/]: Blocked {sd} entry vs strong {sentiment_str} Sentiment ({odds_score:+.1f}c)", level="SCAN")
-                                self.skipped_logs.add(guard_key)
+                            is_sentiment_blocked = False
+                            if sd == "UP" and odds_score < -guard_thresh:
+                                is_sentiment_blocked = True
+                            elif sd == "DOWN" and odds_score > guard_thresh:
+                                is_sentiment_blocked = True
+                                
+                            if is_sentiment_blocked:
+                                guard_key = f"GUARD_{name}_{sd}"
+                                if guard_key not in self.skipped_logs:
+                                    sentiment_str = "Bullish" if odds_score > 0 else "Bearish"
+                                    self.log_msg(f"[bold yellow]GUARD {name}[/]: Blocked {sd} entry vs strong {sentiment_str} Sentiment ({odds_score:+.1f}c)", level="SCAN")
+                                    self.skipped_logs.add(guard_key)
+                                continue
+                        # ----------------------------
+                        # 1c. PRE mode: Momentum only enters via pre-buy, never mid-window (silent)
+                        if name in ["Momentum", "MM2"] and self.mom_buy_mode == "PRE":
                             continue
-                    # ----------------------------
-                    # 1c. PRE mode: Momentum only enters via pre-buy, never mid-window (silent)
-                    if name in ["Momentum", "MM2"] and self.mom_buy_mode == "PRE":
-                        continue
-                    # 2. Configurable Trade-Max Guard (v5.9.18)
-                    trade_limit = getattr(self, "trade_limit", 0)
-                    if trade_limit > 0 and len(self.window_bets) >= trade_limit: continue
-                    
-                    # 3. Strong Only Filter
-                    if self.query_one("#cb_strong").value:
-                        strong_keywords = {"STRONG", "CONFIRMED", "HEAVY", "MAX", "90", "PULSE"}
-                        if not any(k in str(res).upper() for k in strong_keywords):
-                            if f"SKIP_STRONG_{name}" not in self.skipped_logs:
-                                self.log_msg(f"SKIP {name} | Strong Only active (Sig: {res})", level="SCAN")
-                                self.skipped_logs.add(f"SKIP_STRONG_{name}")
-                            continue
-
-                    # 4. Minimum Difference Filter
-                    try: min_diff = float(self.query_one("#inp_min_diff").value)
-                    except: min_diff = 0
-                    if abs(d["cur"] - d["opn"]) < min_diff:
-                        if f"SKIP_DIFF_{name}" not in self.skipped_logs:
-                            self.log_msg(f"SKIP {name} | Diff ${abs(d['cur']-d['opn']):.2f} < Min ${min_diff:.2f}", level="SCAN")
-                            self.skipped_logs.add(f"SKIP_DIFF_{name}")
-                        continue
-
-                    # 5. Bet Sizing (Unified Risk Mode)
-                    try:
-                        ui_amount = getattr(self, "bet_size", 1.0)
-                        is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
-                        if is_pct:
-                            # Percentage of Anchor Bankroll
-                            bs = self.risk_manager.window_start_bankroll * (ui_amount / 100.0)
-                        else:
-                            # Fixed Amount
-                            bs = ui_amount
-                    except:
-                        bs = self.risk_manager.window_start_bankroll * 0.10 if self.risk_manager.window_start_bankroll > 0 else 1.00
-
-                    # --- Apply Multipliers (Penalties & Weights) ---
-                    # Trend Penalty (Going against 1H Trend)
-                    t_dir = "UP" if "UP" in str(res) else "DOWN"
-                    t1h = self.market_data_manager.trend_1h
-                    if t1h != 'NEUTRAL' and t_dir not in t1h:
-                        penalty = getattr(self, "penalty_percentage", 0.10)
-                        bs *= (1.0 - penalty)
-                    
-                    # Consec Loss Penalty
-                    port = self.portfolios.get(name)
-                    if port and port.consecutive_losses >= 2:
-                        bs *= 0.7
+                        # 2. Configurable Trade-Max Guard (v5.9.18)
+                        trade_limit = getattr(self, "trade_limit", 0)
+                        if trade_limit > 0 and len(self.window_bets) >= trade_limit: continue
                         
-                    # Scanner Weight
-                    weight = self.scanner_weights.get(name[:3].upper(), 1.0)
-                    bs = bs * weight
-
-                    # Final Safety Clamp (Bankroll & Max Cap)
-                    bs = min(bs, TradingConfig.MAX_BET_SESSION_CAP)
-                    
-                    # [FEATURE] Global Window Investment Cap ($30 Limit enforcement)
-                    remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
-                    if bs > remaining_cap:
-                        bs = remaining_cap
-                        if bs < 1.00: # Below min bet
-                           if f"SKIP_CAP_{name}" not in self.skipped_logs:
-                               self.log_msg(f"SKIPPED {name} | Window Risk Cap Reached (${total_window_cost:.2f}/$30)", level="SCAN")
-                               self.skipped_logs.add(f"SKIP_CAP_{name}")
-                           continue
-                    
-                    if bs > self.risk_manager.risk_bankroll:
-                        bs = self.risk_manager.risk_bankroll
-                    
-                    if bs > 0:
-                        sd = "UP" if "UP" in str(res) else "DOWN"
-                        pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
-                        
-                        # 8. Unified Finalization (Skepticism & Conviction)
-                        ok_final, final_bs, skepticism_penalty = self._refant_finalize_bet(name, sd, bs, pr, res)
-                        
-                        if not ok_final:
-                            # If blocked by price filters, park it if it's not a hard max-price block
-                            filter_reason = skepticism_penalty # skepticism_penalty is the reason string if ok_final is False
-                            if isinstance(filter_reason, str) and "Max" in filter_reason:
-                                if f"SKIP_MAX_{name}" not in self.skipped_logs:
-                                    self.log_msg(f"SKIPPED: [{name.upper()}] | Reason: {filter_reason}", level="SCAN")
-                                    self.skipped_logs.add(f"SKIP_MAX_{name}")
-                            elif name not in self.pending_bets:
-                                self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
-                                try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
-                                except: pass
-                            else:
-                                # Update values but keep latch flags (mult_logged, skeptic_logged, etc.)
-                                self.pending_bets[name].update({"side": sd, "bs": bs, "res": res})
-                            continue
-
-                        # --- Execution ---
-                        if pr and 0.01 < pr < 0.99:
-                            is_l = self.query_one("#cb_live").value
-                            
-                            # Final Min Bet Check before launching execution
-                            if is_l and final_bs < self.config.MIN_BET:
-                                if f"SKIP_MIN_{name}" not in self.skipped_logs:
-                                    self.log_msg(f"SKIPPED {name} | Final bet ${final_bs:.2f} < Min ${self.config.MIN_BET:.2f}", level="SCAN")
-                                    self.skipped_logs.add(f"SKIP_MIN_{name}")
+                        # 3. Strong Only Filter
+                        if self.query_one("#cb_strong").value:
+                            strong_keywords = {"STRONG", "CONFIRMED", "HEAVY", "MAX", "90", "PULSE"}
+                            if not any(k in str(res).upper() for k in strong_keywords):
+                                if f"SKIP_STRONG_{name}" not in self.skipped_logs:
+                                    self.log_msg(f"SKIP {name} | Strong Only active (Sig: {res})", level="SCAN")
+                                    self.skipped_logs.add(f"SKIP_STRONG_{name}")
                                 continue
 
-                            # Log reasoning for Momentum mid-window entries
-                            if name == "Momentum":
-                                _res_reason = str(res).split("|")[1] if "|" in str(res) else str(res)
-                                _atr_now = getattr(self.market_data_manager, "atr_5m", 0)
-                                _s = self.mom_adv_settings
-                                if self.mom_buy_mode == "ADV":
-                                    _tier = "Stable" if _atr_now <= _s.get("atr_low", 20) else ("Chaos" if _atr_now >= _s.get("atr_high", 40) else "Neutral")
-                                    _offset = _s.get("stable_offset", 0) if _tier == "Stable" else (_s.get("chaos_offset", 0) if _tier == "Chaos" else 0)
-                                    _sc = self.scanners.get("Momentum")
-                                    _base_t = int(getattr(_sc, "base_threshold", 0.6) * 100) if _sc else 60
-                                    self.log_msg(f"[dim]MOM [bold]ADV[/] entry: {_res_reason} | ATR={_atr_now:.1f} Tier=[bold]{_tier}[/] base={_base_t}¢ offset={_offset:+}¢ → thresh={_base_t + _offset}¢[/]", level="SCAN")
-                                else:
-                                    self.log_msg(f"[dim]MOM entry: {_res_reason} | ATR={_atr_now:.1f}[/]", level="SCAN")
+                        # 4. Minimum Difference Filter
+                        try: min_diff = float(self.query_one("#inp_min_diff").value)
+                        except: min_diff = 0
+                        if abs(d["cur"] - d["opn"]) < min_diff:
+                            if f"SKIP_DIFF_{name}" not in self.skipped_logs:
+                                self.log_msg(f"SKIP {name} | Diff ${abs(d['cur']-d['opn']):.2f} < Min ${min_diff:.2f}", level="SCAN")
+                                self.skipped_logs.add(f"SKIP_DIFF_{name}")
+                            continue
 
-                            # --- Bounce Entry Fork ---
-                            dip_threshold = getattr(self, "bounce_dip_cents", 0.5) / 100.0
-                            live_ask = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                        # 5. Bet Sizing (Unified Risk Mode)
+                        try:
+                            ui_amount = getattr(self, "bet_size", 1.0)
+                            is_pct = self.query_one("#rs_bet_mode").pressed_button and self.query_one("#rs_bet_mode").pressed_button.id == "rb_pct"
+                            if is_pct:
+                                # Percentage of Anchor Bankroll
+                                bs = self.risk_manager.window_start_bankroll * (ui_amount / 100.0)
+                            else:
+                                # Fixed Amount
+                                bs = ui_amount
+                        except:
+                            bs = self.risk_manager.window_start_bankroll * 0.10 if self.risk_manager.window_start_bankroll > 0 else 1.00
+
+                        # --- Apply Multipliers (Penalties & Weights) ---
+                        # Trend Penalty (Going against 1H Trend)
+                        t_dir = "UP" if "UP" in str(res) else "DOWN"
+                        t1h = self.market_data_manager.trend_1h
+                        if t1h != 'NEUTRAL' and t_dir not in t1h:
+                            penalty = getattr(self, "penalty_percentage", 0.10)
+                            bs *= (1.0 - penalty)
+                        
+                        # Consec Loss Penalty
+                        port = self.portfolios.get(name)
+                        if port and port.consecutive_losses >= 2:
+                            bs *= 0.7
                             
-                            if self.bounce_mode and name not in self.bounce_pending and live_ask > (pr + dip_threshold):
-                                self.bounce_pending[name] = {
-                                    "side": sd, "target_level": pr, "dip_depth": dip_threshold,
-                                    "has_dipped": False, "signal": str(res), "bs": final_bs
+                        # Scanner Weight
+                        weight = self.scanner_weights.get(name[:3].upper(), 1.0)
+                        bs = bs * weight
+
+                        # Final Safety Clamp (Bankroll & Max Cap)
+                        bs = min(bs, TradingConfig.MAX_BET_SESSION_CAP)
+                        
+                        # [FEATURE] Global Window Investment Cap ($30 Limit enforcement)
+                        remaining_cap = max(0, getattr(self, "total_risk_cap", 30.0) - total_window_cost)
+                        if bs > remaining_cap:
+                            bs = remaining_cap
+                            if bs < 1.00: # Below min bet
+                               if f"SKIP_CAP_{name}" not in self.skipped_logs:
+                                   self.log_msg(f"SKIPPED {name} | Window Risk Cap Reached (${total_window_cost:.2f}/$30)", level="SCAN")
+                                   self.skipped_logs.add(f"SKIP_CAP_{name}")
+                               continue
+                        
+                        if bs > self.risk_manager.risk_bankroll:
+                            bs = self.risk_manager.risk_bankroll
+                        
+                        if bs > 0:
+                            # sd is already defined at line 1507
+                            pr = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                            
+                            # 8. Unified Finalization (Skepticism & Conviction)
+                            ok_final, final_bs, skepticism_penalty = self._refant_finalize_bet(name, sd, bs, pr, res)
+                            
+                            if not ok_final:
+                                # If blocked by price filters, park it if it's not a hard max-price block
+                                filter_reason = skepticism_penalty # skepticism_penalty is the reason string if ok_final is False
+                                if isinstance(filter_reason, str) and "Max" in filter_reason:
+                                    if f"SKIP_MAX_{name}" not in self.skipped_logs:
+                                        self.log_msg(f"SKIPPED: [{name.upper()}] | Reason: {filter_reason}", level="SCAN")
+                                        self.skipped_logs.add(f"SKIP_MAX_{name}")
+                                elif name not in self.pending_bets:
+                                    self.pending_bets[name] = {"side": sd, "bs": bs, "res": res}
+                                    try: self.query_one(f"#lbl_{name[:3].lower()}").add_class("blinking")
+                                    except: pass
+                                else:
+                                    # Update values but keep latch flags (mult_logged, skeptic_logged, etc.)
+                                    self.pending_bets[name].update({"side": sd, "bs": bs, "res": res})
+                                continue
+
+                            # --- Execution ---
+                            if pr and 0.01 < pr < 0.99:
+                                is_l = self.query_one("#cb_live").value
+                                
+                                # Final Min Bet Check before launching execution
+                                if is_l and final_bs < self.config.MIN_BET:
+                                    if f"SKIP_MIN_{name}" not in self.skipped_logs:
+                                        self.log_msg(f"SKIPPED {name} | Final bet ${final_bs:.2f} < Min ${self.config.MIN_BET:.2f}", level="SCAN")
+                                        self.skipped_logs.add(f"SKIP_MIN_{name}")
+                                    continue
+
+                                # Log reasoning for Momentum mid-window entries
+                                if name == "Momentum":
+                                    _res_reason = str(res).split("|")[1] if "|" in str(res) else str(res)
+                                    _atr_now = getattr(self.market_data_manager, "atr_5m", 0)
+                                    _s = self.mom_adv_settings
+                                    if self.mom_buy_mode == "ADV":
+                                        _tier = "Stable" if _atr_now <= _s.get("atr_low", 20) else ("Chaos" if _atr_now >= _s.get("atr_high", 40) else "Neutral")
+                                        _offset = _s.get("stable_offset", 0) if _tier == "Stable" else (_s.get("chaos_offset", 0) if _tier == "Chaos" else 0)
+                                        _sc = self.scanners.get("Momentum")
+                                        _base_t = int(getattr(_sc, "base_threshold", 0.6) * 100) if _sc else 60
+                                        self.log_msg(f"[dim]MOM [bold]ADV[/] entry: {_res_reason} | ATR={_atr_now:.1f} Tier=[bold]{_tier}[/] base={_base_t}¢ offset={_offset:+}¢ → thresh={_base_t + _offset}¢[/]", level="SCAN")
+                                    else:
+                                        self.log_msg(f"[dim]MOM entry: {_res_reason} | ATR={_atr_now:.1f}[/]", level="SCAN")
+
+                                # --- Bounce Entry Fork ---
+                                dip_threshold = getattr(self, "bounce_dip_cents", 0.5) / 100.0
+                                live_ask = self.market_data["up_ask"] if sd == "UP" else self.market_data["down_ask"]
+                                
+                                if self.bounce_mode and name not in self.bounce_pending and live_ask > (pr + dip_threshold):
+                                    self.bounce_pending[name] = {
+                                        "side": sd, "target_level": pr, "dip_depth": dip_threshold,
+                                        "has_dipped": False, "signal": str(res), "bs": final_bs
                                 }
                                 self.log_msg(f"BOUNCE {name} {sd} | Parked. Waiting for retest of {pr*100:.1f}¢", level="SCAN")
                             else:
