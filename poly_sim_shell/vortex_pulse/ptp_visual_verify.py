@@ -67,7 +67,7 @@ def run_ptp_logic(points):
     triggered = slope >= MIN_SLOPE
     return valid_peaks, slope, triggered
 
-def annotate_svg(svg_path, output_path, peaks, slope, triggered, correlation_text):
+def annotate_svg(svg_path, output_path, peaks, points, slope, triggered, correlation_text):
     try:
         with open(svg_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
@@ -78,6 +78,21 @@ def annotate_svg(svg_path, output_path, peaks, slope, triggered, correlation_tex
                 break
         if insert_idx == -1: return
         
+        # Determine background color based on price diff
+        bg_color = "#121212"
+        if len(points) >= 2:
+            price_diff = abs(points[-1]['y'] - points[0]['y']) # Y-units are price-scaled in this mock
+            if price_diff >= 100: bg_color = "#831843"   # Tier 4
+            elif price_diff >= 50: bg_color = "#312e81"  # Tier 3
+            elif price_diff >= 25: bg_color = "#4c1d95"  # Tier 2
+            elif price_diff >= 1: bg_color = "#1e293b"   # Tier 1
+
+        # Update the background rect
+        for i, line in enumerate(lines):
+            if '<rect width="340" height="190"' in line:
+                lines[i] = line.replace('fill="#121212"', f'fill="{bg_color}"')
+                break
+
         new_elements = []
         for i, p in enumerate(peaks):
             new_elements.append(f' <circle cx="{p["x"]}" cy="{p["y"]}" r="2" fill="#ff00ff" stroke="white" stroke-width="0.5" />\n')
@@ -131,7 +146,7 @@ def main():
             if actual_up: stats["non_rising_up"] += 1
             
         corr_text = f"Pattern: {'RISING' if is_rising else 'NONE'} | Result: {'UP' if actual_up else 'DOWN'}"
-        annotate_svg(src, dst, peaks, slope, triggered, corr_text)
+        annotate_svg(src, dst, peaks, points, slope, triggered, corr_text)
         print(f"  Processed {filename}: {corr_text}")
 
     print("\n--- EXPERIMENT SUMMARY ---")

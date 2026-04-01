@@ -1,4 +1,13 @@
 import os
+try:
+    import winsound
+except ImportError:
+    class MockWinsound:
+        SND_FILENAME = 131072
+        SND_ASYNC = 1
+        def Beep(self, f, d): pass
+        def PlaySound(self, p, f): pass
+    winsound = MockWinsound()
 import threading
 import csv
 import time
@@ -5551,4 +5560,152 @@ class PTPSettingsModal(ModalScreen):
                 self.main_app.log_msg(f"⚙️ PTP Config Updated", level="ADMIN")
         except Exception as e:
             if self.main_app: self.main_app.log_msg(f"Error saving PTP: {e}", level="ERROR")
+        self.dismiss()
+
+class SonificationSettingsModal(ModalScreen):
+    """Configuration suite for audio pings."""
+    BINDINGS = [("escape", "dismiss", "Close Modal")]
+    
+    def __init__(self, main_app):
+        super().__init__()
+        self.main_app = main_app
+        self.sets = main_app.sonification_settings
+        
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog_audio"):
+            yield Label("Audio Synth Configuration", id="dialog_audio_title")
+            yield Label("Tune the pitch and rhythm of market ticks.", classes="dialog_subtitle")
+            
+            with Vertical(id="audio_form_area"):
+                with Horizontal(classes="audio_row"):
+                    yield Label("Base Freq (Hz):", classes="audio_lbl")
+                    yield Input(placeholder="800", value=str(self.sets.get("base_freq", 800)), id="audio_base_freq", classes="audio_inp")
+                
+                with Horizontal(classes="audio_row"):
+                    yield Label("Duration (ms):", classes="audio_lbl")
+                    yield Input(placeholder="50", value=str(self.sets.get("duration", 50)), id="audio_duration", classes="audio_inp")
+                
+                with Horizontal(classes="audio_row"):
+                    yield Label("Sensitivity (Hz):", classes="audio_lbl")
+                    yield Input(placeholder="10.0", value=str(self.sets.get("sensitivity", 10.0)), id="audio_sensitivity", classes="audio_inp")
+                    
+                with Horizontal(classes="audio_row"):
+                    yield Label("Pitch Jump (x):", classes="audio_lbl")
+                    yield Input(placeholder="1.5", value=str(self.sets.get("pitch_jump", 1.5)), id="audio_pitch_jump", classes="audio_inp")
+                
+                with Horizontal(classes="audio_row"):
+                    yield Label("Chirp Style:", classes="audio_lbl")
+                    yield Select([("Single Note", "single"), ("Double Chirp", "double"), ("Creative Arpeggio", "arpeggio")], 
+                               value=self.sets.get("style", "double"), id="audio_style", classes="audio_sel")
+                
+                with Horizontal(classes="audio_row"):
+                    yield Label("Sonic Glide (Ticks):", classes="audio_lbl")
+                    yield Input(placeholder="0", value=str(self.sets.get("recap_freq", 0)), id="audio_recap_freq", classes="audio_inp")
+
+                with Horizontal(classes="audio_row"):
+                    yield Label("Archive Win Glide:", classes="audio_lbl")
+                    yield Checkbox(value=self.sets.get("save_window_glide", False), id="audio_save_window", classes="audio_chk")
+
+                with Horizontal(id="audio_test_buttons"):
+                    yield Button("TEST UP (Major)", id="btn_test_up", variant="success")
+                    yield Button("TEST DN (Minor)", id="btn_test_dn", variant="error")
+            
+            with Horizontal(id="dialog_audio_buttons"):
+                yield Button("SAVE & CLOSE", id="btn_audio_save", variant="primary")
+
+    def on_mount(self):
+        d = self.query_one("#dialog_audio")
+        d.styles.background = "#1B1B1D"
+        d.styles.border = ("thick", "#00ff88")
+        d.styles.padding = (1, 2)
+        d.styles.width = 60
+        d.styles.height = "auto"
+        d.styles.align = ("center", "middle")
+        
+        self.query_one("#dialog_audio_title").styles.text_align = "center"
+        self.query_one("#dialog_audio_title").styles.color = "#00ff88"
+        self.query_one("#dialog_audio_title").styles.text_style = "bold"
+        self.query_one("#dialog_audio_title").styles.margin = (0, 0, 1, 0)
+
+        for row in self.query(".audio_row"):
+            row.styles.height = 3
+            row.styles.align = ("left", "middle")
+            
+        for lbl in self.query(".audio_lbl"):
+            lbl.styles.width = 24
+            lbl.styles.content_align = ("right", "middle")
+            
+        for inp in self.query(".audio_inp, .audio_sel"):
+            inp.styles.width = 16
+            
+        btn_row = self.query_one("#audio_test_buttons")
+        btn_row.styles.align = ("center", "middle")
+        btn_row.styles.margin = (1, 0)
+        btn_row.styles.height = 3
+        self.query_one("#btn_test_up").styles.margin = (0, 1)
+        self.query_one("#btn_test_dn").styles.margin = (0, 1)
+
+        save_row = self.query_one("#dialog_audio_buttons")
+        save_row.styles.align = ("center", "middle")
+        save_row.styles.margin = (1, 0, 0, 0)
+        save_row.styles.height = 3
+
+    @on(Button.Pressed, "#btn_test_up")
+    def test_up(self):
+        self._play_test(0.55, True)
+
+    @on(Button.Pressed, "#btn_test_dn")
+    def test_dn(self):
+        self._play_test(0.45, False)
+
+    def _play_test(self, price, is_up):
+        try:
+            bf = int(self.query_one("#audio_base_freq").value)
+            dur = int(self.query_one("#audio_duration").value)
+            sens = float(self.query_one("#audio_sensitivity").value)
+            style = self.query_one("#audio_style").value
+            jump = float(self.query_one("#audio_pitch_jump").value)
+            
+            # Simplified pitch logic for test
+            shift = (price - 0.5) * 100 * sens
+            root = int(bf + shift)
+            root = max(37, min(root, 32767))
+            
+            style = str(style).lower()
+            
+            if style == "single":
+                winsound.Beep(root, dur)
+            elif style == "arpeggio":
+                import random
+                # Creative sequence (Ascending for Test)
+                intervals = [1.0, 1.25, 1.5, 2.0] if is_up else [1.0, 1.2, 1.5]
+                for mult in intervals:
+                    f = int(root * mult)
+                    winsound.Beep(max(37, min(f, 32767)), dur)
+            else: # double
+                if is_up:
+                    winsound.Beep(root, dur)
+                    winsound.Beep(int(root * jump), dur)
+                else:
+                    winsound.Beep(int(root * (jump * 0.8)), dur)
+                    winsound.Beep(root, dur)
+        except Exception: pass
+
+    @on(Button.Pressed, "#btn_audio_save")
+    def save_and_close(self):
+        try:
+            self.main_app.sonification_settings = {
+                "base_freq": int(self.query_one("#audio_base_freq").value),
+                "duration": int(self.query_one("#audio_duration").value),
+                "sensitivity": float(self.query_one("#audio_sensitivity").value),
+                "pitch_jump": float(self.query_one("#audio_pitch_jump").value),
+                "style": self.query_one("#audio_style").value,
+                "recap_freq": int(self.query_one("#audio_recap_freq").value or 0),
+                "save_window_glide": self.query_one("#audio_save_window").value,
+                "cooldown": self.sets.get("cooldown", 0.2)
+            }
+            self.main_app.save_settings()
+            self.main_app.log_msg("⚙️ Audio Configuration Saved", level="SYS")
+        except Exception as e:
+            if self.main_app: self.main_app.log_msg(f"Error saving audio: {e}", level="ERROR")
         self.dismiss()

@@ -1446,3 +1446,70 @@ Total Nitro+GrindSnap Fired: 0`
 **Hypothesis:** Refine Nitro+VolSnap with stricter odds and ATR, and implement a HOLD strategy if trend doesn't align with BTC move, even when Nitro, VolSnap, and GrindSnap fire together.
 **Observation:** Nitro, WCP, and GrindSnap fired in this window where the BTC move was negative with a S-UP trend. Nitro+VolSnap is still the primary focus, but the presence of GrindSnap should be taken into account when adjusting the strategy.
 **Notes:** Added a HOLD return if the btc_move_pct goes the wrong way. Further refining the Nitro+VolSnap to incorporate a HOLD action, ensuring only bets are placed when BTC direction and trend align. Modified the len(fired) condition to allow grindsnap to fire. If the trend is aligned and we expect the move, proceed, otherwise, hold.
+
+## Window 1774961100 — 2026-03-31 15:48
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Tighten Nitro+VolSnap entry conditions further by requiring a stronger odds score and an aligned trend, while also considering the number of fired scanners for signal clarity. Implement a more conservative approach by only betting when the trend aligns with the BTC move and holding otherwise.
+**Observation:** The current Nitro+VolSnap strategy needs further refinement to improve win rate. Holding when trend doesn't align with BTC move is a good starting point, and a tighter odds score with aligned trend can improve accuracy.
+**Notes:** Continue to refine Nitro+VolSnap and potentially explore additional scanner combinations.
+
+## Window 1774961100 — 2026-03-31 15:48
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Refine Nitro+VolSnap further by incorporating HDO's trend confirmation to improve accuracy and reduce false signals, and widen the ATR filter for better volatility capture.
+**Observation:** Current strategy uses Nitro+VolSnap with trend alignment and a strict odds score. The addition of HDO may improve the signal's precision; broadening the ATR range might avoid missing valid signals during more volatile periods.
+**Notes:** Adding HDO to the Nitro+VolSnap confirmation. Slightly widened the ATR filter for broader signal capture.
+**Script output:** `Nitro + VolSnap + HDO, BTC Up - UP: 0, DOWN: 0
+Nitro + VolSnap + HDO, BTC Down - UP: 0, DOWN: 0
+Total Nitro+VolSnap+HDO Fired: 0`
+
+## Window 1774962000 — 2026-03-31 16:03
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Loosen ATR threshold slightly and require stricter odds score for Nitro+VolSnap+HDO, also ensure more reliable trends, by confirming either UP or DOWN with corresponding btc move. This aims to filter out false signals and enhance predictive accuracy when all three scanners fire.
+**Observation:** The current algorithm focuses on Nitro, VolSnap, and HDO firing together, with ATR and odds score filters. The recent memory highlights attempts to refine these conditions further by incorporating HDO and aligning trend with BTC move, suggesting a potential improvement through stricter filters.
+**Notes:** Review performance with adjusted odds score and ATR. Observe the number of instances where the new conditions are met and the subsequent market behavior.
+
+## Window 1774962900 — 2026-03-31 16:17
+**Winner:** N/A | **Conf:** 40%
+**Hypothesis:** Analyze Nitro performance across different trend conditions and odds scores, possibly simplifying the strategy or refining parameters.
+**Observation:** Nitro fired alone, indicating a potential isolated signal. The trend was S-DOWN, and the BTC move was up, which is a conflicting signal.
+**Notes:** Analyzing Nitro-only performance to determine its effectiveness and refine entry conditions based on historical data. Stricter odds scores and aligned trends will be emphasized.
+**Script output:** `Nitro Only, UP Trend - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend - Wins: 0, Losses: 0`
+
+## Window 1774962900 — 2026-03-31 16:20
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Analyze Nitro-only triggers more thoroughly to discern patterns based on historical outcomes, especially considering the recent loss, and refine trend alignment and ATR thresholds.
+**Observation:** Nitro fired alone in this window, but the trend alignment (S-DOWN with positive BTC move) led to a potentially unfavorable outcome. The current ATR threshold might need fine-tuning for Nitro-only scenarios.
+**Notes:** Tighten the Nitro-only trend alignment. Only bet on UP if trend is strictly 'UP' and BTC moves positively. Same for DOWN. Otherwise HOLD. This is a more conservative approach since the prior run had a misleading S-DOWN.
+**Script output:** `Nitro Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0`
+
+## Window 1774962900 — 2026-03-31 16:20
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Refine Nitro-only strategy by analyzing historical trend performance with stricter odds and volatility (ATR) filters.
+**Observation:** The previous Nitro-only strategy showed potential but needs tighter controls on odds, trend alignment, and ATR. Given the recent loss, I'll incorporate a more aggressive ATR threshold to better capture volatility, ensuring alignment between BTC move and trend for enhanced precision.
+**Notes:** Increase ATR threshold to 0.005 and odds to 98 for Nitro-only triggers to reduce false positives. Re-run the analysis script to see the effect of trend and BTC move alignment on Nitro.
+**Script output:** `Nitro Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro Only Triggers: 0`
+
+## Window 1775031600 — 2026-04-01 11:22
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Refine the Nitro-only strategy by incorporating the Briefing scanner and adjusting ATR and odds score thresholds to improve signal accuracy.
+**Observation:** The 'Briefing' scanner fired this window, and previous experiments showed potential in Nitro-only triggers; refining its parameters based on the trend alignment and ATR could improve profitability. The current Nitro strategy with stricter odds and ATR filters needs more nuance.
+**Notes:** Adding Briefing to Nitro strategy to refine entry.
+
+## Window 1775031900 — 2026-04-01 11:28
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Investigate Nitro+VolSnap performance across different trend conditions using historical data.
+**Observation:** Nitro and VolSnap fired, and the price moved up with an 'S-UP' trend. The current algorithm focuses on 'Nitro' and 'Briefing', so I will run an analysis on Nitro+VolSnap historical performance based on trend conditions.
+**Notes:** Review Nitro+VolSnap performance and potentially switch back to it, incorporating trend as a filter.
+**Script output:** `Nitro + VolSnap, UP Trend & BTC Up - 0
+
+Nitro + VolSnap, UP Trend & BTC Down - 0
+
+Nitro + VolSnap, DOWN Trend & BTC Up - 0
+
+Nitro + VolSnap, DOWN Trend & BTC Down - 0
+
+Total Nitro+VolSnap Fired: 0`

@@ -1677,7 +1677,9 @@ class TradeEngineMixin:
                                         "side": sd, "target_level": pr, "dip_depth": dip_threshold,
                                         "has_dipped": False, "signal": str(res), "bs": final_bs
                                 }
-                                self.log_msg(f"BOUNCE {name} {sd} | Parked. Waiting for retest of {pr*100:.1f}¢", level="SCAN")
+                                if f"BOUNCE_PARKED_{name}" not in self.skipped_logs:
+                                    self.log_msg(f"BOUNCE {name} {sd} | Parked. Waiting for retest of {pr*100:.1f}¢", level="SCAN")
+                                    self.skipped_logs.add(f"BOUNCE_PARKED_{name}")
                             else:
                                 ok, msg, act_shares, act_price = self.trade_executor.execute_buy(
                                     is_l, sd, final_bs, pr, 

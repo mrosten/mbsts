@@ -1,6 +1,6 @@
 <svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
 <style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
-<rect width="340" height="190" fill="#121212" />
+<rect width="340" height="190" fill="#4c1d95" />
 <line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
 <line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
 <line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />

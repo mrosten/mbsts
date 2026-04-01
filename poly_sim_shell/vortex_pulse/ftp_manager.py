@@ -172,7 +172,7 @@ class FTPManager:
                 
             sessions = [os.path.basename(i) for i in items if "session_" in i]
             
-            self._log(f"Found {len(sessions)} session directories: {sessions[:10]}...", level="INFO")
+            # self._log(f"Found {len(sessions)} session directories: {sessions[:10]}...", level="INFO")
             
             # Enhanced sorting: parse datetime from session names for proper chronological order
             def parse_session_time(session_id):
@@ -187,8 +187,8 @@ class FTPManager:
             sessions.sort(key=parse_session_time, reverse=True)
             
             # Log the newest few sessions for debugging
-            if sessions:
-                self._log(f"Newest 5 sessions: {sessions[:5]}", level="INFO")
+            # if sessions:
+            #     self._log(f"Newest 5 sessions: {sessions[:5]}", level="INFO")
             
         except Exception as e:
             self._log(f"Failed to list remote directories: {e}", level="ERROR")
