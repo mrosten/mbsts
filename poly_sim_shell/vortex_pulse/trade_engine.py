@@ -1,8 +1,22 @@
 import time
 import asyncio
-import threading
 import os
+try:
+    import winsound
+except ImportError:
+    class MockWinsound:
+        SND_FILENAME = 131072
+        SND_ASYNC = 1
+        def Beep(self, f, d): pass
+        def PlaySound(self, p, f): pass
+    winsound = MockWinsound()
+
+import threading
 import concurrent.futures
+import random
+import math
+import struct
+import wave
 from datetime import datetime, timezone
 
 # Handle imports for both package and direct execution
@@ -145,6 +159,184 @@ class TradeEngineMixin:
             return False, reason, 0.0
 
         return True, None, total_penalty_pct
+
+    def _play_simple_tick_sound(self, price_val, is_up):
+        """
+        Plays a single, double, or creative arpeggio ping using user-configured settings.
+        (v5.9.17 - Simple Tick Reversion w/ Creative Option)
+        """
+        try:
+            s = getattr(self, "sonification_settings", {})
+        except Exception:
+            pass
+
+    def _play_simple_tick_sound(self, root, is_up):
+        """
+        Plays a discrete tick sound (single, double, or arpeggio) using the provided root frequency.
+        """
+        try:
+            s = getattr(self, "sonification_settings", {})
+            dur = s.get("duration", 50)
+            style = str(s.get("style", "double")).lower()
+            jump = s.get("pitch_jump", 1.5)
+            
+            # Execution
+            if style == "single":
+                winsound.Beep(root, dur)
+                
+            elif style == "arpeggio":
+                import random
+                idx = getattr(self, "_arpeggio_tick_index", 0)
+                var = idx % 4
+                self._arpeggio_tick_index = idx + 1
+                
+                btc_cur = self.market_data.get("btc_price", 0)
+                btc_open = self.market_data.get("btc_open", 0)
+                is_sent_up = btc_cur >= btc_open if btc_open > 0 else True
+                
+                if is_sent_up:
+                    base_intervals = [1.0, 1.25, 1.5, 2.0] # Major
+                else:
+                    base_intervals = [1.0, 1.19, 1.5]      # Minor
+                
+                if var == 0:   intervals = base_intervals # Asc
+                elif var == 1: intervals = sorted(base_intervals, reverse=True) # Desc
+                elif var == 2: intervals = [i * 1.25 for i in base_intervals[:3]] # Inv1
+                else:          intervals = random.sample(base_intervals, len(base_intervals)) # Jitter
+                
+                for mult in intervals:
+                    freq = int(root * mult)
+                    winsound.Beep(max(37, min(freq, 32767)), dur)
+                    
+            else: # double (Normal double chirp)
+                if is_up:
+                    winsound.Beep(root, dur)
+                    winsound.Beep(int(root * jump), dur)
+                else:
+                    winsound.Beep(int(root * (jump * 0.8)), dur)
+                    winsound.Beep(root, dur)
+
+        except Exception:
+            pass
+
+    def _play_sonification_glide(self, frequencies, step_dur_ms=15):
+        """
+        Synthesizes and plays a smooth analogue-style frequency sweep (glissando).
+        Uses continuous phase interpolation for a seameless 'zip' sound.
+        """
+        try:
+            import time, wave, struct, math
+            # Using global winsound mock for Linux compatibility
+            
+            # 1. Setup Parameters
+            sample_rate = 22050 # Faster synthesis than 44.1k
+            num_steps = len(frequencies)
+            samples_per_step = int((step_dur_ms / 1000.0) * sample_rate)
+            total_samples = samples_per_step * (num_steps - 1)
+            
+            if total_samples <= 0: return
+            
+            # 2. Temporary File Path
+            # Use current directory to ensure permissions
+            wav_path = os.path.join(os.getcwd(), "recap_glide.wav")
+            
+            # 3. Frequency Sweep Synthesis (Continuous Phase)
+            audio_data = []
+            phase = 0.0
+            
+            # Initial breather
+            time.sleep(0.2) 
+            
+            for i in range(num_steps - 1):
+                f_start = frequencies[i]
+                f_end = frequencies[i+1]
+                
+                for s in range(samples_per_step):
+                    # Linear frequency interpolation
+                    t_frac = s / samples_per_step
+                    cur_f = f_start + (f_end - f_start) * t_frac
+                    
+                    # Update phase with current freq
+                    phase += (2.0 * math.pi * cur_f) / sample_rate
+                    # Prevent phase from growing infinitely (modulo 2pi)
+                    if phase > 2.0 * math.pi: phase -= 2.0 * math.pi
+                    
+                    # Generate Sine (16-bit PCM)
+                    sample = int(math.sin(phase) * 16383) # 50% volume to avoid clipping
+                    audio_data.append(struct.pack('<h', sample))
+            
+            # 4. Write WAVE File
+            with wave.open(wav_path, 'wb') as wf:
+                wf.setnchannels(1) # Mono
+                wf.setsampwidth(2) # 2 bytes (16-bit)
+                wf.setframerate(sample_rate)
+                wf.writeframes(b"".join(audio_data))
+                
+            # 5. Play Asynchronously
+            if os.name == 'nt':
+                    winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            else:
+                # Linux/Mac fallback: use aplay (ALSA) or play (SoX)
+                # The '&' ensures it runs in background like SND_ASYNC
+                os.system(f"aplay {wav_path} > /dev/null 2>&1 &")
+            
+        except Exception:
+            pass
+
+    def _archive_window_sonic_glide(self, tones):
+        """
+        Synthesizes a super-compact (8kHz, 8-bit) archive of the full window price path.
+        Saves to /sonic_archives/ and ensures directory existence.
+        """
+        try:
+            if not tones: return
+            
+            # 1. Setup Compact Parameters (8kHz 8-bit = ~48KB per window)
+            sample_rate = 8000
+            step_dur_ms = 20
+            num_steps = len(self.window_tones)
+            if num_steps < 2: return
+            
+            samples_per_step = int((step_dur_ms / 1000.0) * sample_rate)
+            
+            # 2. Prepare Directory
+            archive_dir = os.path.join(os.getcwd(), "sonic_archives")
+            if not os.path.exists(archive_dir):
+                os.makedirs(archive_dir, exist_ok=True)
+            
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            wav_path = os.path.join(archive_dir, f"glide_{ts}.wav")
+            
+            # 3. Fast Synthesis (8-bit PCM)
+            audio_data = []
+            phase = 0.0
+            import math, struct, wave
+            self.log_msg(f"SONIC_ARCHIVE: Synthesizing {len(tones)} data points into {os.path.basename(wav_path)}...", level="SCAN")
+            for i in range(num_steps - 1):
+                f_start = tones[i]
+                f_end = tones[i+1]
+                for s in range(samples_per_step):
+                    t_frac = s / samples_per_step
+                    cur_f = f_start + (f_end - f_start) * t_frac
+                    phase += (2.0 * math.pi * cur_f) / sample_rate
+                    if phase > 2.0 * math.pi: phase -= 2.0 * math.pi
+                    # 8-bit PCM is unsigned (0-255), 128 is silence center
+                    sample = int(128 + math.sin(phase) * 64) # 50% amp
+                    audio_data.append(struct.pack('<B', sample))
+            
+            # 4. Write WAVE
+            with wave.open(wav_path, 'wb') as wf:
+                wf.setnchannels(1) # Mono
+                wf.setsampwidth(1) # 1 byte (8-bit)
+                wf.setframerate(sample_rate)
+                wf.writeframes(b"".join(audio_data))
+                
+            self.log_msg(f"SONIC_ARCHIVE: Saved full window glide to [bold white]sonic_archives/{os.path.basename(wav_path)}[/]", level="SCAN")
+            
+        except Exception as e:
+            self.log_msg(f"ARCHIVE_FAIL: {e}", level="ERROR")
+
+    # Legacy generative worker removed in favor of tick-based triggers (v5.9.17)
 
     def _refant_finalize_bet(self, name, sd, bs, pr, res, info=None):
         """
@@ -431,10 +623,14 @@ class TradeEngineMixin:
                         self.log_msg(f"[bold yellow]GAP DETECTED: {gap}s since last window. Skipping stale settlement/audit.[/]", level="ADMIN")
                         self.audit_buffer = None # Discard pending audit for the window before the gap
                     else:
-                        # [FIX] Capture state for the window we are about to settle
-                        old_slug = self.market_data.get("slug")
-                        old_strike = self.market_data.get("window_strike")
-                        self.trigger_settlement(settlement_slug=old_slug, settlement_strike=old_strike)
+                        # [PAUSABLE]
+                        if not getattr(self, "paused", False):
+                            # [FIX] Capture state for the window we are about to settle
+                            old_slug = self.market_data.get("slug")
+                            old_strike = self.market_data.get("window_strike")
+                            self.trigger_settlement(settlement_slug=old_slug, settlement_strike=old_strike)
+                        else:
+                            self.log_msg("[bold yellow]SETTLEMENT SKIPPED:[/] Bot is PAUSED. Window history will be irregular.", level="SYS")
                 
                 self.last_window_ts = ts_start # Track for gap detection
                 
@@ -477,6 +673,16 @@ class TradeEngineMixin:
                 for sc in self.scanners.values(): sc.reset() # reset all scanner signals/timers
                 self._window_tick_signals = {}  # Clear tick signals for new window
                 self.reentry_state = {}         # [NEW] Clear re-entry tracking for new window
+                # 5. Sonic Archive (Full Window History) - v5.9.22 (Pausable)
+                s_cfg = getattr(self, "sonification_settings", {})
+                if s_cfg.get("save_window_glide") and not getattr(self, "paused", False):
+                    # Capture tone history snapshot BEFORE clearing it (v5.9.22 Race Fix)
+                    save_tones = list(getattr(self, "window_tones", []))
+                    if len(save_tones) > 2:
+                        self.run_worker(lambda: self._archive_window_sonic_glide(save_tones), thread=True)
+
+                self.window_tones = []          # [NEW] Track sonic path frequencies
+                self._recap_tick_count = 0      # [NEW] Reset recap counter
                 
                 # --- [NEW] Window-Level Volatility Latching (v5.9.15) ---
                 vol_cfg = getattr(self, "volatility_scaling", {"enabled": False})
@@ -522,57 +728,50 @@ class TradeEngineMixin:
             slug = f"btc-updown-{freq}m-{ts_start}"
             self.market_data["slug"] = slug  # Essential for accounting
             
-            # Fetch Kraken Open Price instantly to avoid API lag from other services
-            cur = await asyncio.to_thread(self.market_data_manager.fetch_current_price)
-            opn = await asyncio.to_thread(self.market_data_manager.update_history, cur, ts_start, elapsed)
-            
-            # [FIX] Sync btc_open IMMEDIATELY so fetch_polymarket (in gather below) has the correct price
-            self.market_data_manager.market_data["btc_open"] = opn
-
-            # --- [NEW] Connection Resumption Logic ---
-            if self.market_data_manager.just_reconnected:
-                self.market_data_manager.just_reconnected = False
-                if elapsed > 90:
-                    self.mid_window_lockout = True
-                    self.log_msg(f"[bold yellow]RECONNECTED: {elapsed}s into window. SUSPENDING trading for this round...[/]", level="ADMIN")
-                else:
-                    self.log_msg(f"[bold green]RECONNECTED: {elapsed}s into window. Resuming normally...[/]", level="ADMIN")
+            # --- [PAUSABLE] Market Data Feed (v5.9.22) ---
+            if not getattr(self, "paused", False):
+                # Fetch Kraken Open Price instantly to avoid API lag from other services
+                cur = await asyncio.to_thread(self.market_data_manager.fetch_current_price)
+                opn = await asyncio.to_thread(self.market_data_manager.update_history, cur, ts_start, elapsed)
                 
-                # Elegant Resume Statement with Guess (if possible)
+                # [FIX] Sync btc_open IMMEDIATELY so fetch_polymarket (in gather below) has the correct price
+                self.market_data_manager.market_data["btc_open"] = opn
+
+                # Refactored for efficiency: use asyncio.to_thread with gather
                 try:
-                    up_p = (self.market_data.get("up_price") or 0.5) * 100
-                    dn_p = (self.market_data.get("down_price") or 0.5) * 100
-                    guess = "UP" if up_p > dn_p else "DOWN"
-                    self.log_msg(f"RESUME: Guess=[bold cyan]{guess}[/] (UP={up_p:.1f}¢ | DN={dn_p:.1f}¢)", level="SCAN")
-                except: pass
-            # ------------------------------------------
-            
-            if is_new_window:
-                self.awaiting_next_strike = True
-                # Strike will be populated later in the loop from 'poly' data
-
-            if not getattr(self, "app_active", False): return
-
-            # Refactored for efficiency: use asyncio.to_thread with gather
-            # to avoid creating a new ThreadPoolExecutor every second
-            try:
-                results = await asyncio.gather(
-                    asyncio.to_thread(self.market_data_manager.update_4h_trend),
-                    asyncio.to_thread(self.market_data_manager.update_1h_trend),
-                    asyncio.to_thread(self.market_data_manager.fetch_candles_60m),
-                    asyncio.to_thread(self.market_data_manager.fetch_polymarket, slug)
-                )
-                candles, poly = results[2], results[3]
-            except Exception as e:
-                self.safe_call(self.log_msg, f"[dim]Fetch error: {e}[/]")
-                # [FIX] Provide full dict structure to prevent downstream KeyErrors
-                candles, poly = ([], [], [], []), {
-                    "up_price": 0.5, "down_price": 0.5,
-                    "up_bid": 0.5, "down_bid": 0.5,
-                    "up_ask": 0.51, "down_ask": 0.51,
-                    "up_id": "unknown_up", "down_id": "unknown_down",
-                    "p2b": None
+                    results = await asyncio.gather(
+                        asyncio.to_thread(self.market_data_manager.update_4h_trend),
+                        asyncio.to_thread(self.market_data_manager.update_1h_trend),
+                        asyncio.to_thread(self.market_data_manager.fetch_candles_60m),
+                        asyncio.to_thread(self.market_data_manager.fetch_polymarket, slug)
+                    )
+                    candles, poly = results[2], results[3]
+                except Exception as e:
+                    self.safe_call(self.log_msg, f"[dim]Fetch error: {e}[/]")
+                    # Provide default structure to prevent downstream KeyErrors
+                    candles, poly = ([], [], [], []), {
+                        "up_price": 0.5, "down_price": 0.5,
+                        "up_bid": 0.5, "down_bid": 0.5,
+                        "up_ask": 0.51, "down_ask": 0.51,
+                        "up_id": "unknown_up", "down_id": "unknown_down",
+                        "p2b": None
+                    }
+            else:
+                # While paused, use last known market data
+                cur = self.market_data.get("btc_price", 0)
+                opn = self.market_data.get("btc_open", 0)
+                poly = {
+                    "up_price": self.market_data.get("up_price", 0.5),
+                    "down_price": self.market_data.get("down_price", 0.5),
+                    "up_bid": self.market_data.get("up_bid", 0.5),
+                    "down_bid": self.market_data.get("down_bid", 0.5),
+                    "up_ask": self.market_data.get("up_ask", 0.51),
+                    "down_ask": self.market_data.get("down_ask", 0.51),
+                    "up_id": self.market_data.get("up_id", "paused"),
+                    "down_id": self.market_data.get("down_id", "paused"),
+                    "p2b": self.market_data.get("window_strike")
                 }
+                candles = ([], [], [], []) # Candles stay empty or unchanged
 
             # --- [DEFERRED LOGGING & AUDIT LOGIC] ---
             # v5.9.8: Settlement is now immediate at T=0. 
@@ -772,14 +971,7 @@ class TradeEngineMixin:
                                     main_bal = self.live_broker.balance if is_l else self.sim_broker.balance
                                     logged_pnl = buf.get("pnl", 0.0)
                                     
-                                    price_diff = abs(buf.get('close_price', 0) - p2b_start) * 100
-                                    tier_class = ""
-                                    if price_diff >= 100: tier_class = "tier4"
-                                    elif price_diff >= 50: tier_class = "tier3"
-                                    elif price_diff >= 25: tier_class = "tier2"
-                                    elif price_diff >= 1: tier_class = "tier1"
-                                    
-                                    f.write(f"<tr class='{row_class} trade-row {tier_class}'>")
+                                    f.write(f"<tr class='{row_class} trade-row'>")
                                     f.write(f"<td>{timestamp_str}</td>")
                                     f.write(f"<td><a href='{pm_url}' target='_blank'>{audit_slug}</a></td>")
                                     f.write(f"<td>${p2b_start:,.2f}</td>") # Bot Strike
@@ -847,8 +1039,10 @@ class TradeEngineMixin:
                         if getattr(self, "app_active", False):
                             self.log_msg(f"[red]Audit Process Error: {e}[/]", level="ERROR")
 
-                if getattr(self, "official_audit_enabled", True):
+                if getattr(self, "official_audit_enabled", True) and not getattr(self, "paused", False):
                     asyncio.create_task(_perform_official_audit())
+                elif getattr(self, "paused", False):
+                    self.log_msg("[dim]Audit Task Paused.[/]", level="SYS")
                 else:
                     self.log_msg("[dim]Official Audit Skipped (Disabled in Settings)[/]", level="SYS")
 
@@ -864,6 +1058,39 @@ class TradeEngineMixin:
             
             d = {"c60":c60, "l60":l60, "h60":h60, "cur":cur, "opn":opn, "poly":poly}
             
+            # --- SONIFICATION & TRACKING TRIGGER (v5.9.22 - Pausable) ---
+            if not getattr(self, "paused", False):
+                new_p = d["poly"].get("up_price", 0.5)
+                old_p = self.market_data.get("up_price", 0.5)
+                if new_p != old_p:
+                    now_s = time.time()
+                    s_conf = getattr(self, "sonification_settings", {})
+                    if now_s - getattr(self, "last_beep_time", 0) >= s_conf.get("cooldown", 0.2):
+                        self.last_beep_time = now_s
+                        is_up = new_p > old_p
+                        
+                        # 1. Pitch Logic (Shift from base_freq @ 50c)
+                        bf = s_conf.get("base_freq", 800)
+                        sens = s_conf.get("sensitivity", 10.0)
+                        root = max(37, min(int(bf + (new_p - 0.5) * 100 * sens), 32767))
+                        
+                        # 2. Always Track for Archive/Recap
+                        if not hasattr(self, "window_tones"): self.window_tones = []
+                        self.window_tones.append(root)
+                        
+                        # 3. Trigger Sonification (Live)
+                        if getattr(self, "sonification_enabled", False):
+                            self.run_worker(lambda: self._play_simple_tick_sound(root, is_up), thread=True)
+                            
+                        # 4. Trigger Periodic Recap (Sonic Glide)
+                        re_freq = s_conf.get("recap_freq", 0)
+                        if re_freq > 0:
+                            self._recap_tick_count = getattr(self, "_recap_tick_count", 0) + 1
+                            if self._recap_tick_count % re_freq == 0:
+                                trace_path = self.window_tones[-40:]
+                                if len(trace_path) > 1:
+                                    self.run_worker(lambda: self._play_sonification_glide(trace_path), thread=True)
+
             self.market_data.update({
                 "btc_price": d["cur"], "btc_open": d["opn"],
                 "up_price": d["poly"]["up_price"], "down_price": d["poly"]["down_price"],
@@ -873,21 +1100,23 @@ class TradeEngineMixin:
             })
             # Sync other market data into MarketDataManager
             
-            # Push to Lean Chart
-            try: 
-                chart = self.query_one("#pulse_lean_chart")
-                # If there's a pending tilt from the previous window, inject it at T=0
-                if not chart.history and hasattr(self, "_pending_next_tilt") and self._pending_next_tilt:
-                    tilt_dir, tilt_mag = self._pending_next_tilt
-                    chart.push_tilt(0, tilt_dir, tilt_mag)
-                    self._pending_next_tilt = None
-                chart.push_value(elapsed, d["poly"]["up_price"])
-                # Capture and push scanner triggers (v5.9.13)
-                for scanner_name, sig in self.tick_signals.items():
-                    if "BET" in sig or "BUY" in sig:
-                        side = "UP" if "UP" in sig else "DOWN"
-                        chart.push_trigger(elapsed, d["poly"]["up_price"], side, scanner_name)
-            except: pass
+            # Push to Lean Chart (v5.9.22 - Pausable)
+            if not getattr(self, "paused", False):
+                try: 
+                    chart = self.query_one("#pulse_lean_chart")
+                    # If there's a pending tilt from the previous window, inject it at T=0
+                    if not chart.history and hasattr(self, "_pending_next_tilt") and self._pending_next_tilt:
+                        tilt_dir, tilt_mag = self._pending_next_tilt
+                        chart.push_tilt(0, tilt_dir, tilt_mag)
+                        self._pending_next_tilt = None
+                    chart.push_value(elapsed, d["poly"]["up_price"])
+                    
+                    # Capture and push scanner triggers (v5.9.13)
+                    for scanner_name, sig in self.tick_signals.items():
+                        if "BET" in sig or "BUY" in sig:
+                            side = "UP" if "UP" in sig else "DOWN"
+                            chart.push_trigger(elapsed, d["poly"]["up_price"], side, scanner_name)
+                except: pass
             
             rsi = calculate_rsi(d["c60"])
             self.market_data['rsi'] = rsi # Store for manual access
@@ -1227,61 +1456,62 @@ class TradeEngineMixin:
                     except: pass
             # --------------------------------------------------
 
-            # 1. Process All Scanners to find signals
-            total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
-            for name, sc in self.scanners.items():
-                if not self.query_one(scanner_map[name]).value: continue
-                
-                # --- [NEW] HDO Halt Guard ---
-                if self.hdo_fired_in_window:
-                    if "HDO_HALT_GLOBAL" not in self.skipped_logs:
-                        self.log_msg("HALT Scanners | Window hedged - no further trades allowed.", level="SCAN")
-                        self.skipped_logs.add("HDO_HALT_GLOBAL")
-                    continue
-                # ----------------------------
-                
-                # [FIXED] Prevent "Machine-Gunning": If this scanner already fired this window, skip.
-                if getattr(sc, "fired", False):
-                    tick_signals[name] = "FIRED"
-                    continue
-                
-                # Dynamic Advanced Settings injection (primarily for Momentum)
-                if hasattr(sc, "adv_settings"):
-                    sc.adv_settings = self.mom_adv_settings
-                if hasattr(sc, "buy_mode"):
-                    sc.buy_mode = self.mom_buy_mode
-                
-                # In PRE/ADV mode at T-15s, let _do_prebuy thread be the sole caller of
-                # get_signal so it reads the NEXT window context and the latch isn't consumed here.
-                if name == "Momentum" and self.mom_buy_mode in ["PRE", "ADV"] and elapsed >= (self.config.WINDOW_SECONDS - 15):
-                    continue
-
-                # Check Signal
-                res = sc.get_signal(context)
-                
-                tick_signals[name] = str(res)  # Capture for UI / scoring
-                if res == "WAIT": continue
-                if res == "NONE":
-                    reason = getattr(sc, "last_skip_reason", None)
-                    if reason:
-                        # Clean reason of dynamic numbers/BTC counts for better suppression
-                        import re
-                        clean_reason = re.sub(r'\d+\.?\d*', 'X', reason)
-                        suppress_key = f"SKIP_{name}_{clean_reason}"
-                        if suppress_key not in self.skipped_logs:
-                            self.log_msg(f"SKIP {name} | {reason}", level="SCAN")
-                            self.skipped_logs.add(suppress_key)
-                    continue
-                        
-                if "BET_" in str(res):
-                    sd = "UP" if "UP" in str(res) else "DOWN"
-                    # Robust Duplicate Check: Match algorithm name and side
-                    already_have = any(
-                        info.get("algorithm") == name and info.get("side") == sd and not info.get("closed")
-                        for info in self.window_bets.values()
-                    )
+            # 1. Process All Scanners to find signals (v5.9.22 - Pausable)
+            if not getattr(self, "paused", False):
+                total_window_cost = sum(info.get("cost", 0) for info in self.window_bets.values())
+                for name, sc in self.scanners.items():
+                    if not self.query_one(scanner_map[name]).value: continue
                     
-                    if already_have: continue
+                    # --- [NEW] HDO Halt Guard ---
+                    if self.hdo_fired_in_window:
+                        if "HDO_HALT_GLOBAL" not in self.skipped_logs:
+                            self.log_msg("HALT Scanners | Window hedged - no further trades allowed.", level="SCAN")
+                            self.skipped_logs.add("HDO_HALT_GLOBAL")
+                        continue
+                    # ----------------------------
+                
+                    # [FIXED] Prevent "Machine-Gunning": If this scanner already fired this window, skip.
+                    if getattr(sc, "fired", False):
+                        tick_signals[name] = "FIRED"
+                        continue
+                    
+                    # Dynamic Advanced Settings injection (primarily for Momentum)
+                    if hasattr(sc, "adv_settings"):
+                        sc.adv_settings = self.mom_adv_settings
+                    if hasattr(sc, "buy_mode"):
+                        sc.buy_mode = self.mom_buy_mode
+                    
+                    # In PRE/ADV mode at T-15s, let _do_prebuy thread be the sole caller of
+                    # get_signal so it reads the NEXT window context and the latch isn't consumed here.
+                    if name == "Momentum" and self.mom_buy_mode in ["PRE", "ADV"] and elapsed >= (self.config.WINDOW_SECONDS - 15):
+                        continue
+
+                    # Check Signal
+                    res = sc.get_signal(context)
+                    
+                    tick_signals[name] = str(res)  # Capture for UI / scoring
+                    if res == "WAIT": continue
+                    if res == "NONE":
+                        reason = getattr(sc, "last_skip_reason", None)
+                        if reason:
+                            # Clean reason of dynamic numbers/BTC counts for better suppression
+                            import re
+                            clean_reason = re.sub(r'\d+\.?\d*', 'X', reason)
+                            suppress_key = f"SKIP_{name}_{clean_reason}"
+                            if suppress_key not in self.skipped_logs:
+                                self.log_msg(f"SKIP {name} | {reason}", level="SCAN")
+                                self.skipped_logs.add(suppress_key)
+                        continue
+                            
+                    if "BET_" in str(res):
+                        sd = "UP" if "UP" in str(res) else "DOWN"
+                        # Robust Duplicate Check: Match algorithm name and side
+                        already_have = any(
+                            info.get("algorithm") == name and info.get("side") == sd and not info.get("closed")
+                            for info in self.window_bets.values()
+                        )
+                        
+                        if already_have: continue
 
                     # 1b. Mid-Round Lockout: skip execution if booted mid-window or in first 10s
                     if is_initial_lockout or self.mid_window_lockout:
@@ -2529,8 +2759,8 @@ class TradeEngineMixin:
                 chart = self.query_one("#pulse_lean_chart")
                 if chart.save_graph_svg(graph_path):
                     self.log_msg(f"[dim]Saved window graph to graphs/{os.path.basename(graph_path)}[/]")
-                    # Parallel FTP Upload
-                    if self.log_settings.get("verification_html", True):
+                    # Parallel FTP Upload (v5.9.22 - Pausable)
+                    if self.log_settings.get("verification_html", True) and not getattr(self, "paused", False):
                         self.ftp_manager.upload_graph(graph_path, graph_filename)
                 else:
                     self.log_msg(f"[red]Chart save logic failed for graphs/{os.path.basename(graph_path)}[/]")

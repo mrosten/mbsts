@@ -250,8 +250,18 @@ class PulseLeanChart(Static):
             svg = [f'<svg width="{img_w + pad*2}" height="{img_h + pad*2}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">']
             # Inline CSS for hover tooltips on trade dots
             svg.append('<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>')
-            # Background
-            svg.append(f'<rect width="{img_w + pad*2}" height="{img_h + pad*2}" fill="#121212" />')
+            # Background Colors based on price diff (1, 25, 50, 100 units)
+            bg_color = "#121212" # Default
+            points = self.history
+            if points and len(points) >= 2:
+                # diff = abs(last - first) in cents
+                price_diff = abs(points[-1][1] - points[0][1]) * 100
+                if price_diff >= 100: bg_color = "#831843"   # Tier 4: Magenta/Maroon
+                elif price_diff >= 50: bg_color = "#312e81"  # Tier 3: Indigo
+                elif price_diff >= 25: bg_color = "#4c1d95"  # Tier 2: Purple
+                elif price_diff >= 1: bg_color = "#1e293b"   # Tier 1: Slate
+            
+            svg.append(f'<rect width="{img_w + pad*2}" height="{img_h + pad*2}" fill="{bg_color}" />')
             
             # Grid Lines
             for i in [2, 4, 5, 6, 8]:
@@ -390,6 +400,18 @@ class PulseApp(TradeEngineMixin, App):
     .timer_text { text-style: bold; color: $warning; }
     .run_time { color: #00ffff; margin-left: 2; }
     .live_mode { color: #ff0000; text-style: bold; background: #330000; }
+    
+    #btn_pause {
+        min-width: 12;
+        margin-right: 1;
+        border: solid gray;
+    }
+    .paused_active {
+        background: #b22222;
+        color: white;
+        border: double white;
+        text-style: bold;
+    }
     
     #exposure_mini_box { width: 100%; height: auto; layout: vertical; }
     #exposure_mini_box Label { width: 100%; content-align: center middle; opacity: 0.8; }
@@ -611,6 +633,32 @@ class PulseApp(TradeEngineMixin, App):
         cb_id = cb.id
         if not cb_id: return
         
+        if cb_id == "cb_sonify":
+            self.sonification_enabled = event.value
+            if not getattr(self, "is_initializing", False):
+                self.save_settings()
+                self.log_msg(f"SONIFICATION {'ENABLED' if event.value else 'DISABLED'}", level="SYS")
+            return
+
+        if cb_id == "cb_audit_enabled":
+            self.official_audit_enabled = event.value
+            if not getattr(self, "is_initializing", False):
+                self.save_settings()
+                self.log_msg(f"WINDDOW AUDIT {'ENABLED' if event.value else 'DISABLED'}", level="SYS")
+            return
+
+        if cb_id and cb_id.startswith("cb_log_"):
+            log_key = cb_id.replace("cb_log_", "")
+            # Mapping short ID to settings key
+            key_map = {"console": "console_txt", "html": "verification_html"}
+            if log_key in key_map:
+                settings_key = key_map[log_key]
+                self.log_settings[settings_key] = event.value
+                self.log_msg(f"LOGGING {'ENABLED' if event.value else 'DISABLED'}: {settings_key.upper()}", level="SYS")
+                if not getattr(self, "is_initializing", False):
+                    self.save_settings()
+            return
+            
         if cb_id and cb_id.startswith("cb_"):
             code = cb_id[3:]
             try:
@@ -632,23 +680,6 @@ class PulseApp(TradeEngineMixin, App):
             # Auto-persist algorithm toggle
             if not getattr(self, "is_initializing", False):
                 self.save_settings()
-        
-        elif cb_id and cb_id.startswith("cb_log_"):
-            log_key = cb_id.replace("cb_log_", "")
-            # Mapping short ID to settings key
-            key_map = {"console": "console_txt", "html": "verification_html"}
-            if log_key in key_map:
-                settings_key = key_map[log_key]
-                self.log_settings[settings_key] = event.value
-                self.log_msg(f"LOGGING {'ENABLED' if event.value else 'DISABLED'}: {settings_key.upper()}", level="SYS")
-                if not getattr(self, "is_initializing", False):
-                    self.save_settings()
-        
-        elif cb_id == "cb_audit_enabled":
-            self.official_audit_enabled = event.value
-            if not getattr(self, "is_initializing", False):
-                self.save_settings()
-                self.log_msg(f"WINDDOW AUDIT {'ENABLED' if event.value else 'DISABLED'}", level="SYS")
 
     @on(events.Click, "Label")
     def on_label_click(self, event: events.Click) -> None:
@@ -711,6 +742,19 @@ class PulseApp(TradeEngineMixin, App):
             try: self.query_one(f"#cb_{code.lower()}").value = False
             except: pass
 
+    @on(Button.Pressed, "#btn_pause")
+    def toggle_pause(self):
+        self.paused = not self.paused
+        btn = self.query_one("#btn_pause")
+        if self.paused:
+            btn.label = "RESUME"
+            btn.add_class("paused_active")
+            self.log_msg("[bold white on red] GLOBAL PAUSE ACTIVE [/] All scanners and trading suspended.", level="SYS")
+        else:
+            btn.label = "PAUSE"
+            btn.remove_class("paused_active")
+            self.log_msg("[bold white on green] GLOBAL RESUME [/] Monitoring and trading active.", level="SYS")
+
     def __init__(self, sim_broker, live_broker, start_live_mode=False, session_id=None):
         super().__init__()
         import atexit
@@ -753,6 +797,21 @@ class PulseApp(TradeEngineMixin, App):
         self.exposure_up = {"cost": 0.0, "payout": 0.0}
         self.exposure_dn = {"cost": 0.0, "payout": 0.0}
         self.last_window_ts = 0             # Track for gap detection (v5.9.9)
+        self.paused = False                 # [NEW] Global Pause Flag
+        
+        # Sonification State (v5.9.17)
+        self.sonification_enabled = False
+        self.sonification_settings = {
+            "base_freq": 800,        # Hz for 50c
+            "duration": 50,          # ms
+            "style": "double",       # 'single' or 'double'
+            "pitch_jump": 1.5,       # multiplier for 2nd note (1.5 = 5th)
+            "sensitivity": 10.0,     # Hz shift per cent
+            "cooldown": 0.2,         # seconds between ticks
+            "recap_freq": 0,         # Replay price path every N ticks (0=off)
+            "save_window_glide": False # [NEW] Archive full window glide at end (8kHz 8-bit)
+        }
+        self.last_beep_time = 0
         
         # Log Toggles
         self.log_settings = {
@@ -1105,10 +1164,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 f.write(".graph-img{width:200px;height:100px;border-radius:0.5rem;border:1px solid #475569;background:#0f172a;object-fit:contain;transition:all 0.3s;cursor:pointer;}")
                 f.write(".graph-img:hover{transform:scale(1.05);border-color:#38bdf8;box-shadow:0 0 15px rgba(56,189,248,0.4);}")
                 f.write(".no-data{background:#1e293b;color:#64748b;padding:3rem;text-align:center;border-radius:0.75rem;border:2px dashed #334155;margin:2rem 0;}")
-                f.write(".tier1{background:rgba(51, 65, 85, 0.4) !important;}")
-                f.write(".tier2{background:rgba(88, 28, 135, 0.4) !important;}")
-                f.write(".tier3{background:rgba(49, 46, 129, 0.5) !important;}")
-                f.write(".tier4{background:rgba(131, 24, 67, 0.5) !important;}")
                 f.write(".algorithm-signals{background:rgba(51, 65, 85, 0.3);}")
                 f.write(".algorithm-signals td{padding:0.5rem 1rem 1rem 1rem;font-size:0.75rem;color:#94a3b8;border-top:none;}")
                 f.write(".algorithm-signals strong{color:#38bdf8;}")
@@ -1175,9 +1230,10 @@ document.addEventListener('DOMContentLoaded', function() {
             Label(f"{self.config.MARKET_FREQ}-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
             Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
             Label(" | WIN: ", classes="timer_text"),
-            Label("00:00", id="lbl_timer_big", classes="timer_text"),
+            Label("--:--:--", id="lbl_timer_big", classes="timer_text"),
             Label(" | Start: ", classes="timer_text"),
             Label("--:--:--", id="lbl_window_start", classes="timer_text"),
+            Button("PAUSE", id="btn_pause", variant="default"),
             id="top_bar"
         )
         yield Horizontal(
@@ -1359,6 +1415,8 @@ document.addEventListener('DOMContentLoaded', function() {
             Checkbox("Whale Protect", value=False, id="cb_whale"),
             Checkbox("Bounce Entry", value=False, id="cb_bounce"),
             Checkbox("Audit", value=self.official_audit_enabled, id="cb_audit_enabled"),
+            Checkbox("Tick Sound", value=False, id="cb_sonify"),
+            Button("⚙", id="btn_sonify_config", classes="btn_icon_sm"),
             id="settings_row",
             classes="live_row"
         )
@@ -1669,6 +1727,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async def on_mount(self) -> None:
         self.is_initializing = True
         self.app_active = True
+        
         self.init_web3()
         self.init_live_broker()
         # Log the HTML file path once at start
@@ -1788,6 +1847,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     "#cb_log_html": "verification_html"
                 }
                 for qid, k in sync_logs.items():
+                    try: self.query_one(qid).value = bool(self.log_settings.get(k, True))
+                    except: pass
+                
+                # Restore Sonification Settings
+                if "sonification_settings" in s:
+                    self.sonification_settings.update(s["sonification_settings"])
+                    try: self.query_one("#cb_sonify").value = self.sonification_enabled
+                    except: pass
                     try: self.query_one(qid).value = bool(self.log_settings.get(k, True))
                     except: pass
 
@@ -2082,15 +2149,16 @@ document.addEventListener('DOMContentLoaded', function() {
             
             self.sim_broker.log_snapshot(self.market_data, self.time_rem_str, is_live, self.live_broker.balance, self.risk_manager.risk_bankroll)
             
-            # Push to Web Dashboard
-            try:
-                self.ftp_manager.push_session_stats(
-                    pnl=self.session_pnl,
-                    trades=self.session_total_trades,
-                    status="ACTIVE",
-                    interval=f"{self.config.MARKET_FREQ}M"
-                )
-            except: pass
+            # Push to Web Dashboard (v5.9.22 - Pausable)
+            if not getattr(self, "paused", False):
+                try:
+                    self.ftp_manager.push_session_stats(
+                        pnl=self.session_pnl,
+                        trades=self.session_total_trades,
+                        status="ACTIVE",
+                        interval=f"{self.config.MARKET_FREQ}M"
+                    )
+                except: pass
         except Exception as e:
             # Silent fail to prevent interval crash if UI or files are locked
             pass
@@ -2212,7 +2280,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 "db_tick_freq":   getattr(self, "db_tick_freq", 1),
                 "log_display_mode": getattr(self, "log_display_mode", "ALL"),
                 "log_display_filter": list(getattr(self, "log_display_filter", [])),
-                "darwin_mode": self.config.DARWIN_MODE
+                "darwin_mode": self.config.DARWIN_MODE,
+                "sonification_settings": getattr(self, "sonification_settings", {})
             }
             
             # [SANITY] Try to get bet_mode from UI if possible (it's not a standard value/checkbox)
@@ -2530,6 +2599,9 @@ document.addEventListener('DOMContentLoaded', function() {
             self.push_screen(GlobalSettingsModal(self))
         elif bid == "btn_db_explorer":
             self.push_screen(DatabaseExplorerModal(self))
+        elif bid == "btn_sonify_config":
+            from ui_modals import SonificationSettingsModal
+            self.push_screen(SonificationSettingsModal(self))
         elif bid == "btn_pause_logs":
             self.log_paused = not self.log_paused
             btn = event.button
@@ -2610,8 +2682,14 @@ document.addEventListener('DOMContentLoaded', function() {
             import threading
             threading.Thread(target=_do_immediate_prebuy, daemon=True).start()
         elif "btn_buy_" in bid: 
+            if getattr(self, "paused", False):
+                self.log_msg("[bold red]MANUAL TRADE BLOCKED:[/] Bot is currently PAUSED.", level="SYS")
+                return
             await self.trigger_buy("UP" if "_up" in bid else "DOWN")
         elif "btn_sell_" in bid:
+            if getattr(self, "paused", False):
+                self.log_msg("[bold red]MANUAL SELL BLOCKED:[/] Bot is currently PAUSED.", level="SYS")
+                return
             await self.trigger_sell_all("UP" if "_up" in bid else "DOWN")
 
     async def perform_frequency_switch(self, new_freq, exit_positions=False):
