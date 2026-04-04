@@ -1,0 +1,29 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#4c1d95" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,93 20,93 31,72 37,67 44,56 50,50 58,63 64,56 71,60 78,63 85,54 91,59 98,57 105,63 113,66 119,69 125,68 132,65 142,60 148,59 154,75 164,82 170,57 176,58 183,52 189,57 195,47 202,46 208,52 214,54 220,59 229,44 237,37 243,36 249,28 255,25 261,25 268,24 274,23 284,25 290,26 296,29 302,23 309,22 315,20" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<g class="trade-dot">
+  <circle cx="212" cy="54" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>Nitro: UP @ 77¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="216" y="26" width="98" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="220" y="36" font-size="9" fill="#00FF00" font-family="monospace">Nitro: UP @ 77¢</text>
+  </g>
+</g>
+<g class="trade-dot">
+  <circle cx="212" cy="54" r="5" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+    <title>VolSnap: UP @ 77¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_1" opacity="0" style="pointer-events:none">
+    <rect x="216" y="26" width="110" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#00FF00" stroke-width="1"/>
+    <text x="220" y="36" font-size="9" fill="#00FF00" font-family="monospace">VolSnap: UP @ 77¢</text>
+  </g>
+</g>
+</svg>

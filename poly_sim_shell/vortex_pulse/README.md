@@ -1,6 +1,6 @@
 # Polymarket Vortex Pulse V5 — Complete System Reference
 
-> **Version:** 5.9.12  
+> **Version:** 5.9.18  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
 > **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)
 
@@ -11,10 +11,12 @@
 Polymarket Vortex Pulse V5 is a fully automated, high-frequency execution bot that trades short-term directional binary options (UP/DOWN) on the Polymarket BTC 5-minute market. It runs inside a rich terminal UI (Textual TUI), evaluates **20 independent technical scanners** every second, manages risk dynamically, and can execute both simulated and live limit orders against the Polymarket CLOB.
 
 Key capabilities:
-- **Trade Protection Suite (v5.9.11)** — Configurable **Late-Window Lockout (LWL)** and **Sentiment Guard** to prevent losses from last-second volatility and oracle mismatches.
-- **Time-Based Take Profit (NEW)** — Sell at target price when time threshold reached (e.g., "90c@90" = 90¢ when ≤90s remaining) to lock in gains before reversals.
-- **Enhanced Console Logging (NEW)** — Detailed trade breakdown, PnL calculation transparency, and individual trade status tracking for debugging.
-- **Moshe Scanner Anti-Spam (FIXED)** — Cooldown mechanism prevents signal spamming with proper reset logic and realistic defaults.
+- **Hurst Logic (v5.9.18)** — Statistically robust **10-minute trailing lookback** (~600 points) calculated once per window and latched to ensure perfect sync between UI and logs.
+- **Window Graph Archiving (NEW)** — Navigate through past 5-minute windows using `< / >` buttons with **separate live/archive buffers** to prevent "ghosting" from real-time data.
+- **Multi-Level CSV Logging (NEW)** — Dedicated `history.csv` (tick-level) and `summary.csv` (window-level) for professional post-session market study.
+- **Sync Drift Auto-Correction (FIXED)** — Force-sync logic ensures UI shares match the broker's truth, eliminating "ghost shares" during high volatility.
+- **Symmetric N-Pattern Scanning (NEW)** — `NPatternScanner` now detects both bullish and bearish (Inverted N) patterns with equal sensitivity.
+- **Enhanced Console Logging (NEW)** — Detailed trade breakdown, PnL transparency, and sanitized scanner tags (no more `!` artifacts).
 - **20 scanners** running in parallel, each with independent signal logic and full configurability
 - **Advanced scanner configuration modals** for all algorithms with individual parameter tuning
 - **Global skepticism filters** for odds and guess conflicts with premium adjustments
@@ -50,11 +52,11 @@ vortex_pulse/
 ├── pulse_settings.json  Auto-generated persistent settings (created on first run)
 └── lg/                  Log archive root
     └── session_YYYYMMDD_HHMMSS/     Unique folder for each run
-        ├── pulse_log_5M_*.csv           Main session CSV log
-        ├── pulse_log_5M_*_console.txt    Rich console mirror (ASCII-scrubbed)
-        ├── pulse_log_5M_*_verification.html  HTML verification report
-        ├── momentum_adv_*.csv             MOM Expert analytics log
-        └── graphs/                      Verification graph PNGs (160x80)
+        ├── pulse_log_5M_*_history.csv       Tick-by-tick market indicators (v5.9.18)
+        ├── pulse_log_5M_*_summary.csv       Window-level results & Hurst (v5.9.18)
+        ├── pulse_log_5M_*_console.txt       Rich console mirror (ASCII-scrubbed)
+        ├── pulse_log_5M_*_verification.html HTML verification report
+        └── graphs/                          Verification graph PNGs (160x80)
 ```
 
 ### File Responsibilities
@@ -686,7 +688,8 @@ Computed from `(short_SMA / long_SMA − 1) × 100`:
 | **v5.9.2** | BullFlag configurable settings modal, research logging |
 | **v5.9.3** | Scanner loop refactor — persistent `base_threshold` state, background error fix |
 | **v5.9.4** | MOM Analytics log, CSV log overhaul (26 live fields, descriptive headers), 1H trend |
-| **v5.9.5** | **Major Feature Release:** Advanced scanner configuration modals, global skepticism filters, BriefingScanner, enhanced MOM/MM2 with Select widgets, safe UI thread calls, per-scanner whale shield, HDO threshold settings fix |
+| **v5.9.5** | Major Feature Release: Advanced scanner configuration modals, global skepticism filters, BriefingScanner, enhanced MOM/MM2 with Select widgets, safe UI thread calls, per-scanner whale shield, HDO threshold settings fix |
+| **v5.9.18** | **Reliability & Study Upgrade:** 10-minute Hurst lookback, window-based graph archiving with dual-buffers, tick/window CSV logging, symmetric N-Pattern scanning, sync-drift auto-correction. |
 
 ### v5.9.5 Technical Deep Dive
 

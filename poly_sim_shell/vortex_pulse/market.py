@@ -43,6 +43,53 @@ def calculate_atr(highs, lows, closes, period=14):
     # Simple Moving Average of TR
     return sum(tr_list[-period:]) / period
 
+def calculate_hurst(prices):
+    """
+    Calculates the Hurst exponent (H) using Rescaled Range (R/S) analysis.
+    H > 0.5: Trending (Persistent)
+    H < 0.5: Mean-reverting (Anti-persistent)
+    H = 0.5: Random Walk
+    """
+    if len(prices) < 20: return 0.5
+    
+    # Calculate returns
+    import math
+    try:
+        # Use log returns for accuracy
+        returns = []
+        for i in range(1, len(prices)):
+            if prices[i] > 0 and prices[i-1] > 0:
+                p_curr = float(prices[i])
+                p_prev = float(prices[i-1])
+                returns.append(math.log(p_curr / p_prev))
+        
+        if len(returns) < 10: return 0.5
+        
+        # R/S Calculation on the full window
+        n = len(returns)
+        mean_val = sum(returns) / n
+        
+        # Cumulative deviate series
+        y = []
+        curr_sum = 0.0
+        for r in returns:
+            curr_sum += (r - mean_val)
+            y.append(curr_sum)
+            
+        # Range R and Std Dev S
+        r_range = max(y) - min(y)
+        s_std = (sum((r - mean_val)**2 for r in returns) / n)**0.5
+        
+        if s_std == 0: return 0.5
+        
+        # Hurst H approx = log(R/S) / log(n)
+        h = math.log(r_range / s_std) / math.log(n)
+        
+        # Clamp to reasonable bounds
+        return max(0.0, min(1.0, h))
+    except:
+        return 0.5
+
 class MarketDataManager:
     def __init__(self, config=None, logger_func=None):
         self.config = config if config else TradingConfig()
@@ -505,10 +552,10 @@ class MarketDataManager:
                 try:
                     # Use larger limit (5000) for BTC to ensure we reach the open price even during high volatility
                     b_depth = requests.get("https://api.binance.com/api/v3/depth", params={"symbol": "BTCUSDT", "limit": 5000}, timeout=2.0).json()
-                    open_p = self.market_data.get("btc_open", 0)
+                    open_p = (self.market_data.get("btc_open") or 0.0)
                     if open_p > 0:
-                        self.market_data["vol_up"] = sum(float(b[1]) for b in b_depth.get("bids", []) if float(b[0]) >= open_p)
-                        self.market_data["vol_dn"] = sum(float(a[1]) for a in b_depth.get("asks", []) if float(a[0]) <= open_p)
+                        self.market_data["vol_up"] = sum(float(b[1]) for b in b_depth.get("bids", []) if float(b[0] or 0) >= open_p)
+                        self.market_data["vol_dn"] = sum(float(a[1]) for a in b_depth.get("asks", []) if float(a[0] or 0) <= open_p)
                     self.last_vol_update = curr_t
                 except: pass
 

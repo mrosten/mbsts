@@ -22,6 +22,8 @@ class SimBroker:
         self.pre_buy_invested = 0.0
         self.revenue_this_window = 0.0
         self.log_file = log_file
+        self.csv_file = log_file.replace("_console.txt", "_history.csv").replace(".txt", ".csv")
+        self.summary_file = log_file.replace("_console.txt", "_summary.csv").replace(".txt", "_summary.csv")
         self.init_log()
 
     def init_log(self):
@@ -34,10 +36,25 @@ class SimBroker:
                 f.write(f"# Polymarket Vortex Pulse V5 — Session Log\n")
                 f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"# Standard Text Format\n\n")
+        
+        # Initialize CSV History (v5.9.18) - SLIM VERSION
+        if not os.path.exists(self.csv_file):
+            with open(self.csv_file, 'w') as f:
+                header = "Timestamp,TimeRemaining,BTC_Price,BTC_Open,Diff,Range,Odds,Trend_4h,Trend_1h,RSI_1m,ATR_5m,V-UP,V-DN,Sling,Cobra,Coiled,Flag,M_Score,M_Status,Scanners,Up_Ask,Dn_Ask,Shares_UP,Shares_DN,Sim_Bal,Risk_Bal\n"
+                f.write(header)
+                
+        # Initialize Window Summary CSV (v5.9.18)
+        if not os.path.exists(self.summary_file):
+            with open(self.summary_file, 'w') as f:
+                header = "Timestamp,WindowID,Winner,PnL,Final_Hurst,BTC_Open,BTC_Close,ATR_5m,RSI_1m,Odds_Score,UP_Shares,DN_Shares,Total_Revenue\n"
+                f.write(header)
 
     def write_to_log(self, text):
-        # CSV logging disabled
-        return
+        try:
+            with open(self.log_file, 'a') as f:
+                f.write(text + "\n")
+        except:
+            pass
 
     def log_trade(self, type_, side, amount, price, shares, context=None, note=""):
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -60,17 +77,70 @@ class SimBroker:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         diff = md['btc_price'] - md['btc_open']
         
-        line = (
-            f"{ts},{self.balance:.2f},{live_bal:.2f},{risk_bankroll:.2f},"
-            f"{time_rem_str},{md['btc_price']:.2f},{md['btc_open']:.2f},{diff:.2f},{md.get('btc_dyn_rng',0):.2f},"
-            f"{md.get('odds_score',0)},{md.get('trend_4h','NEUTRAL')},{md.get('trend_1h','NEUTRAL')},"
-            f"{md.get('rsi_1m',50):.1f},{md.get('atr_5m',0):.2f},"
-            f"{md.get('sling_signal','OFF')},{md.get('cobra_signal','OFF')},{md.get('coiled_cobra_signal','OFF')},{md.get('flag_signal','OFF')},"
-            f"{md.get('master_score',0)},{md.get('master_status','NEUTRAL')},{md.get('active_scanners',0)},"
-            f"{md['up_price']:.3f},{md['down_price']:.3f},{md['up_bid']:.3f},{md['down_bid']:.3f},"
-            f"{self.shares['UP']:.2f},{self.shares['DOWN']:.2f}"
-        )
-        self.write_to_log(line)
+        # 1. Console Log (Simplified Trace)
+        console_line = f"SNAPSHOT,{ts},BAL:{self.balance:.2f},LIVE:{live_bal:.2f},T-{time_rem_str},BTC:{md['btc_price']:.2f}"
+        self.write_to_log(console_line)
+
+        # 2. Structured CSV (v5.9.18)
+        try:
+            with open(self.csv_file, 'a') as f:
+                csv_row = [
+                    ts,
+                    time_rem_str,
+                    f"{md['btc_price']:.2f}",
+                    f"{md['btc_open']:.2f}",
+                    f"{diff:.2f}",
+                    f"{md.get('btc_dyn_rng',0):.2f}",
+                    f"{md.get('odds_score',0)}",
+                    md.get('trend_4h','NEUTRAL'),
+                    md.get('trend_1h','NEUTRAL'),
+                    f"{md.get('rsi_1m',50):.1f}",
+                    f"{md.get('atr_5m',0):.2f}",
+                    # Hurst removed from tick log (stays in summary)
+                    f"{md.get('vol_up',0):.0f}",
+                    f"{md.get('vol_dn',0):.0f}",
+                    md.get('sling_signal','OFF'),
+                    md.get('cobra_signal','OFF'),
+                    md.get('coiled_cobra_signal','OFF'),
+                    md.get('flag_signal','OFF'),
+                    f"{md.get('master_score',0)}",
+                    md.get('master_status','NEUTRAL'),
+                    f"{md.get('active_scanners',0)}",
+                    f"{md['up_price']:.3f}",
+                    f"{md['down_price']:.3f}",
+                    # Bids removed to save space
+                    f"{self.shares['UP']:.2f}",
+                    f"{self.shares['DOWN']:.2f}",
+                    f"{self.balance:.2f}",
+                    # Live_Bal removed to save space (use summary)
+                    f"{risk_bankroll:.2f}"
+                ]
+                f.write(",".join(csv_row) + "\n")
+        except:
+            pass
+
+    def log_window_summary(self, md, winner, pnl):
+        """Records high-level window results to a dedicated summary CSV (v5.9.18)."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(self.summary_file, 'a') as f:
+                row = [
+                    ts,
+                    str(md.get("start_ts", "N/A")),
+                    winner,
+                    f"{pnl:.2f}",
+                    f"{md.get('hurst', 0.5):.3f}",
+                    f"{md.get('btc_open', 0):.2f}",
+                    f"{md.get('btc_price', 0):.2f}",
+                    f"{md.get('atr_5m', 0):.2f}",
+                    f"{md.get('rsi_1m', 50):.1f}",
+                    str(md.get('odds_score', 0)),
+                    f"{self.shares['UP']:.2f}",
+                    f"{self.shares['DOWN']:.2f}",
+                    f"{self.revenue_this_window:.2f}"
+                ]
+                f.write(",".join(row) + "\n")
+        except: pass
 
     def buy(self, side, usd_amount, price, context=None, reason="Manual", is_pre_buy=False):
         if price <= 0 or price >= 1: return False, "Invalid price", 0.0, 0.0

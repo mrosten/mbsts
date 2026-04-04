@@ -77,7 +77,8 @@ class SourceCodeSniffer:
             "VPOC": ("intel_scanners.py", "VPOCAnalyzer"),
             "SDP": ("intel_scanners.py", "SettlementDriftPredictor"),
             "DIV": ("intel_scanners.py", "SentimentDivergenceScanner"),
-            "SSI": ("intel_scanners.py", "StrategyInversionScanner")
+            "SSI": ("intel_scanners.py", "StrategyInversionScanner"),
+            "SHP": ("scanners.py", "ShapeMatcherScanner")
         }
 
     def get_source(self, algo_id: str) -> str:

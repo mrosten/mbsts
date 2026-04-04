@@ -1,0 +1,28 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,88 20,88 23,80 26,84 29,80 32,74 35,80 38,83 41,84 44,81 47,79 50,81 53,81 56,84 59,81 62,75 65,77 68,75 71,72 74,75 77,72 80,71 83,69 86,69 89,76 92,92 95,89 98,88 101,92 104,90 107,92 110,104 113,102 116,89 119,93 122,94 125,92 128,104 131,94 134,84 137,74 140,60 143,57 146,56 149,58 152,58 155,57 158,43 161,50 164,50 167,41 170,43 173,35 176,35 179,38 182,34 185,28 188,26 191,31 194,31 197,31 200,34 203,34 206,43 209,40 212,37 215,37 218,36 221,35 224,41 227,37 230,48 233,51 236,49 239,39 242,34 245,32 248,41 251,35 254,32 257,31 260,28 263,31 266,34 269,34 272,26 275,25 278,23 281,24 284,37 287,34 290,43 293,60 296,99 299,123 302,128 305,136 308,102 311,78 314,35 317,46" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="84" cy="70" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (66¢)</title>
+</circle>
+<circle cx="84" cy="70" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap UP (66¢)</title>
+</circle>
+<circle cx="234" cy="52" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (78¢)</title>
+</circle>
+<circle cx="234" cy="52" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap UP (78¢)</title>
+</circle>
+<circle cx="294" cy="54" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (77¢)</title>
+</circle>
+<circle cx="294" cy="54" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap UP (77¢)</title>
+</circle>
+</svg>

@@ -1,0 +1,25 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,88 22,84 25,83 28,78 31,86 34,83 37,81 40,82 43,83 46,82 49,81 52,78 55,75 58,76 61,80 64,94 67,98 70,100 73,89 76,80 79,84 82,90 85,95 88,102 91,104 94,100 97,103 100,107 103,108 106,119 109,123 112,117 115,117 118,110 121,114 125,110 128,110 131,113 134,113 137,111 140,106 143,107 146,107 149,117 152,117 155,124 158,125 161,126 164,127 167,127 170,131 173,129 176,131 179,135 182,142 185,136 188,139 191,141 194,142 197,144 200,142 203,148 206,149 209,151 212,154 215,157 218,159 221,160 224,160 227,157 230,161 233,157 236,153 239,154 242,151 245,151 248,150 251,148 254,142 257,142 260,133 263,133 266,130 269,125 272,113 275,105 278,101 281,102 284,93 287,84 290,84 293,77 296,49 299,51 302,69 305,61 308,94 311,156 314,164 317,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="54" cy="79" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>MM2 UP (60¢)</title>
+</circle>
+<circle cx="54" cy="79" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro UP (60¢)</title>
+</circle>
+<circle cx="105" cy="81" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>VPOC DOWN (59¢)</title>
+</circle>
+<circle cx="297" cy="49" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap UP (80¢)</title>
+</circle>
+<circle cx="297" cy="49" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>MM2 UP (80¢)</title>
+</circle>
+</svg>

@@ -1,11 +1,11 @@
 # Polymarket Vortex Pulse — Version 5
 
-A Textual-based terminal UI for automated and semi-automated trading on Polymarket BTC 5-minute binary options markets.
+A Textual-based terminal UI for automated and semi-automated trading on Polymarket BTC 5-minute and 15-minute binary options markets.
 
-> **Version:** 5.9.16  
+> **Version:** 5.9.25  
 > **Runtime:** Python 3.12+ with [Textual](https://textual.textualize.io/) TUI  
-> **Market:** Polymarket BTC 5-minute binary options (UP / DOWN)  
-> **Architecture:** Modular enterprise-level system with 300KB+ of production-ready code with AI Orchestration
+> **Market:** BTC 5m/15m Binary Options (UP / DOWN)  
+> **Architecture:** Modular enterprise-level system with 400KB+ of production-ready code with AI Orchestration
 
 ---
 
@@ -14,13 +14,15 @@ A Textual-based terminal UI for automated and semi-automated trading on Polymark
 Polymarket Sniper V5 is a sophisticated automated trading system that has undergone significant architectural evolution through multiple AI-assisted development cycles. The system features enterprise-level modular architecture, comprehensive risk management, and professional-grade logging infrastructure.
 
 ### Key Capabilities
-- **20+ independent scanners** running in parallel with configurable weights
-- **Darwin System Orchestrator** — Autonomous AI agent that manages system state and explores logic
-- **Simulation and Live modes** with identical execution paths
-- **Advanced risk management** with dynamic bet sizing and exhaustion protection
+- **35+ independent scanners** running in parallel with configurable weights and intelligence layers
+- **Darwin System Orchestrator** — Autonomous AI agent that manages system state and explores logic via Command Bridge
+- **Simulation and Live modes** with identical execution paths and real-time bankroll sync
+- **Frequency Switching** — Support for both 5-minute and 15-minute market windows
+- **Sonic Archives & Recaps** — Real-time sonification of price paths with archived .wav recaps
+- **Advanced risk management** with dynamic bet sizing, exhaustion protection, and skepticism filtering
 - **Real-time market data** from multiple sources (Kraken, Binance, Chainlink, Polymarket)
-- **Professional UI/UX** with Textual TUI and modal configuration system
-- **Comprehensive analytics** with CSV logging, momentum research tools, and Darwin Vault (SQLite)
+- **Professional UI/UX** with Textual TUI, modal configuration, and high-res "Lean Charts"
+- **Comprehensive analytics** with CSV logging, SVG exports with trade pips, and Darwin Vault (SQLite)
 
 ---
 
@@ -29,20 +31,24 @@ Polymarket Sniper V5 is a sophisticated automated trading system that has underg
 ### Major Refactor (Latest)
 The original monolithic `app.py` (2,556 lines) was split into three focused modules:
 
+#### Core Logic
 | Module | Size (bytes) | Lines | Responsibility |
 |---|---|---|---|
-| **`app.py`** | 58,658 | ~1,137 | Core PulseApp class with UI, event handlers, settings management |
-| **`trade_engine.py`** | 72,950 | ~1,233 | TradeEngineMixin with all trade execution, settlement, TP/SL logic |
-| **`ui_modals.py`** | 59,874 | ~893 | All modal classes and screens (GlobalSettings, AlgoInfo, MOMExpert, etc.) |
+| **`app.py`** | 153,555 | ~2,895 | Core PulseApp class with UI, event handlers, settings management, Wizard flow |
+| **`trade_engine.py`** | 180,491 | ~3,071 | TradeEngineMixin with trade execution, settlement, TP/SL, Sonic Recaps |
+| **`ui_modals.py`** | 98,720 | ~1,450 | All modal classes, Database Explorer, Log Filters, Darwin Hub |
+| **`scanners.py`** | 87,731 | ~1,814 | 30+ baseline scanner algorithm implementations |
+| **`intel_scanners.py`** | 6,183 | 155 | Intelligence-based scanners (WCP, VPOC, SDP, DIV, SSI) |
 
-### Supporting Modules
-| Module | Size (bytes) | Lines | Role |
-|---|---|---|---|
-| `scanners.py` | 45,532 | ~888 | 20 scanner algorithm implementations |
-| `broker.py` | 16,267 | ~276 | Sim/Live broker execution engines |
-| `market.py` | 14,464 | ~328 | Market data management |
-| `risk.py` | 5,836 | ~143 | Risk management and bankroll controls |
-| `config.py` | 1,357 | 42 | Configuration constants and dataclasses |
+#### Supporting Systems
+| Module | Size (bytes) | Role |
+|---|---|---|
+| `broker.py` | 16,267 | Sim/Live broker execution engines (Taker limit orders) |
+| `market.py` | 14,464 | Market data management & historical backfill |
+| `risk.py` | 5,836 | RiskManager — bankroll controls and skepticism filtering |
+| `ftp_manager.py` | 4,200 | Remote log archival and dashboard synchronization |
+| `history_manager.py` | 3,800 | Centralized SQLite database management (Darwin Vault) |
+| `config.py` | 3,249 | Configuration constants, RPC lists, and FTP credentials |
 
 ---
 
@@ -135,7 +141,10 @@ Each Polymarket 5-minute window has unique UP and DOWN token IDs, so positions f
 
 | Code | Name | Signal Type |
 |---|---|---|
+| ADT | Asymmetric Double | Asymmetric double test pattern |
+| BRI | Briefing | Pre-window market sentiment analysis |
 | COB | Cobra | Momentum reversal from 60m candles |
+| DIV | Sentiment Div | Sentiment/Price divergence (Bubble detection) |
 | FAK | Fakeout | False breakout detection |
 | GRI | GrindSnap | Sustained grind exhaustion |
 | LAT | LateReversal | Late-window mean reversion |
@@ -144,19 +153,26 @@ Each Polymarket 5-minute window has unique UP and DOWN token IDs, so positions f
 | MES | Mesa | Choppy distribution top collapse |
 | MID | MidGame | Mid-window trend continuation |
 | MIN | MinOne | Last-minute wick pattern |
-| MOM | Momentum | Price/time-based momentum (see below) |
+| MM2 | Momentum-2 | Unified scoring (Vector) momentum engine |
+| MOM | Momentum | Original price/time-based momentum |
 | MOS | Moshe | Multi-stage time+diff signal |
 | NPA | NPattern | N-shaped price pattern |
 | POS | PostPump | Post-pump fade |
+| PTP | Peak-to-Peak | Multi-peak trend continuation/exhaustion |
 | RSI | RSI | Overbought/oversold reversion |
+| SDP | Drift Predictor | Basis Gap collapse prediction |
 | SLI | Slingshot | Elastic band snapback |
+| SSI | Strat Inversion | Counter-signal logic based on streak |
 | STA | BullFlag | Staircase breakout |
 | STE | StepClimber | Step pattern continuation |
+| SSC | Shallow Cont | Shallow symmetrical continuation |
 | TRA | TrapCandle | Candle trap reversal |
 | VOL | VolCheck | Volume+price divergence |
-| ZSC | ZScore | Statistical z-score breakout |
+| VPOC| VPOC Analyzer | Volume Point of Control (Thin air) detection |
 | VSN | VolSnap | Volatility-based snapback |
-| DAR | Darwin | Self-Evolving System Orchestrator (Gemini 2.0) |
+| WCP | Candle Profiler | OHLC pattern matching (Hammer/Star) |
+| ZSC | ZScore | Statistical z-score breakout |
+| DAR | Darwin | System Orchestrator (Self-adjusting weights) |
 
 ### MOM Scanner — Buy Modes (v5.9)
 
@@ -180,22 +196,30 @@ Darwin can now use the **Source Code Sniffer** to retrieve the actual Python imp
 - Propose hyper-parameter adjustments based on internal logic rather than just output.
 
 ### Phase 2: System Orchestration (Command Bridge)
-Darwin is empowered to act upon the system through the **Command Bridge**. Every 5 minutes, after analyzing the window results, Darwin can issue a set of `system_actions`:
-- **Scanner Control**: Enable or disable any scanner (e.g., disable RSI during high-volatility "Chaos" regimes).
-- **Risk Management**: Autonomously adjust `bet_size`, `tp_pct`, `sl_pct`, and `total_risk_cap`.
-- **Regime Switching**: Transition the entire bot's stance based on multi-factor AI reasoning.
+Darwin is empowered to act upon the system through the **Command Bridge**. Every 5 minutes, Darwin evaluates window outcomes and can transition the bot's stance:
+- **Autonomous Control**: Enable/disable any of the 35+ scanners based on regime detection.
+- **Risk Tuning**: Adjust `bet_size`, `tp_pct`, `sl_pct`, and `risk_cap` in real-time.
+- **Parameter Injection**: Directly modify scanner internal logic (e.g., RSI thresholds or MOM offsets).
+- **Regime Switching**: Transition between "Chaos", "Stable", and "Neural" modes with different sensitivity profiles.
+
+### Darwin Hub & Database Explorer
+Access the **Darwin Hub** via the 🧬 icon next to the Darwin scanner label to view analysis logs and adjust AI exploration intensity. Use the **Database Explorer** to query historical results from the SQLite Darwin Vault.
 
 ### Darwin Vault (SQLite)
 All Darwin hypotheses, observations, and system actions are stored in the **Darwin Vault** (SQLite) for long-term strategy drift analysis and performance backtesting.
 
 ---
 
-## Expert & Volatility Logic (v5.9)
+---
 
-The **MOM ADV** mode introduces Tier-based trading:
-- **ATR Gateways**: Define Boundaries for "Stable" vs. "Chaos" tiers.
-- **Dynamic Offsets**: Automatically adds/subtracts from the base threshold (e.g. +10¢ in Chaos).
-- **Whale Shield**: Emergency exit triggered in the final seconds if the price stays within a "reach" (e.g. 5¢) of the 50¢ neutral zone.
+## Sonification & Sonic Archives (v5.9.17)
+
+Pulse V5 features a real-time sonification engine that provides eyes-free market awareness:
+
+- **Simple Ticks**: Every price change triggers a discrete ping (Double chirp, single pitch, or creative arpeggio).
+- **Pitch/Direction**: Higher pitch for UP leans, lower for DOWN.
+- **Sonic Recap Glide**: At settlement, the system plays a high-speed glissando summarizing the price path for the entire window.
+- **Sonic Archive**: All windows are archived as super-compact (8kHz, 8-bit) `.wav` files in the `sonic_archives/` directory for historical "aural backtesting".
 
 ---
 
@@ -282,13 +306,15 @@ If the next market isn't published yet, logs `Next window not yet available`.
 | Version | Highlights |
 |---|---|
 | **v5.0** | Base architecture — 20 scanners, sim/live broker, pending order queue |
-| **v5.8** | Accurate accuracy displays (starts Window 2), Esc key dismissal, log event serialization |
+| **v5.8** | Accurate accuracy displays, Esc key dismissal, log event serialization |
 | **v5.9** | MOM Expert overhaul — ATR tiering, Whale Shield, 2×2 mode grid |
 | **v5.9.1** | Pre-Buy logic refinement, velocity reversion, RSI momentum |
-| **v5.9.2** | BullFlag configurable settings modal, research logging |
-| **v5.9.3** | Scanner loop refactor — persistent `base_threshold` state, background error fix |
-| **v5.9.4** | MOM Analytics log, CSV log overhaul (26 live fields, descriptive headers), 1H trend |
-| **v5.9.16** | Darwin Orchestrator — Phase 1 (Code Sniffer) & Phase 2 (Command Bridge Orchestration) |
+| **v5.9.4** | MOM Analytics log, CSV log overhaul, 1H trend |
+| **v5.9.13** | Lean Chart "Smart Pips" (Visual Trade Indicators), SVG Export with Hover Tooltips |
+| **v5.9.16** | Darwin Orchestrator Phase 2 (Command Bridge), Intel Scanner Layer (WCP, VPOC, SDP, DIV, SSI) |
+| **v5.9.17** | Sonification Engine: Simple Ticks, Arpeggio modes, and Glissando recaps |
+| **v5.9.22** | Sonic Archive: Automatic 8-bit WAVE generation per window, Race safety fixes |
+| **v5.9.25** | Frequency Switch (5m vs 15m), Setup Wizard, Log Filters, Database Explorer |
 
 ### Recent Git History
 - **0cd0dd0** - Fix modal bugs and standardize log paths

@@ -22,11 +22,11 @@ from datetime import datetime, timezone
 # Handle imports for both package and direct execution
 try:
     from .config import TradingConfig
-    from .market import calculate_rsi, calculate_bb, calculate_atr
+    from .market import calculate_rsi, calculate_bb, calculate_atr, calculate_hurst
 except ImportError:
     # Running directly from vortex_pulse directory
     from config import TradingConfig
-    from market import calculate_rsi, calculate_bb, calculate_atr
+    from market import calculate_rsi, calculate_bb, calculate_atr, calculate_hurst
 
 # Import the shared history manager from the parent poly_sim_shell directory
 try:
@@ -109,6 +109,10 @@ class TradeEngineMixin:
                (True, None, penalty_pct) if price is acceptable with penalty,
                (False, reason_string, 0.0) if price is blocked.
         """
+        if "SHP" in name:
+            # ShapeMatcher bypasses global price filters
+            return True, None, 0.0
+
         try:
             base_min = float(self.query_one("#inp_min_price").value)
             max_pr = float(self.query_one("#inp_max_price").value)
@@ -294,7 +298,7 @@ class TradeEngineMixin:
             # 1. Setup Compact Parameters (8kHz 8-bit = ~48KB per window)
             sample_rate = 8000
             step_dur_ms = 20
-            num_steps = len(self.window_tones)
+            num_steps = len(tones)
             if num_steps < 2: return
             
             samples_per_step = int((step_dur_ms / 1000.0) * sample_rate)
@@ -600,7 +604,7 @@ class TradeEngineMixin:
                 "Mesa": "#cb_mes", "MeanReversion": "#cb_mea", "GrindSnap": "#cb_gri", "VolCheck": "#cb_vol",
                 "Moshe": "#cb_mos", "ZScore": "#cb_zsc", "Nitro": "#cb_nit", "VolSnap": "#cb_vsn", "HDO": "#cb_hdo", "Briefing": "#cb_bri",
                 "WCP": "#cb_wcp", "VPOC": "#cb_vpoc", "SDP": "#cb_sdp", "DIV": "#cb_div", "SSI": "#cb_ssi",
-                "SSC": "#cb_ssc", "ADT": "#cb_adt", "Darwin": "#cb_dar", "PTP": "#cb_ptp"
+                "SSC": "#cb_ssc", "ADT": "#cb_adt", "Darwin": "#cb_dar", "PTP": "#cb_ptp", "SHP": "#cb_shp"
             }
             
             if not self.risk_initialized:
@@ -684,24 +688,26 @@ class TradeEngineMixin:
                 self.window_tones = []          # [NEW] Track sonic path frequencies
                 self._recap_tick_count = 0      # [NEW] Reset recap counter
                 
-                # --- [NEW] Window-Level Volatility Latching (v5.9.15) ---
+                # --- [NEW] Window-Level Volatility Latching (v5.9.15+) ---
                 vol_cfg = getattr(self, "volatility_scaling", {"enabled": False})
+                atr_latched = getattr(self.market_data_manager, "atr_5m", 0.0)
+                self.market_data['atr_5m'] = atr_latched # Latch for UI and logs
+                
                 if vol_cfg.get("enabled"):
-                    atr = getattr(self.market_data_manager, "atr_5m", 0.0)
                     floor = vol_cfg.get("floor", 15.0)
                     ceiling = vol_cfg.get("ceiling", 40.0)
                     
-                    if 0.01 < atr < floor:
+                    if 0.01 < atr_latched < floor:
                         self.window_vol_mult = 0.0
                         self.window_vol_halt = True
-                        self.log_msg(f"[bold yellow]VOL-HALT:[/] 5m ATR {atr:.1f} < Floor {floor:.1f}. Trading SUSPENDED for this window.", level="SYS")
+                        self.log_msg(f"[bold yellow]VOL-HALT:[/] 5m ATR {atr_latched:.1f} < Floor {floor:.1f}. Trading SUSPENDED for this window.", level="SYS")
                     else:
-                        self.window_vol_mult = max(0.0, min(1.0, (atr - floor) / (ceiling - floor))) if atr >= floor else 1.0
+                        self.window_vol_mult = max(0.0, min(1.0, (atr_latched - floor) / (ceiling - floor))) if atr_latched >= floor else 1.0
                         self.window_vol_halt = False
-                        if atr >= floor and self.window_vol_mult < 1.0:
-                            self.log_msg(f"VOL-LATCH: {self.window_vol_mult*100:.0f}% Sizing (5m ATR:{atr:.1f}) latched for window.", level="SYS")
-                        elif atr >= ceiling:
-                            self.log_msg(f"VOL-LATCH: 100% Sizing (5m ATR:{atr:.1f} >= Ceiling {ceiling:.1f}) window confirmed.", level="SYS")
+                        if atr_latched >= floor and self.window_vol_mult < 1.0:
+                            self.log_msg(f"VOL-LATCH: {self.window_vol_mult*100:.0f}% Sizing (5m ATR:{atr_latched:.1f}) latched for window.", level="SYS")
+                        elif atr_latched >= ceiling:
+                            self.log_msg(f"VOL-LATCH: 100% Sizing (5m ATR:{atr_latched:.1f} >= Ceiling {ceiling:.1f}) window confirmed.", level="SYS")
                 else:
                     self.window_vol_mult = 1.0
                     self.window_vol_halt = False
@@ -710,8 +716,11 @@ class TradeEngineMixin:
                     self.mid_window_lockout = False
                     self.log_msg("[bold green]Lockout Lifted. Clean Window Started. Trading Enabled.[/]")
 
-                # Reset Lean Chart for new window
-                try: self.query_one("#pulse_lean_chart").reset()
+                # Reset Lean Chart for new window (v5.9.18)
+                try:
+                    pchart = self.query_one("#pulse_lean_chart")
+                    pchart.archive_current_window() # Store history before clearing
+                    pchart.reset()
                 except: pass
 
             # Calculate correct elapsed time using the actual window start
@@ -1084,7 +1093,7 @@ class TradeEngineMixin:
                             
                         # 4. Trigger Periodic Recap (Sonic Glide)
                         re_freq = s_conf.get("recap_freq", 0)
-                        if re_freq > 0:
+                        if re_freq > 0 and getattr(self, "sonification_enabled", False):
                             self._recap_tick_count = getattr(self, "_recap_tick_count", 0) + 1
                             if self._recap_tick_count % re_freq == 0:
                                 trace_path = self.window_tones[-40:]
@@ -1441,6 +1450,12 @@ class TradeEngineMixin:
                 "btc_pct_delta": (d["cur"] - d["opn"]) / d["opn"] if d["opn"] > 0 else 0
             }
 
+            # --- [NEW] Sonic Capture (v5.9.22) ---
+            if not getattr(self, "paused", False):
+                sonic_f = self.sonify_price()
+                if sonic_f > 0:
+                    self.window_tones.append(sonic_f)
+
             # --- [NEW] SQLite Granular Ticker Hook (Prop 4) ---
             if getattr(self, "db_log_ticks", False) and hasattr(self, "history") and self.history:
                 if elapsed % getattr(self, "db_tick_freq", 1) == 0:
@@ -1491,6 +1506,14 @@ class TradeEngineMixin:
                     
                     tick_signals[name] = str(res)  # Capture for UI / scoring
                     if res == "WAIT": continue
+
+                    if res == "MATCH_NEAR_COMPLETION":
+                        # Play a distinctive "near match" sound (🎨 ShapeMatcher)
+                        self.run_worker(lambda: winsound.Beep(1200, 150), thread=True)
+                        if f"NEAR_{name}" not in self.skipped_logs:
+                            self.log_msg(f"🎨 [bold cyan]SHAPE MATCHING:[/] 80% similarity detected!", level="SCAN")
+                            self.skipped_logs.add(f"NEAR_{name}")
+                        continue
                     if res == "NONE":
                         reason = getattr(sc, "last_skip_reason", None)
                         if reason:
@@ -1751,7 +1774,23 @@ class TradeEngineMixin:
             self.query_one("#p_down").update(f"{(self.market_data.get('down_ask') or 0.5)*100:.1f}¢")
             self.query_one("#p_btc").update(f"${self.market_data['btc_price']:,.2f}")
             self.query_one("#p_trend").update(f"Trend 1H: {self.market_data_manager.trend_1h}")
-            self.query_one("#p_atr").update(f"ATR 5m: ${self.market_data_manager.atr_5m:.2f}")
+            # Volatility Tiering (Latched ATR-based)
+            atr = self.market_data.get('atr_5m', 0.0)
+            tier = "STABLE" if atr < 20 else ("NEUTRAL" if atr < 40 else "CHAOS")
+            tier_color = "green" if tier == "STABLE" else ("yellow" if tier == "NEUTRAL" else "red")
+            
+            # Hurst Update (English label version)
+            # Fetch the latched Hurst from market_data (now calculated once per window)
+            h = self.market_data.get('hurst', 0.5)
+            
+            if h < 0.45:
+                h_label, h_color = "REVERTING", "cyan"
+            elif h > 0.55:
+                h_label, h_color = "PERSISTENT", "orange"
+            else:
+                h_label, h_color = "RANDOM-WALK", "white"
+            
+            self.query_one("#p_atr").update(f"ATR: ${atr:.2f} [{tier_color}]{tier}[/] | H: [{h_color}]{h_label}[/]")
             self.query_one("#p_btc_open").update(f"Open: ${self.market_data['btc_open']:,.2f}")
             df = self.market_data['btc_price'] - self.market_data['btc_open']
             self.query_one("#p_btc_diff").update(f"Diff: {'+' if df>=0 else '-'}${abs(df):.2f}")
@@ -1771,6 +1810,16 @@ class TradeEngineMixin:
 
             self.query_one("#lbl_owned_up").update(f"UP OWNED ({up_cnt}): ${exp_up_cost:.0f}/${exp_up_win:.0f}")
             self.query_one("#lbl_owned_dn").update(f"DN OWNED ({dn_cnt}): ${exp_dn_cost:.0f}/${exp_dn_win:.0f}")
+            
+            # --- Periodic CSV Snapshot (v5.9.15+) ---
+            try:
+                rem = max(0, self.config.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
+                ttg_str = f"{rem}s"
+                is_l = self.query_one("#cb_live").value
+                l_bal = getattr(self.live_broker, 'balance', 0.0) if is_l else 0.0
+                r_bal = self.risk_manager.window_start_bankroll
+                self.sim_broker.log_snapshot(self.market_data, ttg_str, is_l, l_bal, r_bal)
+            except: pass
             # ---------------------------------
             # --- SAFETY SYNC CHECK (v5.9.14+) ---
             # Must include pre_buy_shares since pre-buy positions in window_bets
@@ -1789,16 +1838,18 @@ class TradeEngineMixin:
                             for bet in self.window_bets.values():
                                 if not bet.get("closed"):
                                     bet["closed"] = True
+                                    self.log_msg(f"[dim]Auto-Sync:[/] Marked {bet.get('algorithm')} {bet.get('side')} as closed (Broker matches 0)", level="SYS")
                 else:
                     self.sync_drift_logged = False  # Reset latch when back in sync
             # ------------------------------------------
 
-            cur_btc = self.market_data.get("btc_price", 0)
+            cur_btc = (self.market_data.get("btc_price") or 0.0)
             def fmt_v(v_btc, price):
+                v_btc = v_btc or 0.0
                 if v_btc >= 100: return f"{v_btc:.0f}B"
                 return f"{v_btc:.1f}B"
-            self.query_one("#lbl_vol_up").update(f"V-UP: {fmt_v(v_up, cur_btc)}")
-            self.query_one("#lbl_vol_dn").update(f"V-DN: {fmt_v(v_dn, cur_btc)}")
+            self.query_one("#lbl_vol_up").update(f"V-UP: {fmt_v(self.market_data.get('vol_up'), cur_btc)}")
+            self.query_one("#lbl_vol_dn").update(f"V-DN: {fmt_v(self.market_data.get('vol_dn'), cur_btc)}")
 
             # [DARWIN] UI Status Update
             if hasattr(self, "darwin"):
@@ -1927,8 +1978,8 @@ class TradeEngineMixin:
                 if use_tranche:
                     ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason, size=dump_sz)
                 else:
-                    # Global Dump (but still passing size for individual ticket accounting)
-                    ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason, size=dump_sz)
+                    # Global Dump: Pass size=None to ensure the ENTIRE on-chain balance is liquidated (No crumbs)
+                    ok, msg, realized_rev = await asyncio.to_thread(self.trade_executor.execute_sell, is_l, side, self.market_data["up_id" if side=="UP" else "down_id"], lp, cbid, reason=reason, size=None)
                 if ok:
                     info["closed"] = True
                     realized_loss = info["cost"] - realized_rev
@@ -1943,9 +1994,11 @@ class TradeEngineMixin:
                         if "SL HIT" in reason:
                             self.last_sl_event_time = time.time()
                     
-                    # Explicit Traceability Log (v5.9.14)
+                    # Explicit Traceability Log (v5.9.18)
                     entry_cents = info.get("entry", 0) * 100
-                    self.log_msg(f"[ADMIN] POSITION CLOSED: {algo_name} {side} | Cost ${info['cost']:.2f} @ Entry {entry_cents:.1f}¢ -> Exit {cur*100:.1f}¢ | Rev: +${realized_rev:.2f}", level="SYS")
+                    # Sanitize tags to prevent log artifacts like "ERR: !"
+                    clean_algo = str(algo_name).replace("!", "")
+                    self.log_msg(f"[ADMIN] POSITION CLOSED: {clean_algo} {side} | Cost ${info['cost']:.2f} @ Entry {entry_cents:.1f}¢ -> Exit {cur*100:.1f}¢ | Rev: +${realized_rev:.2f}", level="SYS")
                     
                     # --- SL+ RECOVERY LOGIC ---
                     # Guard: never chain recovery on a recovery bet to prevent infinite loops
@@ -2107,19 +2160,8 @@ class TradeEngineMixin:
             tid = self.market_data["up_id" if side=="UP" else "down_id"]
             cbid = self.market_data["up_bid"] if side=="UP" else self.market_data["down_bid"]
 
-            # Safety check: If position is currently WINNING (by delta) but Bid is low (< 30¢), 
-            # do NOT panic sell at a discount. The settlement Oracle will give us the full 100¢.
-            p2b = self.market_data.get("p2b", 0)
-            btc = self.market_data.get("btc_price", 0)
-            is_winning = (btc > p2b) if side == "UP" else (btc < p2b)
-            if is_winning and cbid < 0.30:
-                self.log_msg(f"[bold cyan]🛡️ SAFETY SKIP {side}:[/] Currently winning but Bid {cbid*100:.0f}¢ is low. Waiting for Settlement (100¢).", level="MONEY")
-                continue
-
-            # LIVE: Skip if position has clearly lost (bid < 10¢ with no triggered SL).
-            if is_live and cbid < 0.10:
-                self.log_msg(f"[dim]⏱ SKIP FINAL EXIT {side} — position at {cbid*100:.1f}¢, clearly lost. Letting expire.[/]")
-                continue
+            # Final Exit Logic (Removed Safety Skips as requested by USER)
+            # We now attempt to dump ALL shares regardless of bid price to ensure liquidation.
 
             # For LIVE: User requested strict resting limit order at $0.99
             # For SIM: Perform "True Selling" at the current bid
@@ -2155,21 +2197,17 @@ class TradeEngineMixin:
 
     async def update_timer(self):
         if not getattr(self, "app_active", False): return
-        # Update session runtime regardless of market data status
         run = int(time.time() - self.app_start_time)
         win_count = getattr(self, "session_windows_settled", 0)
-        self.query_one("#lbl_runtime").update(f" | RUN: {run//3600:02d}:{(run%3600)//60:02d}:{run%60:02d} | Win: #{win_count}")
+        # Compact Runtime: R:0:12 W:#3
+        self.query_one("#lbl_runtime").update(f"R:{run//3600}:{(run%3600)//60:02d}:{run%60:02d} W:#{win_count}")
 
         if not self.market_data["start_ts"]: return
         
         rem = max(0, self.config.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
-        self.time_rem_str = f"{rem//60:02d}:{rem%60:02d}"
-        self.query_one("#lbl_timer_big").update(self.time_rem_str)
-        
-        # Update window start time in human-readable format
-        from datetime import datetime
+        # Compact Timer/Start: T:124s S:18:05
         start_dt = datetime.fromtimestamp(self.market_data["start_ts"])
-        self.query_one("#lbl_window_start").update(start_dt.strftime("%H:%M:%S"))
+        self.query_one("#lbl_timer_big").update(f"T:{rem}s S:{start_dt.strftime('%H:%M')}")
         
         # Safety Exit at T-5s (User requested: virtual selling should occur before end)
         # Linked to #cb_whale setting to prevent unauthorized panic exits.
@@ -2878,6 +2916,16 @@ class TradeEngineMixin:
                 self.risk_manager.risk_bankroll = main_bal
                 if self.risk_manager.target_bankroll > main_bal:
                     self.risk_manager.target_bankroll = main_bal
+            # 3b. Hurst Calculation & Window Data Capture (Once Per Window) - v5.9.18
+            # Use 10-minute trailing lookback (approx 600 points) for "sensible" statistics
+            full_history = self.market_data_manager.price_history[-600:]
+            h_prices = [p['price'] for p in full_history]
+            h_val = calculate_hurst(h_prices)
+            self.market_data['hurst'] = h_val
+            
+            # Record Window Summary
+            self.sim_broker.log_window_summary(self.market_data, winner, net_pnl)
+            
             # Secondary update with verified API data
             self.update_balance_ui()
             

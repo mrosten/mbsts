@@ -4,27 +4,35 @@ try:
     with open('darwin/experiment_log.json', 'r') as f:
         history = json.load(f)
 
-    nitro_volsnap_up_up = 0
-    nitro_volsnap_up_down = 0
-    nitro_volsnap_down_up = 0
-    nitro_volsnap_down_down = 0
-    total_nitro_volsnap_fired = 0
+    up_trend_up_wins = 0
+    up_trend_up_losses = 0
+    down_trend_down_wins = 0
+    down_trend_down_losses = 0
+
+    total_triggers = 0
 
     for item in history:
         mdata = item.get('market_data', {})
         fired = mdata.get('fired_scanners', [])
+        trend = mdata.get('trend_1h', 'N/A')
         btc_move_pct = mdata.get('btc_move_pct', 0.0)
 
         if 'Nitro' in fired and 'VolSnap' in fired and len(fired) == 2:
-            total_nitro_volsnap_fired += 1
-            if btc_move_pct > 0:
-                nitro_volsnap_up_up += 1
-            else:
-                nitro_volsnap_up_down += 1
+            total_triggers += 1
+            if trend == 'UP':
+                if btc_move_pct > 0:
+                    up_trend_up_wins += 1
+                else:
+                    up_trend_up_losses += 1
+            elif trend == 'DOWN':
+                if btc_move_pct < 0:
+                    down_trend_down_wins += 1
+                else:
+                    down_trend_down_losses += 1
 
-    print(f'Nitro + VolSnap, BTC Up: {nitro_volsnap_up_up}')
-    print(f'Nitro + VolSnap, BTC Down: {nitro_volsnap_up_down}')
-    print(f'Total Nitro+VolSnap Fired: {total_nitro_volsnap_fired}')
+    print(f"Nitro + VolSnap, UP Trend & BTC Up - Wins: {up_trend_up_wins}, Losses: {up_trend_up_losses}\n"+
+          f"Nitro + VolSnap, DOWN Trend & BTC Down - Wins: {down_trend_down_wins}, Losses: {down_trend_down_losses}\n"+
+          f"Total Nitro+VolSnap Triggers: {total_triggers}")
 
 except Exception as e:
     print(f'Runtime Error: {e}')

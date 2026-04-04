@@ -1,4 +1,13 @@
 import time
+try:
+    import winsound
+except ImportError:
+    class MockWinsound:
+        SND_FILENAME = 131072
+        SND_ASYNC = 1
+        def Beep(self, f, d): pass
+        def PlaySound(self, p, f): pass
+    winsound = MockWinsound()
 from dotenv import load_dotenv
 
 # Load .env variables
@@ -30,7 +39,7 @@ try:
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
         VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner,
-        PeakToPeakScanner
+        PeakToPeakScanner, ShapeMatcherScanner
     )
     from .darwin_agent import DarwinAgent
     from .ui_modals import (
@@ -45,7 +54,7 @@ try:
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
         MM2SettingsModal, DarwinSettingsModal, LogFilterModal, DatabaseExplorerModal,
-        PTPSettingsModal
+        PTPSettingsModal, PatternDraftModal
     )
     from .ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -72,7 +81,7 @@ except ImportError:
         BriefingScanner, CoiledCobraScanner, MesaCollapseScanner, MeanReversionScanner,
         GrindSnapScanner, VolCheckScanner, MosheSpecializedScanner, ZScoreBreakoutScanner,
         VolSnapScanner, ShallowSymmetricalContinuationScanner, AsymmetricDoubleTestScanner,
-        PeakToPeakScanner
+        PeakToPeakScanner, ShapeMatcherScanner
     )
     from darwin_agent import DarwinAgent
     from ui_modals import (
@@ -87,7 +96,7 @@ except ImportError:
         TrendEfficiencyModal, ConvictionScalingModal,
         BRISettingsModal, ZSCSettingsModal, SSCSettingsModal, ADTSettingsModal,
         MM2SettingsModal, DarwinSettingsModal, LogFilterModal, DatabaseExplorerModal,
-        PTPSettingsModal
+        PTPSettingsModal, PatternDraftModal
     )
     from ui_modals_intel import (
         WCPSettingsModal, VPOCSettingsModal, SDPSettingsModal,
@@ -108,20 +117,53 @@ class PulseLeanChart(Static):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.history = []
-        self.trigger_events = [] # [(elapsed, value, side, scanner_name)]
+        self.live_history = kwargs.get('history', [])  # Actual live data buffer
+        self.live_triggers = kwargs.get('triggers', [])  # Actual live trigger buffer
+        
+        self.history = list(self.live_history)  # Current VIEW (Live or Archived)
+        self.trigger_events = list(self.live_triggers) # Current VIEW triggers
+        
         self.tilt_events = []    # [(elapsed, direction, magnitude)] — 52/48 tilt markers
         self.duration = 300 # Default to 5m
+        
+        # Graph history for navigation
+        self.graph_history = []  # Store graph windows for navigation
+        self.graph_history_index = -1  # -1 means showing LIVE data
+        self.showing_live = True
 
     def push_value(self, elapsed, value):
-        # elapsed: seconds into current window
-        # value: 0.0 - 1.0 (UP Price)
-        self.history.append((elapsed, value))
-        self.refresh()
+        # Always update the live buffer (v5.9.18)
+        self.live_history.append((elapsed, value))
+        
+        if self.showing_live:
+            self.history = self.live_history
+            self.trigger_events = self.live_triggers
+            self.refresh()
 
     def push_trigger(self, elapsed, value, side, scanner_name):
-        self.trigger_events.append((elapsed, value, side, scanner_name))
-        self.refresh()
+        self.live_triggers.append((elapsed, value, side, scanner_name))
+        if self.showing_live:
+            self.trigger_events = self.live_triggers
+            self.refresh()
+
+    def archive_current_window(self):
+        """Archives the current completed window data for history navigation (v5.9.18)."""
+        if not self.history: return
+        
+        snapshot = {
+            'history': list(self.history),
+            'triggers': list(self.trigger_events),
+            'timestamp': time.time()
+        }
+        self.graph_history.append(snapshot)
+        if len(self.graph_history) > 50: self.graph_history.pop(0)
+        
+        # If we were showing live, keep pointing at the new end of history but stay live
+        if self.showing_live:
+            self.graph_history_index = len(self.graph_history) - 1
+        else:
+            # We are in historical mode, don't move the index unless it was the very last one
+            pass
 
     def push_tilt(self, elapsed, direction, magnitude):
         """Record a 52/48+ market tilt at the given elapsed time.
@@ -132,14 +174,24 @@ class PulseLeanChart(Static):
         self.refresh()
 
     def reset(self):
-        self.history = []
-        self.trigger_events = []
+        """Clears current live history for a new window cycle."""
+        self.live_history = []
+        self.live_triggers = []
         self.tilt_events = []
-        self.refresh()
+        
+        if self.showing_live:
+            self.history = self.live_history
+            self.trigger_events = self.live_triggers
+            self.refresh()
+
 
     def render(self):
         if not self.history:
             return Text("Lean Chart: Syncing...", style="dim yellow")
+        
+        w = self.size.width
+        h = self.size.height
+        if w <= 0 or h <= 0: return ""
         
         w = self.size.width
         h = self.size.height
@@ -162,7 +214,7 @@ class PulseLeanChart(Static):
 
         # 2. Plot Price History (Left-to-Right mapping)
         duration = getattr(self.app.config, "WINDOW_SECONDS", self.duration)
-        points = self.history
+        points = self.history  # Use the history passed to chart
         if points and points[0][0] > 0:
             points = [(0, points[0][1])] + points
 
@@ -396,15 +448,18 @@ class PulseApp(TradeEngineMixin, App):
     #top_bar { dock: top; height: 1; background: $panel; color: $text; content-align: center middle; }
     #btn_settings { dock: right; border: none; background: transparent; color: #aaaaaa; min-width: 14; height: 1; padding: 0 1; }
     #btn_settings:hover { color: #ffffff; text-style: bold; }
-    #header_stats { width: auto; margin-right: 2; }
-    .timer_text { text-style: bold; color: $warning; }
-    .run_time { color: #00ffff; margin-left: 2; }
-    .live_mode { color: #ff0000; text-style: bold; background: #330000; }
-    
+    #btn_graph_back { border: none; background: transparent; color: #aaaaaa; min-width: 5; height: 1; padding: 0 1; }
+    #btn_graph_forward { border: none; background: transparent; color: #aaaaaa; min-width: 5; height: 1; padding: 0 1; }
+    #btn_graph_back:hover { color: #ffffff; text-style: bold; }
+    #btn_graph_forward:hover { color: #ffffff; text-style: bold; }
+    #header_stats { width: auto; margin: 0 1; }
+    .run_time { width: auto; margin: 0 1; color: #888888; text-style: italic; }
+    .timer_text { width: auto; color: #ff9900; margin: 0 1; }
     #btn_pause {
-        min-width: 12;
-        margin-right: 1;
-        border: solid gray;
+        min-width: 7;
+        margin: 0;
+        border: none;
+        background: $surface;
     }
     .paused_active {
         background: #b22222;
@@ -620,6 +675,26 @@ class PulseApp(TradeEngineMixin, App):
     #sel_trade_limit:hover { background: #444444; }
     #sel_trade_limit SelectCurrent { background: transparent; border: none; padding: 0 1; height: 3; }
     .lbl_sm_inline { width: auto; color: #ffffff; margin-left: 1; height: 1; content-align: center middle; }
+    
+    /* Setup Wizard Styles */
+    .wizard_button_row { height: 3; align: center middle; margin: 1 0; background: $surface; border: solid #00ffff; padding: 1; }
+    .wizard_description { color: #aaaaaa; margin-left: 1; content-align: center middle; }
+    #wizard_container { width: 100%; height: auto; padding: 2; background: $panel; border: solid #00ffff; }
+    #progress_bar { height: 1; width: 100%; margin: 0 0 2 0; align: center middle; }
+    .step_active { color: #00ffff; text-style: bold; margin: 0 1; }
+    .step_completed { color: #00ff00; text-style: bold; margin: 0 1; }
+    .step_inactive { color: #666666; margin: 0 1; }
+    #step_title { text-align: center; text-style: bold; margin: 0 0 1 0; }
+    #step_question { text-align: center; color: #ffffff; margin: 0 0 2 0; }
+    #choice_options { width: 100%; height: auto; margin: 1 0; }
+    #toggle_options { width: 100%; height: auto; margin: 1 0; }
+    .wizard_option { width: 100%; height: auto; margin: 0 0 1 0; padding: 1; text-align: center; }
+    #welcome_buttons { width: 100%; height: auto; margin: 2 0; align: center middle; }
+    #summary_title { text-align: center; text-style: bold; margin: 0 0 1 0; }
+    #summary_options { width: 100%; height: auto; margin: 1 0; }
+    .summary_item { color: #ffffff; margin: 0 0 1 2; }
+    #summary_buttons { width: 100%; height: auto; margin: 2 0; align: center middle; }
+    #nav_buttons { width: 100%; height: auto; margin: 2 0 0 0; align: center middle; }
     """
 
     @on(Button.Pressed, "#btn_dar_info")
@@ -717,10 +792,12 @@ class PulseApp(TradeEngineMixin, App):
                 "SSC": lambda: SSCSettingsModal(self),
                 "ADT": lambda: ADTSettingsModal(self),
                 "MM2": lambda: MM2SettingsModal(self),
-                "PTP": lambda: PTPSettingsModal(self)
+                "PTP": lambda: PTPSettingsModal(self),
+                "SHP": lambda: PatternDraftModal(self)
             }
 
             if code in modal_factory:
+                from ui_modals import PatternDraftModal
                 self.push_screen(modal_factory[code]())
                 return
             
@@ -755,6 +832,55 @@ class PulseApp(TradeEngineMixin, App):
             btn.remove_class("paused_active")
             self.log_msg("[bold white on green] GLOBAL RESUME [/] Monitoring and trading active.", level="SYS")
 
+    @on(Button.Pressed, "#btn_graph_back")
+    def graph_back(self):
+        """Go back in graph history."""
+        try:
+            chart = self.query_one("#pulse_lean_chart")
+            if not chart.graph_history: return
+            
+            if chart.showing_live:
+                chart.showing_live = False
+                chart.graph_history_index = len(chart.graph_history) - 1
+            elif chart.graph_history_index > 0:
+                chart.graph_history_index -= 1
+            else:
+                return # Already at at the beginning of stored history
+                
+            window_data = chart.graph_history[chart.graph_history_index]
+            # Replace display view with ARCHIVE view
+            chart.history = list(window_data.get('history', []))
+            chart.trigger_events = list(window_data.get('triggers', []))
+            chart.refresh()
+            self.log_msg(f"📊 Graph: Viewing window {chart.graph_history_index} (History)", level="SYS")
+        except Exception as e:
+            self.log_msg(f"Graph Navigation Error: {e}", level="ERROR")
+
+    @on(Button.Pressed, "#btn_graph_forward")
+    def graph_forward(self):
+        """Go forward in graph history."""
+        try:
+            chart = self.query_one("#pulse_lean_chart")
+            if chart.showing_live: return
+            
+            max_index = len(chart.graph_history) - 1
+            if chart.graph_history_index < max_index:
+                chart.graph_history_index += 1
+                window_data = chart.graph_history[chart.graph_history_index]
+                chart.history = list(window_data.get('history', []))
+                chart.trigger_events = list(window_data.get('triggers', []))
+                chart.refresh()
+                self.log_msg(f"📊 Graph: Forward to window {chart.graph_history_index}", level="SYS")
+            else:
+                chart.showing_live = True
+                # Critical Fix: Point back to the LIVE buffers
+                chart.history = chart.live_history
+                chart.trigger_events = chart.live_triggers
+                chart.refresh()
+                self.log_msg("📊 Graph: Returned to LIVE dashboard", level="SYS")
+        except Exception as e:
+            self.log_msg(f"Graph Navigation Error: {e}", level="ERROR")
+
     def __init__(self, sim_broker, live_broker, start_live_mode=False, session_id=None):
         super().__init__()
         import atexit
@@ -762,6 +888,8 @@ class PulseApp(TradeEngineMixin, App):
         self.is_initializing = True
         self.config = TradingConfig() # Instantiate for dynamic frequency support
         self.sim_broker = sim_broker
+        
+        self.ticks_enabled = True  # Tick sound setting
         self.sim_broker.app = self  # Set app reference for log toggle checks
         self.live_broker = live_broker
         self.start_live_mode = start_live_mode
@@ -800,7 +928,7 @@ class PulseApp(TradeEngineMixin, App):
         self.paused = False                 # [NEW] Global Pause Flag
         
         # Sonification State (v5.9.17)
-        self.sonification_enabled = False
+        self.sonification_enabled = True
         self.sonification_settings = {
             "base_freq": 800,        # Hz for 50c
             "duration": 50,          # ms
@@ -809,7 +937,7 @@ class PulseApp(TradeEngineMixin, App):
             "sensitivity": 10.0,     # Hz shift per cent
             "cooldown": 0.2,         # seconds between ticks
             "recap_freq": 0,         # Replay price path every N ticks (0=off)
-            "save_window_glide": False # [NEW] Archive full window glide at end (8kHz 8-bit)
+            "save_window_glide": True  # [NEW] Archive full window glide at end (8kHz 8-bit)
         }
         self.last_beep_time = 0
         
@@ -861,7 +989,8 @@ class PulseApp(TradeEngineMixin, App):
             "DIV": SentimentDivergenceScanner(self.config),
             "SSI": StrategyInversionScanner(self.config),
             "SSC": ShallowSymmetricalContinuationScanner(self.config),
-            "ADT": AsymmetricDoubleTestScanner(self.config)
+            "ADT": AsymmetricDoubleTestScanner(self.config),
+            "SHP": ShapeMatcherScanner(self.config)
         }
         
         # Initialize DARWIN AI Agent (v5.9.16)
@@ -870,6 +999,7 @@ class PulseApp(TradeEngineMixin, App):
 
         self.portfolios = {name: AlgorithmPortfolio(name, 100.0, self.config) for name in self.scanners}
         self.logged_trend_wid = None # Latch for trend log deduplication
+        self.window_tones = []              # [NEW] Track sonic path frequencies
         self.window_bets = {} 
         self.pending_bets = {}
         self.last_second_exit_triggered = False 
@@ -1014,6 +1144,9 @@ class PulseApp(TradeEngineMixin, App):
         self.scanner_weights["LIQ"] = 1.67
         self.scanner_weights["LAT"] = 1.67
         
+        self.custom_patterns = []
+        self.shp_settings = {"leeway": 0.05}
+        
         try:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, "r") as f:
@@ -1093,6 +1226,13 @@ class PulseApp(TradeEngineMixin, App):
                         self.darwin.mode = self.config.DARWIN_MODE
                     if "log_display_mode" in saved: self.log_display_mode = str(saved["log_display_mode"])
                     if "log_display_filter" in saved: self.log_display_filter = set(saved["log_display_filter"])
+                    
+                    if "custom_patterns" in saved:
+                        self.custom_patterns = saved["custom_patterns"]
+                        if "SHP" in self.scanners:
+                            self.scanners["SHP"].custom_patterns = self.custom_patterns
+                    if "shp_settings" in saved:
+                        self.shp_settings.update(saved["shp_settings"])
         except Exception: pass
 
         # Respect user-specified log directory from SimBroker (which is now session-specific)
@@ -1227,12 +1367,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
-            Label(f"{self.config.MARKET_FREQ}-SIM | Bal: ${self.sim_broker.balance:.2f}", id="header_stats"),
-            Label(f" | RUN: 00:00:00", id="lbl_runtime", classes="run_time"),
-            Label(" | WIN: ", classes="timer_text"),
-            Label("--:--:--", id="lbl_timer_big", classes="timer_text"),
-            Label(" | Start: ", classes="timer_text"),
-            Label("--:--:--", id="lbl_window_start", classes="timer_text"),
+            Button("<", id="btn_graph_back", variant="default"),
+            Label(f"{self.config.MARKET_FREQ}m-SIM ${self.sim_broker.balance:.0f}", id="header_stats"),
+            Label(f"R:0:00 W:#0", id="lbl_runtime", classes="run_time"),
+            Label("T:0s S:00:00", id="lbl_timer_big", classes="timer_text"),
+            Button(">", id="btn_graph_forward", variant="default"),
             Button("PAUSE", id="btn_pause", variant="default"),
             id="top_bar"
         )
@@ -1242,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 Label("Open: $0", id="p_btc_open", classes="price_sub"),
                 Label("Diff: $0", id="p_btc_diff", classes="price_sub"),
                 Label("Trend 1H: NEUTRAL", id="p_trend", classes="price_sub"),
-                Label("ATR 5m: $0.00", id="p_atr", classes="price_sub"),
+                Label("ATR: $0.00 (--) | H: --", id="p_atr", classes="price_sub"),
                 Horizontal(
                     Label("V-UP: --", id="lbl_vol_up", classes="price_sub"),
                     Label("V-DN: --", id="lbl_vol_dn", classes="price_sub"),
@@ -1353,6 +1492,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     yield Horizontal(Checkbox(value=False, id="cb_bri"), Label("BRI", id="lbl_bri"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_hdo"), Label("HDO", id="lbl_hdo"), classes="algo_item")
                     yield Horizontal(Checkbox(value=False, id="cb_mos"), Label("MOS", id="lbl_mos"), classes="algo_item")
+                    yield Horizontal(Checkbox(value=False, id="cb_shp"), Label("SHP 🎨", id="lbl_shp", classes="cfg_lbl"), classes="algo_item")
 
                 with Vertical(classes="scanner_col"):
                     yield Label("TREND / SURGE", classes="scanner_header")
@@ -2037,10 +2177,14 @@ document.addEventListener('DOMContentLoaded', function() {
         timestamp = datetime.fromtimestamp(now_ts).strftime('%H:%M:%S')
         
         # Calculate TTG Prefix [MM:SS]
-        ttg_str = ""
-        if self.market_data.get("start_ts", 0) > 0:
-            rem = max(0, self.config.WINDOW_SECONDS - int(now_ts - self.market_data["start_ts"]))
-            ttg_str = f"[{rem//60:02d}:{rem%60:02d}]"
+        rem = max(0, self.config.WINDOW_SECONDS - int(time.time() - self.market_data["start_ts"]))
+        # Compact Timer/Start: T:124s S:18:05
+        start_dt = datetime.fromtimestamp(self.market_data["start_ts"])
+        try:
+            self.query_one("#lbl_timer_big").update(f"T:{rem}s S:{start_dt.strftime('%H:%M')}")
+        except:
+            pass
+        ttg_str = f"[{rem//60:02d}:{rem%60:02d}]"
 
         # Color/Category Mapping
         lv = level.upper()
@@ -2119,6 +2263,44 @@ document.addEventListener('DOMContentLoaded', function() {
                 with open(self.console_log_file, "a", encoding="utf-8") as f:
                     f.write(f"[{timestamp}] {clean_msg}\n")
         except: pass
+
+    def sonify_price(self):
+        """
+        Generates real-time audio based on price (Hz = sensitivity * price_cents).
+        Returns the frequency used (for window archival). v5.9.22
+        """
+        try:
+            if getattr(self, "paused", False): return 0
+            if not getattr(self, "sonification_enabled", False):
+                # Still calculate and return freq for archival even if audio is muted
+                p = self.market_data.get("up_ask", 0.50)
+                return self.sonification_settings.get("base_freq", 800) + ((p * 100) - 50) * self.sonification_settings.get("sensitivity", 10.0)
+
+            now = time.time()
+            if now - self.last_beep_time < self.sonification_settings.get("cooldown", 0.2):
+                return 0 # Rate limit beeps to avoid stutter
+            
+            self.last_beep_time = now
+            p = self.market_data.get("up_ask", 0.50)
+            s = self.sonification_settings
+            
+            # Hz = base (e.g. 800 for 50c) + (cents offset * sensitivity)
+            freq = int(s.get("base_freq", 800) + ((p * 100) - 50) * s.get("sensitivity", 10.0))
+            freq = max(37, min(32767, freq))
+            
+            # Asynchronous-ish beep (thread=True worker?) 
+            # winsound.Beep is blocking, so we'll run it in a tiny worker
+            if self.ticks_enabled:  # Check if tick sound is enabled
+                self.run_worker(lambda: winsound.Beep(freq, s.get("duration", 50)), thread=True)
+            
+            # Double beep for special events
+            if s.get("style") == "double" and self.ticks_enabled:
+                # Play second arpeggio note (e.g. 5th)
+                self.run_worker(lambda: winsound.Beep(int(freq * s.get("pitch_jump", 1.5)), s.get("duration", 50)), thread=True)
+                
+            return freq
+        except:
+            return 0
 
     def rebuild_rich_log(self):
         """Clears and re-populates the RichLog with history based on current filters."""
@@ -2281,7 +2463,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 "log_display_mode": getattr(self, "log_display_mode", "ALL"),
                 "log_display_filter": list(getattr(self, "log_display_filter", [])),
                 "darwin_mode": self.config.DARWIN_MODE,
-                "sonification_settings": getattr(self, "sonification_settings", {})
+                "sonification_settings": getattr(self, "sonification_settings", {}),
+                "custom_patterns": getattr(self, "custom_patterns", []),
+                "shp_settings": getattr(self, "shp_settings", {"leeway": 0.05})
             }
             
             # [SANITY] Try to get bet_mode from UI if possible (it's not a standard value/checkbox)
@@ -2591,6 +2775,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
         except Exception as e:
             self.log_msg(f"[bold red]❌ Analysis error:[/] {e}", level="ADMIN")
+
 
     async def on_button_pressed(self, event: Button.Pressed):
         """Handle button presses."""

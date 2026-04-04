@@ -1,0 +1,25 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+<style>.trade-dot:hover .dot-tip { opacity: 1 !important; } .trade-dot { cursor: crosshair; }</style>
+<rect width="340" height="190" fill="#4c1d95" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,96 23,96 30,102 36,106 44,122 51,113 64,107 74,111 84,123 93,125 106,130 113,134 120,133 127,133 134,121 142,119 150,119 156,122 162,123 168,135 174,145 180,134 186,137 192,141 198,143 204,151 210,157 216,160 222,162 228,162 234,162 241,163 248,165 254,166 261,168 267,168 273,168 279,168 286,168 293,168 302,168 308,168 314,168" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<line x1="20" y1="20" x2="20" y2="170" stroke="#FF00FF" stroke-width="1" stroke-dasharray="3,3" opacity="0.8">
+  <title>Next window tilt: ▼DOWN 55¢</title>
+</line>
+<rect x="21" y="20" width="58" height="11" rx="2" fill="#000000" fill-opacity="0.8" stroke="#FF00FF" stroke-width="1"/>
+<text x="23" y="29" font-size="8" fill="#FF00FF" font-family="monospace" font-weight="bold">▼DOWN 55¢</text>
+<g class="trade-dot">
+  <circle cx="43" cy="82" r="5" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+    <title>Briefing: DOWN @ 57¢</title>
+  </circle>
+  <g class="dot-tip" id="tip_0" opacity="0" style="pointer-events:none">
+    <rect x="47" y="54" width="128" height="14" rx="3" fill="#000000" fill-opacity="0.85" stroke="#FF0000" stroke-width="1"/>
+    <text x="51" y="64" font-size="9" fill="#FF0000" font-family="monospace">Briefing: DOWN @ 57¢</text>
+  </g>
+</g>
+</svg>

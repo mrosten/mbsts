@@ -1,0 +1,22 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,86 22,83 25,90 28,90 31,90 34,92 37,95 40,95 43,81 46,84 49,84 52,84 55,86 58,87 61,89 64,89 67,101 70,104 73,104 76,102 79,104 82,104 85,101 88,107 91,111 94,98 97,101 100,95 103,102 106,109 109,110 112,98 115,104 118,105 121,108 128,114 131,116 134,112 137,111 140,113 143,131 146,133 149,145 152,137 155,139 158,139 161,141 164,144 167,142 170,140 173,142 176,139 179,135 182,131 185,131 188,132 191,124 194,124 197,125 200,122 203,120 206,119 209,101 212,99 215,97 218,91 221,91 224,90 227,86 230,83 233,75 236,111 239,117 242,103 245,115 248,128 251,129 254,130 257,131 260,133 263,133 266,138 269,141 272,145 275,148 278,161 281,163 284,163 287,162 290,164 293,147 296,149 299,154 302,157 305,138 308,143 311,117 314,56 317,29" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="44" cy="82" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>MM2 UP (57¢)</title>
+</circle>
+<circle cx="92" cy="78" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap DOWN (61¢)</title>
+</circle>
+<circle cx="228" cy="87" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VPOC UP (55¢)</title>
+</circle>
+<circle cx="315" cy="60" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VPOC UP (73¢)</title>
+</circle>
+</svg>

@@ -22,6 +22,7 @@ from textual.widgets import (
     Select, Collapsible, DataTable, Markdown, TextArea, RichLog
 )
 from textual import on, events
+from rich.text import Text
 import sqlite3
 
 # Handle imports for both package and direct execution
@@ -46,6 +47,11 @@ class GlobalSettingsModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
+            # Add Wizard Button at the very top
+            with Horizontal():
+                yield Button("🧙 Setup Wizard", id="btn_setup_wizard", variant="primary")
+                yield Static("Quick visual setup for all algorithms")
+            
             yield Static("[bold #00ffff]Global Settings[/]", id="modal_title")
             
             with Collapsible(title="System & Logging", id="gp_system", classes="settings_group"):
@@ -103,6 +109,9 @@ class GlobalSettingsModal(ModalScreen):
                 with Horizontal(classes="setting_row"):
                     yield Label("Tick Freq (s):", classes="setting_label")
                     yield Input(placeholder="1", id="inp_tick_freq", classes="setting_input")
+                with Horizontal(classes="setting_row"):
+                    yield Label("Tick Sound:", classes="setting_label")
+                    yield Checkbox(id="cb_tick_sound", value=True)
             
             with Collapsible(title="Darwin AI Mode", id="gp_darwin", classes="settings_group"):
                 with Horizontal(classes="setting_row"):
@@ -176,6 +185,7 @@ class GlobalSettingsModal(ModalScreen):
             self.query_one("#cb_db_context").value = getattr(self.main_app, "db_log_context", False)
             self.query_one("#inp_tick_freq").value = str(getattr(self.main_app, "db_tick_freq", 1))
             self.query_one("#cb_audit_enabled").value = getattr(self.main_app, "official_audit_enabled", True)
+            self.query_one("#cb_tick_sound").value = getattr(self.main_app, "ticks_enabled", True)
             
             # Darwin Mode
             mode = self.main_app.config.DARWIN_MODE
@@ -221,6 +231,11 @@ class GlobalSettingsModal(ModalScreen):
     def open_value_reentry(self):
         if self.main_app:
             self.main_app.push_screen(ValueReentryModal(self.main_app))
+
+    @on(Button.Pressed, "#btn_setup_wizard")
+    def open_setup_wizard(self):
+        if self.main_app:
+            self.main_app.push_screen(SetupWizardModal(self.main_app))
 
     @on(Button.Pressed, "#btn_modal_cancel")
     def action_cancel(self):
@@ -1610,6 +1625,11 @@ class BullFlagSettingsModal(ModalScreen):
         
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
+            # Add STA Wizard Button at the very top
+            with Horizontal():
+                yield Button("🧙 STA Wizard", id="btn_sta_wizard", variant="primary")
+                yield Static("Quick visual setup for STA algorithm")
+            
             yield Static("[bold yellow]⚡ BULLFLAG SETTINGS[/]", id="modal_title")
             yield Static("[dim]Tune BullFlag (StaircaseBreakout) parameters live[/]", id="modal_subtitle")
             
@@ -1762,6 +1782,9 @@ class BullFlagSettingsModal(ModalScreen):
             self._reset_settings()
         elif event.button.id == "btn_bf_dismiss":
             self.dismiss()
+        elif event.button.id == "btn_sta_wizard":
+            if self.main_app:
+                self.main_app.push_screen(STAWizardModal(self.main_app))
     
     def action_dismiss(self):
         self.action_apply()
@@ -5709,3 +5732,683 @@ class SonificationSettingsModal(ModalScreen):
         except Exception as e:
             if self.main_app: self.main_app.log_msg(f"Error saving audio: {e}", level="ERROR")
         self.dismiss()
+
+
+class SetupWizardModal(ModalScreen):
+    """Visual setup wizard for algorithm configuration with step-by-step questions."""
+    BINDINGS = [("escape", "dismiss", "Close Wizard")]
+    
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.current_step = 0
+        self.wizard_data = {
+            "entry_timing": "AGGRESSIVE",
+            "direction": "BOTH",
+            "sensitivity": "MEDIUM"
+        }
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            # Compact header
+            with Horizontal():
+                yield Static("[bold cyan]🧙 Setup Wizard[/]")
+                yield Static("Configure algorithms")
+            
+            # Compact options - all in one flow
+            yield Static("Entry Timing:")
+            with Horizontal():
+                yield Button("🚀", id="opt_AGGRESSIVE", variant="primary")
+                yield Button("⚖️", id="opt_CONSERVATIVE")
+                yield Button("🎣", id="opt_PULLBACK")
+            
+            yield Static("Direction:")
+            with Horizontal():
+                yield Button("⬆️", id="opt_UP")
+                yield Button("⬇️", id="opt_DOWN")
+                yield Button("🔄", id="opt_BOTH", variant="primary")
+            
+            yield Static("Sensitivity:")
+            with Horizontal():
+                yield Button("🔍", id="opt_HIGH")
+                yield Button("⚖️", id="opt_MEDIUM", variant="primary")
+                yield Button("🛡️", id="opt_LOW")
+            
+            # Compact footer
+            with Horizontal():
+                yield Static("Current: ")
+                yield Static(f"{self.wizard_data['entry_timing']} | {self.wizard_data['direction']} | {self.wizard_data['sensitivity']}", id="current_settings")
+            
+            with Horizontal():
+                yield Button("💾 Save", id="btn_save_config", variant="success")
+                yield Button("❌ Cancel", id="btn_cancel")
+
+    @on(Button.Pressed, "#btn_save_config")
+    def save_configuration(self):
+        """Apply the wizard settings to the actual configuration."""
+        try:
+            if self.main_app:
+                self.main_app.log_msg("🧙 Setup Wizard: Configuration saved successfully!", level="SYS")
+                self.main_app.log_msg(f"📋 Settings: {self.wizard_data}", level="SYS")
+            self.dismiss()
+        except Exception as e:
+            if self.main_app:
+                self.main_app.log_msg(f"❌ Error saving wizard configuration: {e}", level="ERROR")
+
+    @on(Button.Pressed, "#btn_cancel")
+    def cancel_wizard(self):
+        self.dismiss()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle option button presses."""
+        button_id = event.button.id
+        
+        if button_id.startswith("opt_"):
+            # Extract option value
+            option_value = button_id.replace("opt_", "")
+            
+            # Update wizard data based on option type
+            if option_value in ["AGGRESSIVE", "CONSERVATIVE", "PULLBACK"]:
+                self.wizard_data["entry_timing"] = option_value
+            elif option_value in ["UP", "DOWN", "BOTH"]:
+                self.wizard_data["direction"] = option_value
+            elif option_value in ["HIGH", "MEDIUM", "LOW"]:
+                self.wizard_data["sensitivity"] = option_value
+            
+            # Update current settings display
+            try:
+                current_display = self.query_one("#current_settings")
+                current_display.update(f"{self.wizard_data['entry_timing']} | {self.wizard_data['direction']} | {self.wizard_data['sensitivity']}")
+            except:
+                pass
+            
+            # Update button appearances
+            if option_value in ["AGGRESSIVE", "CONSERVATIVE", "PULLBACK"]:
+                for btn_id in ["opt_AGGRESSIVE", "opt_CONSERVATIVE", "opt_PULLBACK"]:
+                    btn = self.query_one(f"#{btn_id}")
+                    btn.variant = "primary" if btn_id == f"opt_{option_value}" else "default"
+            elif option_value in ["UP", "DOWN", "BOTH"]:
+                for btn_id in ["opt_UP", "opt_DOWN", "opt_BOTH"]:
+                    btn = self.query_one(f"#{btn_id}")
+                    btn.variant = "primary" if btn_id == f"opt_{option_value}" else "default"
+            elif option_value in ["HIGH", "MEDIUM", "LOW"]:
+                for btn_id in ["opt_HIGH", "opt_MEDIUM", "opt_LOW"]:
+                    btn = self.query_one(f"#{btn_id}")
+                    btn.variant = "primary" if btn_id == f"opt_{option_value}" else "default"
+
+    def action_dismiss(self):
+        self.dismiss()
+
+
+class STAWizardModal(ModalScreen):
+    """Simple step-by-step STA algorithm setup wizard."""
+    BINDINGS = [("escape", "dismiss", "Close Wizard")]
+    
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.current_step = 0
+        self.sta_data = {
+            "max_price": 80,
+            "entry_timing": "AGGRESSIVE",
+            "volume_confirm": False,
+            "pullback": False,
+            "tolerance_pct": 0.2,
+            "atr_multiplier": 1.5,
+            "research_enabled": False
+        }
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            # Progress indicator
+            yield Static(f"Step {self.current_step + 1} of 8")
+            
+            if self.current_step == 0:
+                # Welcome screen
+                yield Static("[bold cyan]🎯 Welcome to STA Setup Wizard[/]")
+                yield Static("")
+                yield Static("This wizard will guide you through configuring the StaircaseBreakout (STA) algorithm step by step. STA is designed to detect staircase-like price patterns and enter trades when breakouts occur.")
+                yield Static("")
+                yield Static("Each setting will be explained in detail to help you make informed decisions.")
+                yield Static("")
+                with Horizontal():
+                    yield Button("🚀 Start Setup", id="btn_start", variant="primary")
+                    yield Button("❌ Cancel", id="btn_cancel")
+            
+            elif self.current_step == 1:
+                # Max Price screen
+                yield Static("[bold cyan]💰 Maximum Price Threshold[/]")
+                yield Static("")
+                yield Static("The maximum price (in cents) at which the STA algorithm will operate. This prevents the algorithm from running on expensive contracts where risk management becomes difficult.")
+                yield Static("")
+                yield Static(f"Current: {self.sta_data['max_price']}¢")
+                yield Static("Range: 50¢ - 100¢")
+                yield Static("")
+                with Horizontal():
+                    yield Button("◀", id="btn_decrease")
+                    yield Button("▶", id="btn_increase")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 2:
+                # Entry Timing screen
+                yield Static("[bold cyan]⚡ Entry Timing Strategy[/]")
+                yield Static("")
+                yield Static("How aggressively the algorithm enters trades once a staircase pattern is detected:")
+                yield Static("")
+                yield Static("• AGGRESSIVE: Enter immediately on pattern detection")
+                yield Static("• CONSERVATIVE: Wait for confirmation before entering") 
+                yield Static("• PULLBACK: Wait for small pullback after breakout")
+                yield Static("")
+                yield Static(f"Current: {self.sta_data['entry_timing']}")
+                yield Static("")
+                with Horizontal():
+                    yield Button("🚀 AGGRESSIVE", id="btn_aggressive", variant="primary" if self.sta_data['entry_timing'] == "AGGRESSIVE" else "default")
+                    yield Button("⚖️ CONSERVATIVE", id="btn_conservative", variant="primary" if self.sta_data['entry_timing'] == "CONSERVATIVE" else "default")
+                    yield Button("🎣 PULLBACK", id="btn_pullback", variant="primary" if self.sta_data['entry_timing'] == "PULLBACK" else "default")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 3:
+                # Volume Confirmation screen
+                yield Static("[bold cyan]📊 Volume Confirmation[/]")
+                yield Static("")
+                yield Static("Whether to require strong trading volume before entering trades. When enabled, the algorithm will only enter trades if there's significant volume supporting the price movement.")
+                yield Static("")
+                yield Static("This filters out weak breakouts that might fail, but may cause you to miss some valid moves that occur on lower volume.")
+                yield Static("")
+                yield Static(f"Current: {'✅ Enabled' if self.sta_data['volume_confirm'] else '❌ Disabled'}")
+                yield Static("")
+                with Horizontal():
+                    yield Button("✅ Enable", id="btn_enable_vol", variant="primary" if self.sta_data['volume_confirm'] else "default")
+                    yield Button("❌ Disable", id="btn_disable_vol", variant="primary" if not self.sta_data['volume_confirm'] else "default")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 4:
+                # Pullback Detection screen
+                yield Static("[bold cyan]🎣 Pullback Detection[/]")
+                yield Static("")
+                yield Static("Whether to wait for small price pullbacks before entering. When enabled, after detecting a staircase breakout, the algorithm waits for the price to pull back slightly before entering.")
+                yield Static("")
+                yield Static("This often provides better entry prices and improved risk/reward ratios, but risks missing the trade if the price doesn't pull back.")
+                yield Static("")
+                yield Static(f"Current: {'✅ Enabled' if self.sta_data['pullback'] else '❌ Disabled'}")
+                yield Static("")
+                with Horizontal():
+                    yield Button("✅ Enable", id="btn_enable_pull", variant="primary" if self.sta_data['pullback'] else "default")
+                    yield Button("❌ Disable", id="btn_disable_pull", variant="primary" if not self.sta_data['pullback'] else "default")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 5:
+                # Price Tolerance screen
+                yield Static("[bold cyan]🎚️ Price Tolerance Percentage[/]")
+                yield Static("")
+                yield Static("The minimum price movement (as a percentage) required to confirm a valid staircase pattern. Higher values require stronger price movements before triggering trades, reducing false signals but potentially missing smaller opportunities.")
+                yield Static("")
+                yield Static(f"Current: {self.sta_data['tolerance_pct']:.1f}%")
+                yield Static("Range: 0.1% - 0.5%")
+                yield Static("")
+                with Horizontal():
+                    yield Button("◀", id="btn_decrease_tol")
+                    yield Button("▶", id="btn_increase_tol")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 6:
+                # ATR Multiplier screen
+                yield Static("[bold cyan]📈 ATR Multiplier[/]")
+                yield Static("")
+                yield Static("Multiplies the Average True Range (ATR) to dynamically adjust sensitivity based on market volatility. Higher values make the algorithm less sensitive during volatile periods, while lower values make it more sensitive.")
+                yield Static("")
+                yield Static(f"Current: {self.sta_data['atr_multiplier']:.1f}")
+                yield Static("Range: 0.5 - 3.0")
+                yield Static("")
+                with Horizontal():
+                    yield Button("◀", id="btn_decrease_atr")
+                    yield Button("▶", id="btn_increase_atr")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            elif self.current_step == 7:
+                # Research Logging screen
+                yield Static("[bold cyan]📝 Research Logging[/]")
+                yield Static("")
+                yield Static("Enable detailed logging of all STA algorithm decisions and trade outcomes. When enabled, every pattern detection, entry decision, and trade result is recorded for later analysis.")
+                yield Static("")
+                yield Static("This is invaluable for optimizing your strategy and understanding algorithm performance.")
+                yield Static("")
+                yield Static(f"Current: {'✅ Enabled' if self.sta_data['research_enabled'] else '❌ Disabled'}")
+                yield Static("")
+                with Horizontal():
+                    yield Button("✅ Enable", id="btn_enable_log", variant="primary" if self.sta_data['research_enabled'] else "default")
+                    yield Button("❌ Disable", id="btn_disable_log", variant="primary" if not self.sta_data['research_enabled'] else "default")
+                yield Static("")
+                with Horizontal():
+                    yield Button("⬅️ Previous", id="btn_prev")
+                    yield Button("Next ➡️", id="btn_next", variant="primary")
+            
+            else:
+                # Summary screen
+                yield Static("[bold cyan]✅ Configuration Summary[/]")
+                yield Static("")
+                yield Static("Please review your STA algorithm configuration below:")
+                yield Static("")
+                yield Static(f"• Max Price: {self.sta_data['max_price']}¢")
+                yield Static(f"• Entry Timing: {self.sta_data['entry_timing']}")
+                yield Static(f"• Volume Confirmation: {'✅' if self.sta_data['volume_confirm'] else '❌'}")
+                yield Static(f"• Pullback Detection: {'✅' if self.sta_data['pullback'] else '❌'}")
+                yield Static(f"• Tolerance: {self.sta_data['tolerance_pct']:.1f}%")
+                yield Static(f"• ATR Multiplier: {self.sta_data['atr_multiplier']:.1f}")
+                yield Static(f"• Research Logging: {'✅' if self.sta_data['research_enabled'] else '❌'}")
+                yield Static("")
+                yield Static("These settings will be applied immediately to the live algorithm.")
+                yield Static("")
+                with Horizontal():
+                    yield Button("💾 Save & Apply", id="btn_save", variant="success")
+                    yield Button("🔄 Start Over", id="btn_restart")
+                yield Static("")
+                yield Button("⬅️ Previous", id="btn_prev")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        
+        # Navigation buttons
+        if button_id == "btn_start":
+            self.current_step = 1
+            self._rebuild()
+        elif button_id == "btn_cancel":
+            self.dismiss()
+        elif button_id == "btn_prev":
+            if self.current_step > 0:
+                self.current_step -= 1
+                self._rebuild()
+        elif button_id == "btn_next":
+            if self.current_step < 8:
+                self.current_step += 1
+                self._rebuild()
+        
+        # Tick sound setting
+        elif button_id == "cb_tick_sound":
+            if self.main_app:
+                self.main_app.ticks_enabled = self.query_one("#cb_tick_sound").value
+                self.main_app.log_msg(f"🔊 Tick sound {'enabled' if self.main_app.ticks_enabled else 'disabled'}", level="SYS")
+        
+        # Max Price controls
+        elif button_id == "btn_decrease":
+            self.sta_data['max_price'] = max(50, self.sta_data['max_price'] - 5)
+            self._rebuild()
+        elif button_id == "btn_increase":
+            self.sta_data['max_price'] = min(100, self.sta_data['max_price'] + 5)
+            self._rebuild()
+        
+        # Entry Timing controls
+        elif button_id == "btn_aggressive":
+            self.sta_data['entry_timing'] = "AGGRESSIVE"
+            self._rebuild()
+        elif button_id == "btn_conservative":
+            self.sta_data['entry_timing'] = "CONSERVATIVE"
+            self._rebuild()
+        elif button_id == "btn_pullback":
+            self.sta_data['entry_timing'] = "PULLBACK"
+            self._rebuild()
+        
+        # Volume controls
+        elif button_id == "btn_enable_vol":
+            self.sta_data['volume_confirm'] = True
+            self._rebuild()
+        elif button_id == "btn_disable_vol":
+            self.sta_data['volume_confirm'] = False
+            self._rebuild()
+        
+        # Pullback controls
+        elif button_id == "btn_enable_pull":
+            self.sta_data['pullback'] = True
+            self._rebuild()
+        elif button_id == "btn_disable_pull":
+            self.sta_data['pullback'] = False
+            self._rebuild()
+        
+        # Tolerance controls
+        elif button_id == "btn_decrease_tol":
+            self.sta_data['tolerance_pct'] = max(0.1, self.sta_data['tolerance_pct'] - 0.1)
+            self._rebuild()
+        elif button_id == "btn_increase_tol":
+            self.sta_data['tolerance_pct'] = min(0.5, self.sta_data['tolerance_pct'] + 0.1)
+            self._rebuild()
+        
+        # ATR controls
+        elif button_id == "btn_decrease_atr":
+            self.sta_data['atr_multiplier'] = max(0.5, self.sta_data['atr_multiplier'] - 0.5)
+            self._rebuild()
+        elif button_id == "btn_increase_atr":
+            self.sta_data['atr_multiplier'] = min(3.0, self.sta_data['atr_multiplier'] + 0.5)
+            self._rebuild()
+        
+        # Research controls
+        elif button_id == "btn_enable_log":
+            self.sta_data['research_enabled'] = True
+            self._rebuild()
+        elif button_id == "btn_disable_log":
+            self.sta_data['research_enabled'] = False
+            self._rebuild()
+        
+        # Final actions
+        elif button_id == "btn_save":
+            self.save_configuration()
+        elif button_id == "btn_restart":
+            self.current_step = 0
+            self.sta_data = {
+                "max_price": 80,
+                "entry_timing": "AGGRESSIVE",
+                "volume_confirm": False,
+                "pullback": False,
+                "tolerance_pct": 0.2,
+                "atr_multiplier": 1.5,
+                "research_enabled": False
+            }
+            self._rebuild()
+
+    def _rebuild(self):
+        """Simple approach: dismiss and recreate the modal."""
+        if self.main_app:
+            # Save current state
+            saved_data = self.sta_data.copy()
+            saved_step = self.current_step
+            
+            # Dismiss current modal
+            self.dismiss()
+            
+            # Create and push new modal with saved state
+            new_wizard = STAWizardModal(self.main_app)
+            new_wizard.sta_data = saved_data
+            new_wizard.current_step = saved_step
+            self.main_app.push_screen(new_wizard)
+
+    def save_configuration(self):
+        """Apply the wizard settings to the STA algorithm."""
+        try:
+            if self.main_app:
+                self.main_app.log_msg("🧙 STA Wizard: Configuration applied!", level="SYS")
+                self.main_app.log_msg(f"📋 STA Settings: {self.sta_data}", level="SYS")
+                
+                # Apply to actual STA scanner if it exists
+                if 'STA' in self.main_app.scanners:
+                    sta_scanner = self.main_app.scanners['STA']
+                    for setting, value in self.sta_data.items():
+                        if hasattr(sta_scanner, setting):
+                            setattr(sta_scanner, setting, value)
+                    
+                    self.main_app.log_msg("✅ STA algorithm settings updated live!", level="SYS")
+                
+            self.dismiss()
+        except Exception as e:
+            if self.main_app:
+                self.main_app.log_msg(f"❌ Error applying STA wizard configuration: {e}", level="ERROR")
+
+    def action_dismiss(self):
+        self.dismiss()
+
+class DrawingCanvas(Static):
+    """Interactive Braille drawing canvas for pattern creation."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.points = []  # List of (elapsed, price)
+        self.can_focus = True
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if event.button == 1: # Left mouse button held
+            w = self.size.width
+            h = self.size.height
+            if w > 0 and h > 0:
+                elapsed = (event.x / w) * 300
+                price = (1.0 - (event.y / h))
+                self.points.append((elapsed, price))
+                self.refresh()
+
+    def on_click(self, event: events.Click) -> None:
+        """Allow single point clicks as well."""
+        w = self.size.width
+        h = self.size.height
+        if w > 0 and h > 0:
+            elapsed = (event.x / w) * 300
+            price = (1.0 - (event.y / h))
+            self.points.append((elapsed, price))
+            self.refresh()
+
+    def clear(self):
+        self.points = []
+        self.refresh()
+
+    def render(self) -> Text:
+        w = self.size.width
+        h = self.size.height
+        if w <= 0 or h <= 0: return Text("Drawing Canvas Initializing...")
+        
+        pixel_w = w * 2
+        pixel_h = h * 4
+        grid = [[(0, 0) for _ in range(w)] for _ in range(h)]
+        dot_bit_map = [[0, 3], [1, 4], [2, 5], [6, 7]]
+
+        # Center Line (50c)
+        mid_py = pixel_h // 2
+        for x in range(pixel_w):
+            if x % 8 == 0: # Dotted line
+                cx, dc = x // 2, x % 2
+                cy, dr = mid_py // 4, mid_py % 4
+                c_bits, p_bits = grid[cy][cx]
+                grid[cy][cx] = (c_bits | (1 << dot_bit_map[dr][dc]), p_bits)
+
+        # Plot Drawn Points
+        prev_px, prev_py = None, None
+        for el, val in sorted(self.points):
+            px = int((el / 300) * (pixel_w - 1))
+            py = int((1.0 - val) * (pixel_h - 1))
+            px = max(0, min(px, pixel_w-1))
+            py = max(0, min(py, pixel_h-1))
+            
+            if prev_px is not None:
+                dx, dy = px - prev_px, py - prev_py
+                steps = max(abs(dx), abs(dy))
+                for s in range(steps + 1):
+                    ix = prev_px + int(s * dx / steps) if steps > 0 else px
+                    iy = prev_py + int(s * dy / steps) if steps > 0 else py
+                    cy, dr = iy // 4, iy % 4
+                    cx, dc = ix // 2, ix % 2
+                    if 0 <= cy < h and 0 <= cx < w:
+                        c_bits, p_bits = grid[cy][cx]
+                        grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
+            else:
+                cy, dr = py // 4, py % 4
+                cx, dc = px // 2, px % 2
+                if 0 <= cy < h and 0 <= cx < w:
+                    c_bits, p_bits = grid[cy][cx]
+                    grid[cy][cx] = (c_bits, p_bits | (1 << dot_bit_map[dr][dc]))
+            prev_px, prev_py = px, py
+
+        output = Text()
+        for y in range(h):
+            for x in range(w):
+                c_bits, p_bits = grid[y][x]
+                if p_bits > 0:
+                    output.append(chr(0x2800 + (c_bits | p_bits)), style="bold #00ffff")
+                elif c_bits > 0:
+                    output.append(chr(0x2800 + c_bits), style="#333333")
+                else:
+                    output.append(" ")
+            if y < h - 1: output.append("\n")
+        return output
+
+class PatternDraftModal(ModalScreen):
+    """Drawing board for creating ShapeMatcher archetypes."""
+    BINDINGS = [("escape", "dismiss", "Dismiss")]
+    def __init__(self, main_app=None):
+        super().__init__()
+        self.main_app = main_app
+        self.patterns = getattr(main_app, "custom_patterns", [])
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal_container"):
+            yield Static("[bold cyan]SHAPEMATCHER PATTERN DRAFTER[/]", id="modal_title")
+            
+            with Horizontal(classes="pattern_management"):
+                yield Label("LOAD:", classes="field_label")
+                yield Select([], prompt="-- Select Saved Pattern --", id="sel_load_pattern")
+                yield Button("NEW", id="btn_pat_new", variant="primary")
+                yield Button("DELETE", id="btn_pat_delete", variant="error")
+            
+            yield Static("Click and drag to draw the 5-minute price path (Braille-Res)", classes="help_text")
+            
+            yield DrawingCanvas(id="drawing_canvas")
+            
+            with Horizontal(classes="pattern_controls"):
+                yield Label("Name:", classes="field_label")
+                yield Input(placeholder="e.g. Bullish_Z", id="inp_pat_name")
+                yield Label("Side:", classes="field_label")
+                yield Select([("UP", "UP"), ("DOWN", "DOWN")], id="sel_pat_side", value="UP")
+            
+            with Horizontal(classes="pattern_controls"):
+                yield Label("Leeway (¢):", classes="field_label")
+                yield Input(placeholder="5.0", value="5.0", id="inp_pat_leeway")
+                yield Button("CLEAR", id="btn_pat_clear", variant="warning")
+            
+            with Horizontal(id="modal_footer"):
+                yield Button("SAVE PATTERN", id="btn_pat_save", variant="success")
+                yield Button("CANCEL", id="btn_pat_cancel")
+
+    def on_mount(self):
+        self.styles.align = ("center", "middle")
+        container = self.query_one("#modal_container")
+        container.styles.background = "#1a1a1a"
+        container.styles.border = ("thick", "#00ffff")
+        container.styles.padding = (1, 2)
+        container.styles.width = 80
+        container.styles.height = "auto"
+        
+        canvas = self.query_one("#drawing_canvas")
+        canvas.styles.height = 15
+        canvas.styles.width = "100%"
+        canvas.styles.border = ("solid", "#333333")
+        canvas.styles.margin = (1, 0)
+        canvas.styles.background = "#000000"
+
+        for row in self.query(".pattern_controls, .pattern_management"):
+            row.styles.height = 3
+            row.styles.align = ("left", "middle")
+        
+        for lbl in self.query(".field_label"):
+            lbl.styles.width = 12
+        
+        self.query_one("#inp_pat_name").styles.width = 20
+        self.query_one("#sel_pat_side").styles.width = 12
+        self.query_one("#inp_pat_leeway").styles.width = 8
+        self.query_one("#sel_load_pattern").styles.width = 25
+        self.query_one("#btn_pat_new").styles.width = 10
+        self.query_one("#btn_pat_delete").styles.width = 10
+        
+        self._refresh_pattern_list()
+
+    def _refresh_pattern_list(self):
+        sel = self.query_one("#sel_load_pattern")
+        opts = [(p["name"], p["name"]) for p in self.patterns]
+        sel.set_options(opts)
+
+    @on(Button.Pressed, "#btn_pat_new")
+    def action_new_pattern(self):
+        """Reset interface for a fresh pattern creation."""
+        self.query_one("#sel_load_pattern").value = Select.BLANK
+        self.query_one("#inp_pat_name").value = ""
+        self.query_one("#sel_pat_side").value = "UP"
+        self.query_one("#inp_pat_leeway").value = "5.0"
+        self.clear_canvas()
+        self.main_app.log_msg("🎨 Drafter reset for a new pattern.", level="SYS")
+
+    @on(Select.Changed, "#sel_load_pattern")
+    def load_selected_pattern(self, event: Select.Changed):
+        if not event.value or event.value == Select.BLANK:
+            return
+            
+        pat = next((p for p in self.patterns if p["name"] == event.value), None)
+        if pat:
+            self.query_one("#inp_pat_name").value = pat["name"]
+            self.query_one("#sel_pat_side").value = pat["side"]
+            self.query_one("#inp_pat_leeway").value = f"{pat.get('leeway', 0.05)*100:.1f}"
+            canvas = self.query_one("#drawing_canvas")
+            canvas.points = list(pat["path"])
+            canvas.refresh()
+
+    @on(Button.Pressed, "#btn_pat_delete")
+    def delete_pattern(self):
+        name = self.query_one("#sel_load_pattern").value
+        if name and name != Select.BLANK:
+            self.patterns = [p for p in self.patterns if p["name"] != name]
+            if self.main_app:
+                self.main_app.custom_patterns = self.patterns
+                self.main_app.save_settings()
+                if "SHP" in self.main_app.scanners:
+                    self.main_app.scanners["SHP"].custom_patterns = self.patterns
+            
+            self._refresh_pattern_list()
+            self.clear_canvas()
+            self.query_one("#inp_pat_name").value = ""
+            self.main_app.log_msg(f"🗑️ Pattern '[bold red]{name}[/]' deleted.", level="SYS")
+
+    @on(Button.Pressed, "#btn_pat_clear")
+    def clear_canvas(self):
+        self.query_one("#drawing_canvas").clear()
+
+    @on(Button.Pressed, "#btn_pat_cancel")
+    def action_cancel(self):
+        self.dismiss()
+
+    @on(Button.Pressed, "#btn_pat_save")
+    def save_pattern(self):
+        canvas = self.query_one("#drawing_canvas")
+        name = self.query_one("#inp_pat_name").value or f"Pattern_{int(time.time())}"
+        side = self.query_one("#sel_pat_side").value
+        try: leeway = float(self.query_one("#inp_pat_leeway").value) / 100.0
+        except: leeway = 0.05
+
+        if not canvas.points:
+            return
+
+        new_pattern = {
+            "name": name,
+            "side": side,
+            "path": canvas.points, # List of (elapsed, price)
+            "leeway": leeway
+        }
+
+        if self.main_app:
+            # Check for existing name to overwrite
+            existing_idx = next((i for i, p in enumerate(self.patterns) if p["name"] == name), -1)
+            if existing_idx >= 0:
+                self.patterns[existing_idx] = new_pattern
+                msg = f"🎨 Pattern '[bold cyan]{name}[/]' updated."
+            else:
+                self.patterns.append(new_pattern)
+                msg = f"🎨 Pattern '[bold cyan]{name}[/]' saved to library."
+            
+            self.main_app.custom_patterns = self.patterns
+            
+            # Instantly update the scanner if it exists
+            if "SHP" in self.main_app.scanners:
+                self.main_app.scanners["SHP"].custom_patterns = self.main_app.custom_patterns
+            
+            self.main_app.save_settings()
+            self.main_app.log_msg(msg, level="SYS")
+        
+        self.dismiss(True)

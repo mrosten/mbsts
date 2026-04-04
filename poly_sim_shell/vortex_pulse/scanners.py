@@ -45,28 +45,55 @@ class NPatternScanner(BaseScanner):
         phase1_prices = self.get_price_slice(history_objs, 0, phase1_dur)
         if not phase1_prices: return "WAIT"
             
+        # 1. Check for Bullish N-Pattern
         first_peak = max(phase1_prices)
-        impulse_height = first_peak - open_price
-        if impulse_height < (open_price * self.min_impulse_size): return "WAIT" 
+        up_impulse = first_peak - open_price
+        if up_impulse >= (open_price * self.min_impulse_size):
+            # Find earliest occurrence of peak to look for retrace after
+            peak_idx = -1
+            for i, p in enumerate(history_objs):
+                if p['price'] == first_peak:
+                    peak_idx = i
+                    break
             
-        peak_idx = next(i for i, p in enumerate(history_objs) if p['price'] == first_peak)
-        retrace_objs = history_objs[peak_idx:]
-        if not retrace_objs: return "WAIT"
-            
-        retrace_prices = [p['price'] for p in retrace_objs]
-        retest_low = min(retrace_prices)
-        failed_support = retest_low < (open_price * (1 - self.support_tolerance))
-        retrace_pct = (first_peak - retest_low) / impulse_height if impulse_height > 0 else 0
-        valid_dip = 0.20 <= retrace_pct <= self.max_retrace_depth
-        
-        if failed_support: return "PATTERN_INVALID"
-        if not valid_dip: return "WAIT"
-            
-        current_price = history_objs[-1]['price']
-        breakout = current_price > first_peak
-        if breakout and valid_dip:
-            self.triggered_signal = f"BET_UP_CONFIRMED|Breakout above {first_peak:.2f}"
-            return self.triggered_signal
+            retrace_objs = history_objs[peak_idx:]
+            if retrace_objs:
+                retrace_prices = [p['price'] for p in retrace_objs]
+                retest_low = min(retrace_prices)
+                failed_support = retest_low < (open_price * (1 - self.support_tolerance))
+                retrace_pct = (first_peak - retest_low) / up_impulse if up_impulse > 0 else 0
+                valid_dip = 0.20 <= retrace_pct <= self.max_retrace_depth
+                
+                if not failed_support and valid_dip:
+                    current_price = history_objs[-1]['price']
+                    if current_price > first_peak:
+                        self.triggered_signal = f"BET_UP_CONFIRMED|Breakout above {first_peak:.2f}"
+                        return self.triggered_signal
+
+        # 2. Check for Bearish N-Pattern (Inverted N)
+        first_trough = min(phase1_prices)
+        down_impulse = open_price - first_trough
+        if down_impulse >= (open_price * self.min_impulse_size):
+            trough_idx = -1
+            for i, p in enumerate(history_objs):
+                if p['price'] == first_trough:
+                    trough_idx = i
+                    break
+                    
+            retrace_objs = history_objs[trough_idx:]
+            if retrace_objs:
+                retrace_prices = [p['price'] for p in retrace_objs]
+                retest_high = max(retrace_prices)
+                failed_resistance = retest_high > (open_price * (1 + self.support_tolerance))
+                retrace_pct = (retest_high - first_trough) / down_impulse if down_impulse > 0 else 0
+                valid_pop = 0.20 <= retrace_pct <= self.max_retrace_depth
+                
+                if not failed_resistance and valid_pop:
+                    current_price = history_objs[-1]['price']
+                    if current_price < first_trough:
+                        self.triggered_signal = f"BET_DOWN_CONFIRMED|Breakdown below {first_trough:.2f}"
+                        return self.triggered_signal
+
         return "WAIT"
 
 class FakeoutScanner(BaseScanner):
@@ -719,52 +746,81 @@ class StaircaseBreakoutScanner(BaseScanner):
 
         if len(lows) < 3: return "WAIT_PATTERN"
         
-        # Verify Staircase (Rising Lows)
-        if all(lows[i] < lows[i+1] for i in range(len(lows)-1)):
-            # --- New: Step Velocity Logic ---
-            if len(low_indices) >= 3:
-                # Calculate intervals between steps (in terms of window ticks)
-                intervals = [low_indices[i+1] - low_indices[i] for i in range(len(low_indices)-1)]
-                if len(intervals) >= 2:
-                    current_interval = intervals[-1]
-                    prev_interval = intervals[-2]
-                    if current_interval > 1.5 * prev_interval:
-                        return "WAIT_EXHAUSTED|Steps slowing down (>1.5x interval)"
-            
+        # Verify Staircase (Rising Lows for UP, Falling Lows for DOWN)
+        is_up_staircase = all(lows[i] < lows[i+1] for i in range(len(lows)-1))
+        is_down_staircase = all(lows[i] > lows[i+1] for i in range(len(lows)-1))
+        
+        if not (is_up_staircase or is_down_staircase):
+            return "WAIT_PATTERN"
+        
+        # --- New: Step Velocity Logic ---
+        if len(low_indices) >= 3:
+            # Calculate intervals between steps (in terms of window ticks)
+            intervals = [low_indices[i+1] - low_indices[i] for i in range(len(low_indices)-1)]
+            if len(intervals) >= 2:
+                current_interval = intervals[-1]
+                prev_interval = intervals[-2]
+                if current_interval > 1.5 * prev_interval:
+                    return "WAIT_EXHAUSTED|Steps slowing down (>1.5x interval)"
+        
+        # Determine direction and calculate relevant metrics
+        if is_up_staircase:
+            direction = "UP"
             recent_high = max(window)
+            recent_low = min(window)
+            price_range = recent_high - recent_low
+        else:  # is_down_staircase
+            direction = "DOWN"
+            recent_high = max(window)
+            recent_low = min(window)
+            price_range = recent_high - recent_low
             
             # --- New: ATR-Relative Tolerance ---
-            base_tolerance = self.config.TOLERANCE_PCT if self.config else 0.002
-            if atr_5m is not None and atr_5m > 0:
-                # scale tolerance based on ATR relative to a "normal" $10 ATR
-                atr_scaler = max(0.5, min(2.0, atr_5m / 10.0))
-                adjusted_tolerance = base_tolerance * self.atr_multiplier * atr_scaler
-            else:
-                adjusted_tolerance = base_tolerance * self.atr_multiplier
-            
-            if (recent_high - min(window)) > (min(window) * adjusted_tolerance):
-                if self.pullback:
-                    # Wait for pullback before entering
-                    if window[-1] < (recent_high * 0.995):
-                        self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed (Pullback)"
-                        self.entry_price = current_price  # Store for research logging
-                        return self.triggered_signal
-                    else:
-                        return "WAIT_PULLBACK"
-                elif self.entry_timing == "CONSERVATIVE":
-                    # Conservative entry - wait for confirmation
-                    if window[-1] >= (recent_high * 0.999):
-                        self.triggered_signal = "BET_UP_CONSERVATIVE|Staircase Breakout Confirmed"
-                        self.entry_price = current_price  # Store for research logging
-                        return self.triggered_signal
-                    else:
-                        return "WAIT_CONSERVATIVE"
+        base_tolerance = self.config.TOLERANCE_PCT if self.config else 0.002
+        if atr_5m is not None and atr_5m > 0:
+            # scale tolerance based on ATR relative to a "normal" $10 ATR
+            atr_scaler = max(0.5, min(2.0, atr_5m / 10.0))
+            adjusted_tolerance = base_tolerance * self.atr_multiplier * atr_scaler
+        else:
+            adjusted_tolerance = base_tolerance * self.atr_multiplier
+        
+        # Check if price range exceeds tolerance for breakout
+        breakout_threshold = recent_low * adjusted_tolerance
+        if price_range > breakout_threshold:
+            if self.pullback:
+                # Wait for pullback before entering
+                if direction == "UP" and window[-1] < (recent_high * 0.995):
+                    self.triggered_signal = f"BET_UP_AGGRESSIVE|Staircase Breakout Confirmed (Pullback)"
+                    self.entry_price = current_price
+                    return self.triggered_signal
+                elif direction == "DOWN" and window[-1] > (recent_low * 1.005):
+                    self.triggered_signal = f"BET_DOWN_AGGRESSIVE|Downward Staircase Breakout Confirmed (Pullback)"
+                    self.entry_price = current_price
+                    return self.triggered_signal
                 else:
-                    # Aggressive entry - original logic
-                    if window[-1] >= (recent_high * 0.9995):
-                        self.triggered_signal = "BET_UP_AGGRESSIVE|Staircase Breakout Confirmed"
-                        self.entry_price = current_price  # Store for research logging
-                        return self.triggered_signal
+                    return "WAIT_PULLBACK"
+            elif self.entry_timing == "CONSERVATIVE":
+                # Conservative entry - wait for confirmation
+                if direction == "UP" and window[-1] >= (recent_high * 0.999):
+                    self.triggered_signal = f"BET_UP_CONSERVATIVE|Staircase Breakout Confirmed"
+                    self.entry_price = current_price
+                    return self.triggered_signal
+                elif direction == "DOWN" and window[-1] <= (recent_low * 1.001):
+                    self.triggered_signal = f"BET_DOWN_CONSERVATIVE|Downward Staircase Breakout Confirmed"
+                    self.entry_price = current_price
+                    return self.triggered_signal
+                else:
+                    return "WAIT_CONSERVATIVE"
+            else:
+                # Aggressive entry - original logic
+                if direction == "UP" and window[-1] >= (recent_high * 0.9995):
+                    self.triggered_signal = f"BET_UP_AGGRESSIVE|Staircase Breakout Confirmed"
+                    self.entry_price = current_price
+                    return self.triggered_signal
+                elif direction == "DOWN" and window[-1] <= (recent_low * 1.0005):
+                    self.triggered_signal = f"BET_DOWN_AGGRESSIVE|Downward Staircase Breakout Confirmed"
+                    self.entry_price = current_price
+                    return self.triggered_signal
         return "WAIT"
     
     def log_research_trade(self, exit_price, result, window_id, rsi_1m, btc_velocity, atr_5m):
@@ -1433,7 +1489,8 @@ ALGO_INFO = {
     "DIV": {"name": "Sentiment Divergence", "desc": "Compares Odds Score delta vs BTC Price delta to detect human over-anticipation or panic bubbles."},
     "SSI": {"name": "Strategy Success Inversion", "desc": "Monitors session win streaks to identify whipsaw regimes and invert signals if accuracy is critically low."},
     "SSC": {"name": "Shallow Symmetrical Continuation", "desc": "Detects shallow trends with pullback and symmetrical recovery continuation patterns."},
-    "ADT": {"name": "Asymmetric Double Test", "desc": "Identifies baseline moves with asymmetric double dips/rallies requiring full recovery before execution."}
+    "ADT": {"name": "Asymmetric Double Test", "desc": "Identifies baseline moves with asymmetric double dips/rallies requiring full recovery before execution."},
+    "SHP": {"name": "ShapeMatcher Pattern", "desc": "Triggers trades when the 5-minute price path matches a hand-drawn visual archetype."},
 }
 
 class PeakToPeakScanner(BaseScanner):
@@ -1451,14 +1508,16 @@ class PeakToPeakScanner(BaseScanner):
         self.breakdown_tolerance = breakdown_tolerance # Max drop below P1
         
         self.valid_peaks = []
+        self.valid_desc_peaks = [] # Support for Bearish PTP
         self.aborted = False
         self.last_max = -1
         self.last_min = 1e10
-        self.seeking_state = "trough" # Use trough to require a climb-and-fall for P1
+        self.seeking_state = "trough"
 
     def reset(self):
         super().reset()
         self.valid_peaks = []
+        self.valid_desc_peaks = []
         self.aborted = False
         self.last_max = -1
         self.last_min = 1e10
@@ -1487,10 +1546,17 @@ class PeakToPeakScanner(BaseScanner):
                     peak_time = history_objs[-1]['elapsed']
                     new_peak = {'time': peak_time, 'price': self.last_max}
                     
+                    # 1. Update Ascending Sequence
                     if not self.valid_peaks:
                         self.valid_peaks.append(new_peak)
                     elif new_peak['price'] > self.valid_peaks[-1]['price']:
                         self.valid_peaks.append(new_peak)
+                    
+                    # 2. Update Descending Sequence
+                    if not self.valid_desc_peaks:
+                        self.valid_desc_peaks.append(new_peak)
+                    elif new_peak['price'] < self.valid_desc_peaks[-1]['price']:
+                        self.valid_desc_peaks.append(new_peak)
                         
                     self.seeking_state = "trough"
                     self.last_min = current_price
@@ -1501,35 +1567,46 @@ class PeakToPeakScanner(BaseScanner):
                     self.seeking_state = "peak"
                     self.last_max = current_price
 
-        # 1. Breakdown Monitoring (Red Dot Scenario) - Checked after peak detection
-        # so it catches drops that newly confirm a peak.
+        # 1. Breakdown Monitoring
         if self.valid_peaks:
             p1 = self.valid_peaks[0]
             if current_price < (p1['price'] - self.breakdown_tolerance):
-                self.aborted = True
-                return "WAIT"
+                # Ascending pattern failed
+                self.valid_peaks = []
+        
+        if self.valid_desc_peaks:
+            p1 = self.valid_desc_peaks[0]
+            if current_price > (p1['price'] + self.breakdown_tolerance):
+                # Descending pattern failed (breakout to the upside)
+                self.valid_desc_peaks = []
+                
+        if not self.valid_peaks and not self.valid_desc_peaks and elapsed > t_mid:
+            self.aborted = True
 
         if elapsed < t_mid:
             return "WAIT"
 
         # 3. Slope Calculation & Trigger at T_mid
-        # Fire once in the window [T_mid, T_mid + 10]
         if t_mid <= elapsed <= (t_mid + 10) and not self.triggered_signal:
-            if len(self.valid_peaks) < 2:
-                return "WAIT"
+            # Check BULLISH (Ascending)
+            if len(self.valid_peaks) >= 2:
+                p1, pn = self.valid_peaks[0], self.valid_peaks[-1]
+                delta_y, delta_x = pn['price'] - p1['price'], pn['time'] - p1['time']
+                if delta_x > 0:
+                    slope = delta_y / delta_x
+                    if slope >= self.min_slope:
+                        self.triggered_signal = f"BET_UP_PTP|Bullish Slope {slope:.4f} >= {self.min_slope:.4f}"
+                        return self.triggered_signal
             
-            p1 = self.valid_peaks[0]
-            pn = self.valid_peaks[-1]
-            
-            delta_y = pn['price'] - p1['price']
-            delta_x = pn['time'] - p1['time']
-            
-            if delta_x <= 0: return "WAIT"
-            
-            slope = delta_y / delta_x
-            if slope >= self.min_slope:
-                self.triggered_signal = f"BET_UP_PTP|Slope {slope:.4f} >= {self.min_slope:.4f}"
-                return self.triggered_signal
+            # Check BEARISH (Descending)
+            if len(self.valid_desc_peaks) >= 2:
+                p1, pn = self.valid_desc_peaks[0], self.valid_desc_peaks[-1]
+                delta_y, delta_x = pn['price'] - p1['price'], pn['time'] - p1['time']
+                if delta_x > 0:
+                    slope = delta_y / delta_x
+                    if slope <= -self.min_slope:
+                        self.triggered_signal = f"BET_DOWN_PTP|Bearish Slope {slope:.4f} vs {self.min_slope:.4f}"
+                        return self.triggered_signal
         
         return "WAIT"
 
@@ -1775,10 +1852,109 @@ class AsymmetricDoubleTestScanner(BaseScanner):
         current_price = history_objs[-1]['price']
         
         if abs(current_price - P_base) <= self.baseline_tolerance:
-            # Ensure the price originated from the deeper extrema (t_ext2)
             if self.validate_continuous_move(history_objs, t_ext2, len(history_objs) - 1):
                 signal = "BUY_UP" if direction == 1 else "BUY_DOWN"
                 self.triggered_signal = signal
                 return signal
         
         return "WAIT"
+
+class ShapeMatcherScanner(BaseScanner):
+    """
+    SHP: Visual Archetype Scanner.
+    Compares the current window's price path against a library of hand-drawn patterns.
+    """
+    def __init__(self, config: TradingConfig = None):
+        super().__init__(config)
+        self.custom_patterns = []  # List of {name: str, path: list, side: str, leeway: float}
+        self.last_match_pct = 0.0
+        self.near_match_sound_fired = False
+
+    def resample_path(self, points, n=30):
+        """Normalize a path (list of [elapsed, price]) into a fixed n-point vector."""
+        if not points: return [0.5] * n
+        
+        # Sort by elapsed time
+        points = sorted(points, key=lambda x: x[0])
+        times = [p[0] for p in points]
+        prices = [p[1] for p in points]
+        
+        duration = max(times) if times else 300
+        if duration == 0: duration = 300
+        
+        resampled = []
+        for i in range(n):
+            target_t = (i / (n - 1)) * duration
+            # Linear interpolation
+            if target_t <= times[0]:
+                resampled.append(prices[0])
+            elif target_t >= times[-1]:
+                resampled.append(prices[-1])
+            else:
+                # Find interval
+                for j in range(len(times) - 1):
+                    if times[j] <= target_t <= times[j+1]:
+                        t0, t1 = times[j], times[j+1]
+                        p0, p1 = prices[j], prices[j+1]
+                        if t1 == t0:
+                            resampled.append(p0)
+                        else:
+                            slope = (p1 - p0) / (t1 - t0)
+                            resampled.append(p0 + slope * (target_t - t0))
+                        break
+        return resampled
+
+    def get_signal(self, context: dict) -> str:
+        if self.fired: return "WAIT"
+        
+        history_objs = context.get("history_objs", [])
+        if not history_objs or not self.custom_patterns:
+            return "WAIT"
+
+        # Current window path
+        live_points = [[p['elapsed'], p['price']] for p in history_objs]
+        live_vector = self.resample_path(live_points, n=30)
+        
+        best_match_pct = 0.0
+        best_pattern = None
+
+        for pat in self.custom_patterns:
+            # We only match patterns that have progressed at least as far as the current window
+            # Actually, we compare the current "head" of the window against the drawing
+            target_vector = self.resample_path(pat['path'], n=30)
+            
+            # Calculate similarity (NRMSE-based score)
+            # Max possible error in a 0-1 range across 30 points is sqrt(30)
+            # 5c leeway = 0.05 per point. Euclidean distance of 0.05 * sqrt(30) = ~0.27
+            dist = 0
+            for i in range(30):
+                dist += (live_vector[i] - target_vector[i]) ** 2
+            rms = (dist / 30) ** 0.5
+            
+            # Similarity score: 1.0 - (rms / leeway)
+            # We define 'leeway' as the average price error allowed per point.
+            leeway = pat.get('leeway', 0.05)
+            similarity = max(0.0, 1.0 - (rms / leeway))
+            
+            if similarity > best_match_pct:
+                best_match_pct = similarity
+                best_pattern = pat
+
+        self.last_match_pct = best_match_pct
+        
+        # [SOUND] Near Match Trigger (80%)
+        if best_match_pct >= 0.80 and not self.near_match_sound_fired:
+            self.near_match_sound_fired = True
+            return "MATCH_NEAR_COMPLETION"
+
+        if best_match_pct >= 1.0: # Reached/Exceeded leeway threshold
+            side = best_pattern['side'].upper()
+            self.triggered_signal = f"BET_{side}_SHP|Matched Pattern: {best_pattern['name']}"
+            return self.triggered_signal
+
+        return "WAIT"
+
+    def reset(self):
+        super().reset()
+        self.near_match_sound_fired = False
+        self.last_match_pct = 0.0

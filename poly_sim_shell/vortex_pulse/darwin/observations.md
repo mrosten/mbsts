@@ -1513,3 +1513,170 @@ Nitro + VolSnap, DOWN Trend & BTC Up - 0
 Nitro + VolSnap, DOWN Trend & BTC Down - 0
 
 Total Nitro+VolSnap Fired: 0`
+
+## Window 1775034600 — 2026-04-01 12:15
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Analyze Nitro+Briefing performance with even stricter odds and ATR, potentially requiring near-perfect alignment for betting.
+**Observation:** The current Nitro+Briefing strategy is too sensitive, failing to capitalize even when the 'VolSnap' fired and the btc move was positive, suggesting the odds and ATR requirements may be too strict. The last experiment didn't trigger, indicating excessively stringent entry criteria. Need to analyze if stricter filtering improves performance, or if relaxing the conditions is more effective.
+**Notes:** Analyzing Nitro+Briefing performance with stricter odds and ATR thresholds. Will refine based on results.
+**Script output:** `Nitro + Briefing, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro + Briefing, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro+Briefing Triggers: 0`
+
+## Window 1775037000 — 2026-04-01 12:53
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Revert to Nitro+VolSnap strategy with stricter odds and ATR, and incorporate a HOLD strategy if trend doesn't align with BTC move.
+**Observation:** Nitro and VolSnap fired, but the current Nitro+Briefing strategy is too restrictive given the current market volatility. Reverting to the more frequent Nitro+VolSnap pairing with stricter conditions may be more effective.
+**Notes:** Implement a HOLD strategy if trend doesn't align with BTC move, even when Nitro and VolSnap fire together. Further, require abs(odds_score)>95 and atr_5m > 0.003.
+
+## Window 1775037300 — 2026-04-01 13:00
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Analyze past Nitro+HDO performance, focusing on trend alignment with BTC move and odds score thresholds.
+**Observation:** Nitro and HDO fired in the current window, but the algorithm only considers Nitro+VolSnap. The current market situation provides a fresh data point to analyze Nitro+HDO's efficacy, particularly regarding trend alignment and odds scores.
+**Notes:** This analysis will inform future strategy refinements for Nitro+HDO. Consider incorporating HDO into the main betting logic if the analysis shows promise.
+**Script output:** `Nitro + HDO, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro + HDO, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro+HDO Triggers: 0`
+
+## Window 1775054100 — 2026-04-01 17:39
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Analyze historical Nitro+VolSnap performance further, focusing on refining the odds score and ATR thresholds for improved accuracy.
+**Observation:** Current algorithm triggered VolSnap. The current algorithm waits for Nitro+VolSnap combination and checks odds score, ATR, trend and btc_move_pct, potentially missing setups where either scanner fires alone. I will analyze the performance of Nitro alone under various conditions.
+**Notes:** Run analysis script to evaluate Nitro's isolated performance.
+**Script output:** `Nitro Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro Only Triggers: 0`
+
+## Window 1775056800 — 2026-04-01 18:23
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Analyze the performance of VolSnap alone, focusing on trend alignment and odds score thresholds, to determine if it can be a reliable single scanner.
+**Observation:** VolSnap fired alone in the current window with a positive BTC move and a positive odds score, while the 1H Trend was M-DOWN. This warrants investigating VolSnap's solo performance further, particularly how trend alignment affects its success.
+**Notes:** Investigate VolSnap standalone performance with trend alignment.  The script aggregates data.  The hypothesis will test trend alignment with BTC movement.
+**Script output:** `VolSnap Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+VolSnap Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total VolSnap Only Triggers: 0`
+
+## Window 1775057400 — 2026-04-01 18:35
+**Winner:** N/A | **Conf:** 20%
+**Hypothesis:** Analyze WCP performance to determine if it could be a useful addition to the strategy.
+**Observation:** WCP fired this window along with Nitro and VolSnap.  Given that the current strategy uses Nitro and VolSnap, it may be useful to investigate WCP's performance.
+**Notes:** Keep the analysis simple and focused on the core hypothesis.
+**Script output:** `WCP Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+WCP Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total WCP Only Triggers: 0`
+
+## Window 1775057700 — 2026-04-01 18:40
+**Winner:** N/A | **Conf:** 70%
+**Hypothesis:** Refine Nitro+VolSnap by tightening odds and ATR, and adding a directional filter based on 'tilt_dir'.
+**Observation:** Nitro+HDO fired, but BTC moved against the dominant trend and tilt. The previous algorithm triggered, but the 'HOLD' logic prevented a loss.
+**Notes:** Adding tilt direction as an additional filter. Tightened odds and ATR thresholds slightly.
+
+## Window 1775058300 — 2026-04-01 18:49
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Analyze Nitro+VolSnap performance, relaxing tilt_dir requirement, and analyzing past data with trend alignment. Further refine odds/atr thresholds.
+**Observation:** Nitro+VolSnap fired again, but no bet was placed. It appears the strict requirement for tilt_dir is causing missed opportunities.
+**Notes:** Relaxing tilt_dir condition. Script to analyze Nitro+VolSnap further.
+**Script output:** `Nitro + VolSnap, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro + VolSnap, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro+VolSnap Triggers: 0`
+
+## Window 1775058900 — 2026-04-01 18:59
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Analyze Nitro+VolSnap performance when trend aligns with tilt direction, with refined ATR threshold.
+**Observation:** Nitro+VolSnap fired again. Previous Nitro+VolSnap analyses suggest potential improvements by considering tilt direction and fine-tuning ATR.
+**Notes:** Reduce ATR requirement slightly to catch more signals. Only bet if trend aligns with tilt_dir.
+
+## Window 1775059200 — 2026-04-01 19:03
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Analyze the historical performance of 'Briefing' scanner, particularly when the odds score is high and the trend aligns with the BTC move.
+**Observation:** The 'Briefing' scanner fired this window, but resulted in a loss. I want to understand when 'Briefing' is more accurate by looking at historical data and aligning trend with the actual btc move.
+**Notes:** Analyzing Briefing performance with Trend aligned to BTC move.
+**Script output:** `Briefing, UP Trend & BTC Up - Wins: 0, Losses: 0
+Briefing, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Briefing Triggers: 0`
+
+## Window 1775059500 — 2026-04-01 19:10
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Analyze the impact of 'Briefing' scanner firing in conjunction with the 'tilt_dir' and high odds scores, potentially simplifying the strategy by focusing on a single, high-confidence scanner.
+**Observation:** The current strategy using Nitro+VolSnap hasn't yielded any triggers recently. 'Briefing' scanner fired, and we should assess its solo performance with high odds and tilt direction.
+**Notes:** Focusing on Briefing scanner's performance with high odds and tilt_dir alignment to simplify the decision-making process. Consider relaxing the trend alignment requirement if the analysis script suggests it.
+**Script output:** `Briefing, UP Trend & BTC Up - Wins: 0, Losses: 0
+Briefing, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Briefing Triggers: 0`
+
+## Window 1775059800 — 2026-04-01 19:12
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** The 'Briefing' scanner combined with a high odds score and trend alignment still warrants investigation. We'll relax the requirement for tilt_dir agreement and focus on the trend alignment with odds score as a primary indicator.
+**Observation:** Previous logic requiring tilt_dir alignment resulted in holding despite potential opportunities when the trend and odds score were strong. Removing the tilt_dir requirement might improve the Briefing strategy.
+**Notes:** Relaxed tilt_dir requirement for Briefing strategy. Now focusing purely on Trend and Odds Score.
+
+## Window 1775060100 — 2026-04-01 19:19
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Refine the 'Briefing' scanner strategy by incorporating the ATR and further refining the odds score threshold.
+**Observation:** The 'Briefing' scanner fired again, and I will modify the current algorithm to include ATR and adjust the odds score threshold for potentially improved performance.
+**Notes:** Tighten odds and require atr > 0 for signal.
+
+## Window 1775064300 — 2026-04-01 20:29
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Nitro scanner firing alone seems more predictive. Evaluate historical data of Nitro-only triggers to identify profitable conditions. Add volatility scaling with ATR.
+**Observation:** Nitro fired alone, but the current 'Briefing' scanner focus prevented a potential trigger. ATR remains near zero, suggesting low volatility despite market movement.
+**Notes:** Focusing on Nitro as a standalone scanner. ATR and odds threshold refined. Implemented volatility scaling.
+**Script output:** `Nitro Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro Only Triggers: 0`
+
+## Window 1775064600 — 2026-04-01 20:34
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** Re-evaluate Nitro-only triggers with the trend alignment, ATR, and odds score, but also add volatility scaling.
+**Observation:** The current algorithm focused on Nitro-only triggers, but failed to produce positive results. Both 'VolSnap' and 'HDO' scanners fired without triggering a trade, indicating a potential need to re-evaluate the trigger conditions or explore other scanner combinations.
+**Notes:** Adding btc_move_pct check for confirming trend alignment.
+
+## Window 1775064600 — 2026-04-01 20:34
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** The current Nitro-only strategy needs further refinement. VolSnap and HDO fired this window, so let's analyze their combined historical performance.
+**Observation:** The current Nitro-only strategy didn't trigger. HDO and VolSnap both fired this window, potentially providing more information than Nitro alone.
+**Notes:** Analyze historical performance of HDO+VolSnap to see if it can be integrated into the strategy. Consider trend alignment.
+**Script output:** `HDO+VolSnap, UP Trend & BTC Up (or DOWN Trend & BTC Down) - Wins: 0, Losses: 0
+Total HDO+VolSnap Triggers: 0`
+
+## Window 1775065200 — 2026-04-01 20:44
+**Winner:** N/A | **Conf:** 30%
+**Hypothesis:** Analyze historical performance of HDO scanner to determine if it's predictive on its own, focusing on correlation with trend and odds score. If promising, refine the HDO-only strategy.
+**Observation:** The scanner 'HDO' fired in the current window. Past experiments have focused on Nitro and Briefing; it's time to investigate HDO's potential predictive power when it fires alone.
+**Notes:** The HDO analysis will inform future strategy. If HDO alone is not sufficiently predictive, will need to analyze combinations with other scanners.
+**Script output:** `HDO Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+HDO Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total HDO Only Triggers: 0`
+
+## Window 1775065200 — 2026-04-01 20:45
+**Winner:** N/A | **Conf:** 50%
+**Hypothesis:** HDO is triggering, but performance is unknown. Analyze past HDO triggers, incorporating trend, odds score, and ATR.
+**Observation:** HDO fired this window, but the result was N/A. Need to analyze historical data to determine if HDO firing alone is predictive, specifically considering trend, odds score, and ATR.
+**Notes:** Further refinement will depend on the output of the analysis script.
+**Script output:** `HDO Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+HDO Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total HDO Only Triggers: 0`
+
+## Window 1775065500 — 2026-04-01 20:49
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Re-evaluate HDO scanner with more aggressive odds and ATR thresholds and incorporating a positive BTC move direction bias.
+**Observation:** HDO fired this window. Previous analysis focused on trend alignment, but the trend data might be lagging. Let's test HDO with more aggressive filters, ignoring the trend and favoring UP bets.
+**Notes:** Aggressively test HDO-only, favoring UP bets. Increase odds score threshold and add a minimum ATR threshold.
+
+## Window 1775065500 — 2026-04-01 20:49
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** The current HDO strategy with positive BTC move bias may be too restrictive. Analyze past HDO triggers using a broader set of criteria (odds score & ATR), testing both UP and DOWN bets to see if there's a directional bias.
+**Observation:** The HDO scanner fired in this window. The previous attempt to bias towards UP moves didn't fire, and we need to analyze HDO triggers historically with more granularity.
+**Notes:** Analyze HDO performance with tighter odds and ATR thresholds without a directional bias.
+**Script output:** `HDO Only, Odds > 80 & ATR > 0.0005, UP Bet - Wins: 0, Losses: 0
+HDO Only, Odds > 80 & ATR > 0.0005, DOWN Bet - Wins: 0, Losses: 0
+Total HDO Only Triggers: 0`
+
+## Window 1775067300 — 2026-04-01 21:19
+**Winner:** N/A | **Conf:** 60%
+**Hypothesis:** Nitro scanner performance needs to be analyzed more thoroughly, particularly when it's the only scanner that fires. Also, investigate the correlation of the 1H Trend with Nitro scanner firings.
+**Observation:** Nitro fired alone this window with a negative BTC move, despite the algorithm holding due to the BTC move condition within the HDO-focused scan function. The current algorithm prioritizing HDO isn't yielding results, prompting a shift to analyze Nitro's isolated performance.
+**Notes:** Need to carefully track performance of new Nitro-based algorithm, ensuring it's not over-fitting to historical data. Consider incorporating odds_score and ATR later.
+**Script output:** `Nitro Only, UP Trend & BTC Up - Wins: 0, Losses: 0
+Nitro Only, DOWN Trend & BTC Down - Wins: 0, Losses: 0
+Total Nitro Only Triggers: 0`

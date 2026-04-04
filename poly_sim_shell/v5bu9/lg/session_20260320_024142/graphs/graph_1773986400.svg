@@ -1,0 +1,25 @@
+<svg width="340" height="190" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="#121212" />
+<line x1="20" y1="139" x2="320" y2="139" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="109" x2="320" y2="109" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="94" x2="320" y2="94" stroke="#3C3C3C" stroke-width="1" />
+<line x1="20" y1="79" x2="320" y2="79" stroke="#232323" stroke-width="1" />
+<line x1="20" y1="49" x2="320" y2="49" stroke="#232323" stroke-width="1" />
+<line x1="169" y1="20" x2="169" y2="170" stroke="#232323" stroke-width="1" />
+<polyline points="20,110 20,110 24,123 27,116 30,124 33,124 36,132 39,135 42,134 45,139 48,144 51,142 54,144 57,144 60,143 63,142 66,139 69,139 72,139 75,144 78,144 81,148 84,142 87,138 90,137 93,145 96,143 99,147 102,145 105,142 108,144 111,139 114,133 117,132 120,133 123,133 126,126 129,126 132,128 135,132 138,128 141,136 144,127 147,123 150,121 153,113 156,108 159,110 162,113 165,112 168,111 171,116 174,112 177,103 180,101 183,102 186,98 189,103 192,112 195,118 198,125 201,128 204,127 207,128 210,125 213,119 216,110 219,111 222,111 225,106 228,109 231,110 234,107 237,117 240,119 243,104 246,98 249,101 252,110 255,110 258,113 261,110 264,107 267,85 270,82 273,69 276,45 279,46 282,56 285,73 288,80 291,107 294,93 297,126 300,157 303,158 306,163 309,157 312,166 315,166 318,167" fill="none" stroke="#FFFF00" stroke-width="2" stroke-linejoin="round" />
+<circle cx="40" cy="55" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>Nitro DOWN (76¢)</title>
+</circle>
+<circle cx="89" cy="51" r="4" fill="#FF0000" stroke="#FFFFFF" stroke-width="1">
+  <title>VolSnap DOWN (79¢)</title>
+</circle>
+<circle cx="275" cy="73" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>WCP UP (64¢)</title>
+</circle>
+<circle cx="275" cy="73" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>VPOC UP (64¢)</title>
+</circle>
+<circle cx="275" cy="73" r="4" fill="#00FF00" stroke="#FFFFFF" stroke-width="1">
+  <title>MM2 UP (64¢)</title>
+</circle>
+</svg>
